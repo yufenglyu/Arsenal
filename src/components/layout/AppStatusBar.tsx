@@ -15,17 +15,17 @@ import { useAppStatusStore, type AppStatusTask } from "@/stores/appStatusStore";
 import { cn } from "@/lib/utils";
 
 function statusIcon(task: AppStatusTask | null) {
-  if (!task) return <Circle className="size-3 fill-current text-muted-foreground" />;
+  if (!task) return <Circle className="size-4 fill-current text-muted-foreground" />;
   if (task.status === "running") {
-    return <Loader2 className="size-3.5 animate-spin text-primary" />;
+    return <Loader2 className="size-4 animate-spin text-primary" />;
   }
   if (task.status === "success") {
-    return <CheckCircle2 className="size-3.5 text-emerald-600" />;
+    return <CheckCircle2 className="size-4 text-emerald-600" />;
   }
   if (task.status === "error") {
-    return <AlertCircle className="size-3.5 text-destructive" />;
+    return <AlertCircle className="size-4 text-destructive" />;
   }
-  return <Circle className="size-3 fill-current text-muted-foreground" />;
+  return <Circle className="size-4 fill-current text-muted-foreground" />;
 }
 
 export function AppStatusBar({settingsOpen = false}: {settingsOpen?: boolean} = {}) {
@@ -94,7 +94,7 @@ export function AppStatusBar({settingsOpen = false}: {settingsOpen?: boolean} = 
           {statusIcon(busyTask ? task : null)}
           <span
             className={cn(
-              "shrink-0 font-medium",
+              "shrink-0 font-normal",
               busyTask && task?.status === "error" && "text-destructive",
               task?.status === "success" && "text-foreground",
               task?.status === "running" && "text-foreground"
@@ -132,8 +132,8 @@ export function AppStatusBar({settingsOpen = false}: {settingsOpen?: boolean} = 
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="h-6 shrink-0 gap-2 px-2 text-xs text-muted-foreground"
+              size="status"
+              className="shrink-0 text-muted-foreground"
               onClick={() => setCenterView("history")}
               aria-label={t(isImport ? "status.viewImportStats" : "status.viewUpdateStats")}
             ><ActionIcon action="delete"/>

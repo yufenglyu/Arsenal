@@ -23,7 +23,7 @@ function Checkbox({
       {...props}
     >
       <CheckboxPrimitive.Indicator className="flex items-center justify-center">
-        <Check className="size-3 text-primary-foreground" strokeWidth={3} />
+        <Check className="size-4 text-primary-foreground" strokeWidth={3} />
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   )

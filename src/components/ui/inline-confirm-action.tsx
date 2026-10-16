@@ -96,7 +96,7 @@ export function InlineConfirmAction({
         >
           {isLoading ? (
             <span className="inline-flex items-center gap-1.5">
-              <Loader2 className="size-3 animate-spin" />
+              <Loader2 className="size-4 animate-spin" />
               {confirmLabel}
             </span>
           ) : (

@@ -300,7 +300,7 @@ export function PlatformDialog({
           <Button onClick={handleSubmit} disabled={isSubmitting}>
             {isSubmitting ? (
               <>
-                <Loader2 className="size-3.5 animate-spin" />
+                <Loader2 className="size-4 animate-spin" />
                 {isEditMode ? t("platformDialog.saving") : t("platformDialog.adding")}
               </>
             ) : isEditMode ? (

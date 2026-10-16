@@ -10,3 +10,5 @@ pub mod settings;
 pub mod skills;
 
 pub mod metadata;
+
+pub(crate) mod repository_docs;

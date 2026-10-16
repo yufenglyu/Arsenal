@@ -11,6 +11,9 @@ import { isProjectAgentId } from "@/lib/projectTargets";
 import {
   Check,
   ArrowLeftRight,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
   ChevronRight,
   ChevronDown,
   FileText,
@@ -152,6 +155,7 @@ export interface SkillTableItem extends UnifiedSkillCardProps {
 export interface SkillBrowserTableProps {
   statusPath?: string;
   statusCollections?: boolean;
+  onSelectionChange?: (rowKeys: string[]) => void;
   compactList?: boolean;
   tree?: boolean;
   showInstallationSource?: boolean;
@@ -231,7 +235,7 @@ export function InstallSummaryCell({
 
   return (
     <div
-      className="flex flex-col gap-0.5 text-xs leading-5 text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="flex flex-col gap-0.5 text-sm leading-5 text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
       title={tooltip}
       tabIndex={0}
       aria-label={tooltip}
@@ -537,10 +541,10 @@ function SourceIndicator({
 
   return (
     <div
-      className={cn("inline-flex items-center gap-1 text-xs font-medium", isSymlink ? "text-primary/80" : "text-muted-foreground")}
+      className={cn("inline-flex items-center gap-1 text-xs font-normal", isSymlink ? "text-primary/80" : "text-muted-foreground")}
       title={t(hint)}
     >
-      {isSymlink ? <Link2 className="size-3 shrink-0" /> : <FolderOpen className="size-3 shrink-0" />}
+      {isSymlink ? <Link2 className="size-4 shrink-0" /> : <FolderOpen className="size-4 shrink-0" />}
       <span>{t(label)}</span>
     </div>
   );
@@ -560,7 +564,7 @@ function SourceOriginBadge({ originKind }: { originKind: PlatformSourceKind }) {
     <span
       title={hint}
       className={cn(
-        "inline-flex w-fit items-center rounded-full bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-700 ring-1 ring-violet-500/20 dark:text-violet-300"
+        "inline-flex w-fit items-center rounded-full bg-violet-500/10 px-2 py-0.5 text-xs font-normal text-violet-700 ring-1 ring-violet-500/20 dark:text-violet-300"
       )}
     >
       {label}
@@ -696,6 +700,7 @@ function sortHeaderLabel(
 export function SkillBrowserTable({
   statusPath,
   statusCollections = false,
+  onSelectionChange,
   tree = false,
   compactList = false,
   kind,
@@ -761,6 +766,14 @@ export function SkillBrowserTable({
     if (scrollTargetKey) rowNodes.current.get(scrollTargetKey)?.scrollIntoView?.({block:"center"});
   }, [scrollTargetKey]);
   const effectiveSelection = new Set([...selectedRows].filter(key=>visibleKeys.includes(key)));
+  const selectionPayload = JSON.stringify([...effectiveSelection].sort());
+  const previousSelectionPayload = useRef("[]");
+  useEffect(() => {
+    if (previousSelectionPayload.current !== selectionPayload) {
+      previousSelectionPayload.current = selectionPayload;
+      onSelectionChange?.(JSON.parse(selectionPayload) as string[]);
+    }
+  }, [selectionPayload, onSelectionChange]);
   const statusPayload = statusPath === undefined ? null : JSON.stringify({path:statusPath,collections:statusCollections,...browserStats(visibleRows,effectiveSelection)});
   useEffect(() => {
     if (statusPayload) useBrowserStatusStore.getState().setStats(JSON.parse(statusPayload));
@@ -998,14 +1011,14 @@ export function SkillBrowserTable({
     const sortable = onSortChange && isSortableColumn(column, kind);
     const selected = sortable && sortField === column;
     if (!sortable) return label;
-    const sortMarker = selected ? (sortDirection === "asc" ? "↑" : "↓") : "↕";
+    const SortIcon = selected ? (sortDirection === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
 
     return (
       <button
         type="button"
         className={cn(
-          "inline-flex max-w-full items-center gap-1 rounded-md text-left transition-colors hover:text-primary",
-          selected && "font-semibold text-foreground"
+          "inline-flex max-w-full items-center gap-1 rounded-md text-left leading-5 transition-colors hover:text-primary",
+          selected && "font-normal text-foreground"
         )}
         aria-label={selected ? sortHeaderLabel(t, label, sortDirection) : label}
         onClick={() =>
@@ -1016,12 +1029,7 @@ export function SkillBrowserTable({
         }
       >
         <span className="truncate">{label}</span>
-        <span
-          aria-hidden="true"
-          className={cn("text-[0.7rem]", selected ? "text-primary" : "text-muted-foreground/60")}
-        >
-          {sortMarker}
-        </span>
+        <SortIcon aria-hidden="true" className={cn("size-4 shrink-0", selected ? "text-primary" : "text-muted-foreground/60")} />
       </button>
     );
   }
@@ -1054,7 +1062,7 @@ export function SkillBrowserTable({
                           <td key={column} className={cn("relative px-3 py-2", nested && "pl-14")}>
                             <div className="flex min-w-0 items-center gap-2">
                               {nested && <span aria-hidden="true" className={cn("pointer-events-none absolute left-7 top-0 w-5 border-l border-border", lastChild ? "h-5" : "h-full")}><span className="absolute top-5 left-0 w-4 border-t border-border" /></span>}
-                              {tree && <FileText className="size-4 shrink-0 text-muted-foreground" />}
+                              {tree && <FileText className="size-[1em] shrink-0 text-muted-foreground" />}
                               {skill.checkbox && !skill.isReadOnly ? (
                                 <input
                                   type="checkbox"
@@ -1070,7 +1078,7 @@ export function SkillBrowserTable({
                                     data-row-activate
                                     ref={skill.detailButtonRef}
                                     type="button"
-                                    className="block max-w-full truncate text-left font-medium text-foreground"
+                                    className="block max-w-full truncate text-left font-normal text-foreground"
                                     aria-label={t("central.viewDetailsLabel", {
                                       name: skill.name,
                                     })}
@@ -1079,7 +1087,7 @@ export function SkillBrowserTable({
                                     {skill.name}
                                   </button>
                                 ) : (
-                                  <div className="truncate font-medium text-foreground">{skill.name}</div>
+                                  <div className="truncate font-normal text-foreground">{skill.name}</div>
                                 )}
                               </div>
                             </div>
@@ -1182,7 +1190,7 @@ export function SkillBrowserTable({
             next.focus({preventScroll:true});
             next.scrollIntoView?.({block:"nearest", inline:"nearest"});
           }}
-          className={cn("table-fixed min-w-full text-left text-sm", tree && "[&_td]:overflow-hidden [&_td]:text-ellipsis [&_td]:whitespace-nowrap [&_th]:overflow-hidden")}
+          className={cn("table-fixed min-w-full text-left text-sm font-normal", compactList && "[&_*]:font-normal", tree && "[&_td]:overflow-hidden [&_td]:text-ellipsis [&_td]:whitespace-nowrap [&_th]:overflow-hidden")}
           style={{ width: tree || compactList ? "100%" : `${tableWidth}px`, "--skill-table-sticky-top": stickyHeaderTop } as CSSProperties}
         >
           <colgroup>
@@ -1193,7 +1201,7 @@ export function SkillBrowserTable({
               />
             ))}
           </colgroup>
-          <thead className={cn("sticky top-[var(--skill-table-sticky-top)] z-20 bg-background text-xs font-medium text-muted-foreground", compactList ? "shadow-[0_1px_0_0_var(--border)]" : "shadow-[0_2px_0_0_var(--border)]")}>
+          <thead className={cn("sticky top-[var(--skill-table-sticky-top)] z-20 bg-background text-sm font-normal text-muted-foreground", compactList ? "shadow-[0_1px_0_0_var(--border)]" : "shadow-[0_2px_0_0_var(--border)]")}>
             <tr>
               {activeColumns.map((column) => (
                 <th
@@ -1230,7 +1238,7 @@ export function SkillBrowserTable({
                   aria-label={columnLabel(column)}
                   onContextMenu={handleHeaderContextMenu}
                   className={cn(
-                    "relative bg-background py-2 font-medium",
+                    "relative bg-background py-2 font-normal",
                     dropTarget?.column === column && (dropTarget.after ? "shadow-[inset_-2px_0_var(--primary)]" : "shadow-[inset_2px_0_var(--primary)]"),
                     column === "index" ? "px-2" : "px-3"
                   )}
@@ -1238,11 +1246,11 @@ export function SkillBrowserTable({
                   <div className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap">
                     {renderHeaderContent(column)}
                     {(column === "name" || column === repositoryNameColumn) && <div className="ml-auto flex shrink-0 items-center gap-2 pr-1">
-                      {column === repositoryNameColumn && canSwitchRepositoryName && <button type="button" title={switchNameLabel} aria-label={switchNameLabel} aria-pressed={repositoryFirst} onClick={toggleRepositoryName} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><ArrowLeftRight className="size-4" /></button>}
+                      {column === repositoryNameColumn && canSwitchRepositoryName && <button type="button" title={switchNameLabel} aria-label={switchNameLabel} aria-pressed={repositoryFirst} onClick={toggleRepositoryName} className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><ArrowLeftRight className="size-4 shrink-0" aria-hidden="true" /></button>}
                       {column === "name" && nameHeaderAction}
                     </div>}
                   </div>
-                  {column !== "actions" && !compactList ? (
+                  {column !== "actions" && !compactList && (!tree || column !== activeColumns.at(-1)) ? (
                     <span
                       role="separator"
                       aria-label={t("skillBrowser.resizeColumnLabel", {
@@ -1274,7 +1282,7 @@ export function SkillBrowserTable({
                       if ((event.key === "ArrowRight") !== Boolean(folder.expanded)) folder.onToggle();
                       return;
                     }
-                    if(event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) { event.preventDefault(); if(!effectiveSelection.has(`folder:${folder.key}`))setSelectedRows(new Set([`folder:${folder.key}`])); menuReturnFocus.current = event.currentTarget; const rect=event.currentTarget.getBoundingClientRect(); setRowMenu({kind:"folder",key:folder.key,x:rect.left+40,y:rect.top+20}); } }} onClick={(event) => { if (tree && !(event.target as HTMLElement).closest("button,input,a")) folder.onOpen(); }} key={folder.key} ref={node => { const key = `folder:${folder.key}`; if (node) rowNodes.current.set(key, node); else rowNodes.current.delete(key); }} className={cn("align-middle select-none", !selectionClass(`folder:${folder.key}`,folder.highlighted) && "hover:bg-muted/25", tree && "font-medium", selectionClass(`folder:${folder.key}`,folder.highlighted) && "bg-primary/10 ring-1 ring-inset ring-primary/40")}>
+                    if(event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) { event.preventDefault(); if(!effectiveSelection.has(`folder:${folder.key}`))setSelectedRows(new Set([`folder:${folder.key}`])); menuReturnFocus.current = event.currentTarget; const rect=event.currentTarget.getBoundingClientRect(); setRowMenu({kind:"folder",key:folder.key,x:rect.left+40,y:rect.top+20}); } }} onClick={(event) => { if (tree && !(event.target as HTMLElement).closest("button,input,a")) folder.onOpen(); }} key={folder.key} ref={node => { const key = `folder:${folder.key}`; if (node) rowNodes.current.set(key, node); else rowNodes.current.delete(key); }} className={cn("align-middle select-none", !selectionClass(`folder:${folder.key}`,folder.highlighted) && "hover:bg-muted/25", tree && "font-normal", selectionClass(`folder:${folder.key}`,folder.highlighted) && "bg-primary/10 ring-1 ring-inset ring-primary/40")}>
                     {activeColumns.map((column) => {
                       if (column === "index") {
                         return (
@@ -1294,7 +1302,7 @@ export function SkillBrowserTable({
                             {tree && <FolderOpen className="size-4 shrink-0 text-muted-foreground" />}
                             <button
                               type="button"
-                              className="block min-w-0 truncate text-left font-medium text-foreground"
+                              className="block min-w-0 truncate text-left font-normal text-foreground"
                               data-row-activate
                               onClick={folder.onOpen}
                             >
@@ -1374,7 +1382,7 @@ export function SkillBrowserTable({
           style={{ left: columnMenu.x, top: columnMenu.y }}
           onClick={(event) => event.stopPropagation()}
         >
-          <div className="mb-1 px-2 text-xs font-medium text-muted-foreground">
+          <div className="mb-1 px-2 text-xs font-normal text-muted-foreground">
             {t("skillBrowser.visibleColumns")}
           </div>
           <div className="space-y-1">

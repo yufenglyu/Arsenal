@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { AiPromptSettings } from "@/components/settings/AiPromptSettings";
 import { useCollectionStore } from "@/stores/collectionStore";
 import { ChangeEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Trash2, Pencil, Loader2, FolderOpen, AppWindow, Info, Database, Globe, Bot, MessageSquareText, ChevronDown, ChevronRight, KeyRound, Download, Upload, RefreshCw, ExternalLink, CircleHelp, Save, Keyboard, RotateCcw } from "lucide-react";
+import { Plus, Trash2, Pencil, Loader2, FolderOpen, AppWindow, Info, Database, Globe, Bot, MessageSquareText, ChevronDown, ChevronRight, KeyRound, Download, Upload, RefreshCw, ExternalLink, CircleHelp, Save, Keyboard, RotateCcw, Plug } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
@@ -66,7 +66,7 @@ function HintIcon({ text, className }: { text: string; className?: string }) {
         className
       )}
     >
-      <CircleHelp className="size-3.5" />
+      <CircleHelp className="size-4" />
     </span>
   );
 }
@@ -173,7 +173,7 @@ function RefreshItemButton({
       type="button"
       variant="outline"
       size="sm"
-      className="h-7 shrink-0"
+      className="shrink-0"
       onClick={onClick}
       disabled={disabled || isLoading}
       aria-label={ariaLabel}
@@ -181,9 +181,9 @@ function RefreshItemButton({
       title={ariaLabel}
     >
       {isLoading ? (
-        <Loader2 className="size-3.5 animate-spin" />
+        <Loader2 className="size-4 animate-spin" />
       ) : (
-        <RefreshCw className="size-3.5" />
+        <RefreshCw className="size-4" />
       )}
       <span>{label}</span>
     </Button>
@@ -224,7 +224,7 @@ function SoftwarePlatformRow({
             : ""
       )}
     >
-      <PlatformIcon agentId={agent.id} brand displayName={agent.display_name} size={16} className="size-4" />
+      <PlatformIcon agentId={agent.id} brand displayName={agent.display_name} size={14} className="size-[1em]" />
       <div className="flex-1 min-w-0">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <div className="truncate text-sm font-medium">
@@ -232,7 +232,7 @@ function SoftwarePlatformRow({
           </div>
           <span
             className={cn(
-              "shrink-0 rounded border px-1.5 py-0.5 text-[10px] leading-none",
+              "shrink-0 rounded border px-1.5 py-0.5 text-xs leading-none",
               sharesCentral
                 ? "border-chart-4/40 bg-chart-4/10 text-chart-4"
                 : "border-primary/30 bg-primary/10 text-primary"
@@ -244,7 +244,7 @@ function SoftwarePlatformRow({
           {showBuiltinDetection && (
             <span
               className={cn(
-                "shrink-0 rounded border px-1.5 py-0.5 text-[10px] leading-none",
+                "shrink-0 rounded border px-1.5 py-0.5 text-xs leading-none",
                 agent.is_detected
                   ? "border-primary/30 bg-primary/10 text-primary"
                   : "border-border/70 bg-background text-muted-foreground"
@@ -261,7 +261,7 @@ function SoftwarePlatformRow({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <div className="flex items-center gap-1.5 pr-1">
+        <div className="flex items-center gap-2 pr-1">
           <span className="text-xs text-muted-foreground">
             {action}
           </span>
@@ -276,10 +276,10 @@ function SoftwarePlatformRow({
           size="sm"
           onClick={onEdit}
           aria-label={t("settings.editPlatformLabel", { name: agent.display_name })}
-          className="h-7 w-7 p-0"
+          className="w-7"
           title={t("settings.editPlatformLabel", { name: agent.display_name })}
         >
-          <Pencil className="size-3.5" />
+          <Pencil className="size-4" />
         </Button>
         <InlineConfirmAction
           onConfirm={onRemove}
@@ -287,7 +287,7 @@ function SoftwarePlatformRow({
           idleAriaLabel={t("settings.removePlatformLabel", { name: agent.display_name })}
           idleTitle={t("settings.removePlatformLabel", { name: agent.display_name })}
           confirmLabel={t("common.confirmDelete")}
-          icon={<Trash2 className="size-3.5" />}
+          icon={<Trash2 className="size-4" />}
         />
       </div>
     </div>
@@ -354,8 +354,8 @@ function SoftwarePlatformsCard({
         <div data-testid="settings-software-platforms-header" className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <button type="button" onClick={() => setPlatformsExpanded(value => !value)} aria-expanded={platformsExpanded} aria-label={platformsToggleLabel} className="flex items-center gap-2 text-left">
-              <AppWindow className="size-5 shrink-0 text-muted-foreground" />
-              <CardTitle role="heading" aria-level={2}>{t("settings.softwarePlatforms")}</CardTitle>
+              <AppWindow className="size-4 shrink-0 text-muted-foreground" />
+              <CardTitle className="font-semibold" role="heading" aria-level={2}>{t("settings.softwarePlatforms")}</CardTitle>
               {platformsExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
             </button>
             <HintIcon text={t("settings.platformProjectLocationsDesc")} />
@@ -369,10 +369,10 @@ function SoftwarePlatformsCard({
             <SectionStatCounts detectedCount={platformDetectedCount} enabledCount={platformEnabledCount} />
           <div className="flex shrink-0 items-center gap-2">
             <RefreshItemButton label={t("common.refresh")} ariaLabel={t("settings.refreshPlatformsAndProjects")} isLoading={isRefreshingLocations} disabled={isRefreshingLocations} onClick={onRefreshLocations} />
-            <Button variant="outline" size="sm" onClick={onAddPlatform} aria-label={t("settings.addPlatformAriaLabel")}><Plus className="size-3.5" /><span>{t("settings.addPlatform")}</span></Button>
+            <Button variant="outline" size="sm" onClick={onAddPlatform} aria-label={t("settings.addPlatformAriaLabel")}><Plus className="size-4" /><span>{t("settings.addPlatform")}</span></Button>
           </div>
         </div>
-        <div className="space-y-5">
+        <div className="space-y-4">
           <div>
             {platformError && (
               <p className="mt-2 text-xs text-destructive" role="alert">
@@ -451,28 +451,28 @@ function ShortcutRecorder({
         type="button"
         variant={isRecording ? "default" : "outline"}
         size="sm"
-        className="h-8"
+
         onClick={() => setIsRecording(true)}
         onKeyDown={handleKeyDown}
         aria-label={t("settings.shortcutRecordLabel", {
           action: t(SHORTCUT_DEFINITIONS.find((definition) => definition.id === actionId)?.labelKey ?? ""),
         })}
       >
-        <Keyboard className="size-3.5" />
+        <Keyboard className="size-4" />
         <span>{isRecording ? t("settings.shortcutRecording") : t("settings.shortcutRecord")}</span>
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="icon"
-        className="size-8"
+
         onClick={onReset}
         aria-label={t("settings.shortcutResetLabel", {
           action: t(SHORTCUT_DEFINITIONS.find((definition) => definition.id === actionId)?.labelKey ?? ""),
         })}
         disabled={combo === DEFAULT_SHORTCUTS[actionId]}
       >
-        <RotateCcw className="size-3.5" />
+        <RotateCcw className="size-4" />
       </Button>
     </div>
   );
@@ -491,9 +491,9 @@ function ShortcutsSettingsCard() {
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
-            <Keyboard className="size-5 shrink-0 text-muted-foreground" />
-            <div className="flex min-w-0 items-center gap-1.5">
-              <CardTitle role="heading" aria-level={2}>
+            <Keyboard className="size-4 shrink-0 text-muted-foreground" />
+            <div className="flex min-w-0 items-center gap-2">
+              <CardTitle className="font-semibold" role="heading" aria-level={2}>
                 <button type="button" className="flex items-center gap-2" aria-expanded={expanded} aria-controls="shortcut-settings-content" onClick={() => setExpanded(value => !value)}>
                   {t("settings.shortcutsTitle")}
                   {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
@@ -503,7 +503,7 @@ function ShortcutsSettingsCard() {
             </div>
           </div>
           {expanded && <Button type="button" variant="outline" size="sm" onClick={resetAllShortcuts}>
-            <RotateCcw className="size-3.5" />
+            <RotateCcw className="size-4" />
             <span>{t("settings.shortcutResetAll")}</span>
           </Button>}
         </div>
@@ -1155,12 +1155,12 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="border-b border-border px-6 py-4">
-        <div className="flex items-center justify-between"><h1 className="text-lg font-semibold">{t("settings.title")}</h1><Button variant="ghost" size="icon" onClick={onClose} aria-label={t("common.close")}><X className="size-4" /></Button></div>
+      <div className="border-b border-border px-4 py-4">
+        <div className="flex items-center justify-between"><h1 className="text-sm font-semibold">{t("settings.title")}</h1><Button variant="ghost" size="icon" onClick={onClose} aria-label={t("common.close")}><X className="size-4" /></Button></div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto p-6 space-y-6">
+      <div className="flex-1 overflow-auto p-4 space-y-4">
 
         {/* Section 1: Path settings */}
         <Card>
@@ -1168,19 +1168,19 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
           <CardHeader>
             <div className="flex items-center gap-2">
-              <FolderOpen className="size-5 text-muted-foreground" />
-              <div className="flex items-center gap-1.5">
-                <CardTitle role="heading" aria-level={2} className="flex items-center gap-2">{t("settings.pathsConfigTitle")}<ChevronRight className="size-4 shrink-0 group-open/settings-section:rotate-90" /></CardTitle>
+              <FolderOpen className="size-4 text-muted-foreground" />
+              <div className="flex items-center gap-2">
+                <CardTitle role="heading" aria-level={2} className="font-semibold flex items-center gap-2">{t("settings.pathsConfigTitle")}<ChevronRight className="size-4 shrink-0 group-open/settings-section:rotate-90" /></CardTitle>
                 <HintIcon text={t("settings.pathsConfigDesc")} />
               </div>
             </div>
           </CardHeader>
           </summary>
           <CardContent className="pt-4">
-            <div className="space-y-5">
+            <div className="space-y-4">
               <div className="space-y-3">
                 <div>
-                  <label htmlFor="config-dir" className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <label htmlFor="config-dir" className="mb-1 flex items-center gap-2 text-xs font-medium text-muted-foreground">
                     <span>{t("settings.configDirLabel")}</span>
                     <HintIcon text={`${t("settings.configDirDesc")}\n\n${t("settings.configDirHint")}`} className="size-4" />
                   </label>
@@ -1209,7 +1209,7 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
 
               <div className="space-y-3">
                 <div>
-                  <label htmlFor="skill-resource-library-dir" className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <label htmlFor="skill-resource-library-dir" className="mb-1 flex items-center gap-2 text-xs font-medium text-muted-foreground">
                     <span>{t("settings.resourcePathLabel")}</span>
                     <HintIcon text={`${t("settings.resourcePathDesc")}\n\n${t("settings.resourcePathHint")}`} className="size-4" />
                   </label>
@@ -1238,7 +1238,7 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
 
               <div className="space-y-3">
                 <div>
-                  <label htmlFor="central-skills-dir" className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <label htmlFor="central-skills-dir" className="mb-1 flex items-center gap-2 text-xs font-medium text-muted-foreground">
                     <span>{t("settings.centralPathLabel")}</span>
                     <HintIcon text={`${t("settings.centralPathDesc")}\n\n${t("settings.centralPathHint")}`} className="size-4" />
                   </label>
@@ -1289,10 +1289,10 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
           <CardHeader className="flex flex-row items-center justify-between">
             <div className="flex items-center gap-2">
-              <Database className="size-5 text-muted-foreground" />
+              <Database className="size-4 text-muted-foreground" />
               <div>
-                <div className="flex items-center gap-1.5">
-                  <CardTitle className="flex items-center gap-2">{t("settings.backupTitle")}<ChevronRight className="size-4 shrink-0 group-open/settings-section:rotate-90" /></CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="font-semibold flex items-center gap-2">{t("settings.backupTitle")}<ChevronRight className="size-4 shrink-0 group-open/settings-section:rotate-90" /></CardTitle>
                   <HintIcon text={t("settings.backupDesc")} />
                 </div>
               </div>
@@ -1304,7 +1304,7 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
               <div className="rounded-lg border border-border/70 bg-background/40 p-4">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 text-sm font-medium">
+                    <div className="flex items-center gap-2 text-sm font-medium">
                       <span>{t("settings.backupLocalTitle")}</span>
                       <HintIcon text={`${t("settings.backupLocalDesc")}\n\n${t("settings.backupHint")}`} />
                     </div>
@@ -1336,11 +1336,10 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
 
               <div className="rounded-lg border border-border/70 bg-background/40 p-4">
                 <div>
-                  <div className="flex items-center gap-1.5 text-sm font-medium">
+                  <div className="flex items-center gap-2 text-sm font-medium">
                     <span>{t("settings.webdavTitle")}</span>
-                    <HintIcon text={t("settings.webdavPersistHint")} />
+                    <HintIcon text={`${t("settings.webdavScope")}\n\n${t("settings.webdavPersistHint")}`} />
                   </div>
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t("settings.webdavScope")}</p>
                 </div>
 
                 <div className="mt-4 space-y-3">
@@ -1447,10 +1446,10 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
           <CardHeader>
             <div className="flex items-center gap-2">
-              <KeyRound className="size-5 text-muted-foreground" />
+              <KeyRound className="size-4 text-muted-foreground" />
               <div>
-                <div className="flex items-center gap-1.5">
-                  <CardTitle className="flex items-center gap-2">{t("settings.githubPatTitle")}<ChevronRight className="size-4 shrink-0 group-open/settings-section:rotate-90" /></CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="font-semibold flex items-center gap-2">{t("settings.githubPatTitle")}<ChevronRight className="size-4 shrink-0 group-open/settings-section:rotate-90" /></CardTitle>
                   <HintIcon
                     text={`${t("settings.githubPatDesc")}\n\n${t("settings.githubPatDirectOnly")}\n\n${t("settings.githubPatRateLimitHint")}`}
                   />
@@ -1516,10 +1515,10 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
           <CardHeader className="flex flex-row items-center justify-between">
             <div className="flex items-center gap-2">
-              <Bot className="size-5 text-muted-foreground" />
+              <Bot className="size-4 text-muted-foreground" />
               <div>
-                <div className="flex items-center gap-1.5">
-                  <CardTitle className="flex items-center gap-2">{t("settings.aiServiceTitle")}<ChevronRight className="size-4 shrink-0 group-open/settings-section:rotate-90" /></CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="font-semibold flex items-center gap-2">{t("settings.aiServiceTitle")}<ChevronRight className="size-4 shrink-0 group-open/settings-section:rotate-90" /></CardTitle>
                   <HintIcon
                     text={t("settings.aiServiceDescription")}
                   />
@@ -1528,13 +1527,13 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
             </div>
           </CardHeader>
           </summary>
-          <CardContent className="space-y-5 pt-4">
+          <CardContent className="space-y-4 pt-3">
             <section aria-labelledby="ai-connection-heading" className="rounded-lg border border-border p-4">
-              <h3 id="ai-connection-heading" className="mb-4 text-sm font-semibold">{t("settings.aiConnectionTitle")}</h3>
+              <h3 id="ai-connection-heading" className="mb-3 flex items-center gap-2 text-sm font-normal"><Plug className="size-[1em] shrink-0" aria-hidden="true"/>{t("settings.aiConnectionTitle")}</h3>
             <div className="space-y-4">
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-2 block">{lang === "zh" ? "提供商" : "Provider"}</label>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-2">
                   {AI_PROVIDERS.map((p) => (
                     <button
                       key={p.id}
@@ -1554,7 +1553,7 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
               {currentProvider && currentProvider.regions.length > 1 && (
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-2 block">{lang === "zh" ? "区域" : "Region"}</label>
-                  <div className="flex gap-1.5">
+                  <div className="flex gap-2">
                     {currentProvider.regions.map((r) => (
                       <button
                         key={r}
@@ -1619,13 +1618,13 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
                   }
                   finally { setAiTesting(false); }
                 }} className="shrink-0">
-                  {aiTesting ? <Loader2 className="size-3.5 animate-spin" /> : <Bot className="size-3.5" />}
+                  {aiTesting ? <Loader2 className="size-4 animate-spin" /> : <Bot className="size-4" />}
                   <span>{lang === "zh" ? "测试连接" : "Test"}</span>
                 </Button>
-                <Button variant="outline" size="sm" disabled={!aiLoaded || aiSaving || aiTesting} onClick={() => void handleSaveAiConfig()}><Save className="size-3.5" />{t("settings.aiSaveConfig")}</Button>
+                <Button variant="outline" size="sm" disabled={!aiLoaded || aiSaving || aiTesting} onClick={() => void handleSaveAiConfig()}><Save className="size-4" />{t("settings.aiSaveConfig")}</Button>
               </div>
               {aiTestResult && (
-                <div className={`text-xs rounded-md px-3 py-2 space-y-1.5 ${aiTestResult.ok ? "bg-green-500/10 text-green-700 dark:text-green-400" : "bg-destructive/10 text-destructive"}`}>
+                <div className={`text-xs rounded-md px-3 py-2 space-y-2 ${aiTestResult.ok ? "bg-green-500/10 text-green-700 dark:text-green-400" : "bg-destructive/10 text-destructive"}`}>
                   <p>{aiTestResult.ok ? "✓ " : "✕ "}{aiTestResult.msg}</p>
                   {!aiTestResult.ok && aiTestResult.details && (
                     <div>
@@ -1633,11 +1632,11 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
                         className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                         onClick={() => setShowAiTestDetails((v) => !v)}
                       >
-                        {showAiTestDetails ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+                        {showAiTestDetails ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
                         {lang === "zh" ? "查看详情" : "Details"}
                       </button>
                       {showAiTestDetails && (
-                        <pre className="mt-1 text-[11px] leading-4 font-mono text-muted-foreground whitespace-pre-wrap break-all bg-muted/30 rounded-md p-2 max-h-32 overflow-auto">
+                        <pre className="mt-1 text-xs leading-4 font-mono text-muted-foreground whitespace-pre-wrap break-all bg-muted/30 rounded-md p-2 max-h-32 overflow-auto">
                           {aiTestResult.details}
                         </pre>
                       )}
@@ -1655,8 +1654,8 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
             </div>
             </section>
             <details aria-labelledby="ai-prompts-heading" className="group/ai-prompts rounded-lg border border-border p-4">
-              <summary id="ai-prompts-heading" className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold [&::-webkit-details-marker]:hidden">
-                <MessageSquareText className="size-5 shrink-0 text-muted-foreground" />
+              <summary id="ai-prompts-heading" className="flex cursor-pointer list-none items-center gap-2 text-sm font-normal [&::-webkit-details-marker]:hidden">
+                <MessageSquareText className="size-4 shrink-0 text-muted-foreground" />
                 <span className="flex items-center gap-2">{t("settings.aiPromptsTitle")}<ChevronRight className="size-4 shrink-0 group-open/ai-prompts:rotate-90" /></span>
                 <HintIcon text={t("settings.aiPromptsHelp")} />
               </summary>
@@ -1669,7 +1668,7 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
         {/* ── Section 5: About ────────────────────────────────────────────── */}
         <Card>
           <CardHeader>
-            <CardTitle>{t("settings.about")}</CardTitle>
+            <CardTitle className="font-semibold">{t("settings.about")}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
@@ -1706,9 +1705,9 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
                     disabled={isCheckingUpdate}
                   >
                     {isCheckingUpdate ? (
-                      <Loader2 className="size-3.5 animate-spin" />
+                      <Loader2 className="size-4 animate-spin" />
                     ) : (
-                      <RefreshCw className="size-3.5" />
+                      <RefreshCw className="size-4" />
                     )}
                     <span>
                       {isCheckingUpdate ? t("settings.checkingUpdates") : t("settings.checkUpdates")}
@@ -1719,9 +1718,9 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
                       href={updateInfo.latestUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm transition-colors hover:bg-muted"
+                      className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm transition-colors hover:bg-muted"
                     >
-                      <ExternalLink className="size-3.5" />
+                      <ExternalLink className="size-4" />
                       <span>{t("settings.openLatestRelease")}</span>
                     </a>
                   ) : null}

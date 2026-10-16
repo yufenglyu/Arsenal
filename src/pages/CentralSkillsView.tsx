@@ -495,7 +495,7 @@ export function CentralSkillsView() {
       <SidebarTagFilter hasSelection={selectedTags.length > 0} onClear={() => setSelectedTags([])}><TagFilters tags={availableTags} selected={selectedTags} onChange={setSelectedTags}/></SidebarTagFilter>
       <SkillBrowserWorkspace onRefresh={handleRefresh} toolbar={viewControl => <SkillBrowserHeader viewControl={viewControl} title={<div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold">{t("central.title")}</h1>
+            <h1 className="text-sm font-semibold">{t("central.title")}</h1>
             <Button
               variant="ghost"
               size="icon"

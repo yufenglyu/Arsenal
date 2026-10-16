@@ -170,12 +170,12 @@ export function CollectionPickerDialog({
             <Button
               variant="ghost"
               size="sm"
-              className="w-full gap-1.5 text-muted-foreground hover:text-foreground"
+              className="w-full text-muted-foreground hover:text-foreground"
               onClick={() => setIsCreateOpen(true)}
               disabled={isAdding}
               aria-label={t("collectionPicker.createNew")}
             >
-              <Plus className="size-3.5" />
+              <Plus className="size-4" />
               {t("collectionPicker.createNew")}
             </Button>
 
@@ -200,7 +200,7 @@ export function CollectionPickerDialog({
             >
               {isAdding ? (
                 <>
-                  <Loader2 className="size-3.5 animate-spin" />
+                  <Loader2 className="size-4 animate-spin" />
                   {t("collectionPicker.adding")}
                 </>
               ) : selectedIds.size > 0 ? (

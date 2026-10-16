@@ -388,6 +388,7 @@ export interface GitHubRepoImportResult {
 export type GitHubImportProgressPhase = "preparing" | "writing" | "finalizing";
 
 export interface GitHubImportProgressPayload {
+  operationId?: string | null;
   phase: GitHubImportProgressPhase;
   currentSkill?: string | null;
   currentPath?: string | null;

@@ -22,7 +22,6 @@ import { SkillDetailDrawer } from "@/components/skill/SkillDetailDrawer";
 import { OpenableDirectoryPath } from "@/components/common/OpenableDirectoryPath";
 import { SkillBrowserHeader } from "@/components/skill/SkillBrowserHeader";
 import { SearchInput } from "@/components/ui/search-input";
-import { MetadataRow } from "@/components/skill/SkillDetailView";
 import { SkillBrowserWorkspace } from "@/components/skill/SkillBrowserWorkspace";
 import { CollectionDetail, SkillWithLinks } from "@/types";
 import { SidebarTagFilter } from "@/components/layout/SidebarTagFilter";
@@ -423,8 +422,6 @@ export function CollectionsListView() {
           deleteLabel: t("collection.delete"), deleteRequiresConfirmation: false, isDeleting,
           metadata: <>
             {collection.description && <p className="text-sm whitespace-pre-wrap">{collection.description}</p>}
-            <MetadataRow label={t("detail.createdAt")} value={new Date(collection.created_at).toLocaleString()} />
-            <MetadataRow label={t("detail.updatedAt")} value={new Date(collection.updated_at).toLocaleString()} />
           </>,
         }))}
                           skills={sortBySkillBrowserOrder(collectionSkillsWithLinks.filter(skill=>matchesTags(skill.tags,selectedTags)&&matchesSearch(skill,search,searchScopes,currentDetail?.name)), sortField, sortDirection).map((skill) => ({

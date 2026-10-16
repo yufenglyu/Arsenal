@@ -186,12 +186,12 @@ export function PlatformInstallDrawer({
                         key={agent.id}
                         className="flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5"
                       >
-                        <PlatformIcon agentId={agent.id} className="size-5 text-muted-foreground" size={20} />
+                        <PlatformIcon agentId={agent.id} className="size-[1em] text-muted-foreground" size={14} />
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium text-foreground">
                             {agent.display_name}
                           </div>
-                          <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+                          <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
                             <span>{statusLabel}</span>
                             {!agent.is_detected && <span>{t("installDialog.notDetected")}</span>}
                           </div>

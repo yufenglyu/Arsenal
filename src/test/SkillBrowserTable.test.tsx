@@ -105,11 +105,11 @@ describe("SkillBrowserTable", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "创建时间" }));
     expect(onSortChange).toHaveBeenCalledWith("createdAt", "asc");
-    expect(screen.getByRole("button", { name: "创建时间" })).toHaveTextContent("↕");
+    expect(screen.getByRole("button", { name: "创建时间" }).querySelector("svg")).toHaveClass("lucide-arrow-up-down");
 
     fireEvent.click(screen.getByRole("button", { name: "名称，升序排序" }));
     expect(onSortChange).toHaveBeenCalledWith("name", "desc");
-    expect(screen.getByRole("button", { name: "名称，升序排序" })).toHaveTextContent("↑");
+    expect(screen.getByRole("button", { name: "名称，升序排序" }).querySelector("svg")).toHaveClass("lucide-arrow-up");
 
     expect(screen.queryByRole("columnheader", { name: "操作" })).not.toBeInTheDocument();
   });
@@ -480,8 +480,8 @@ describe("SkillBrowserTable", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "创建时间" })).toHaveTextContent("↕");
-    expect(screen.getByRole("button", { name: "更新时间" })).toHaveTextContent("↕");
+    expect(screen.getByRole("button", { name: "创建时间" }).querySelector("svg")).toHaveClass("lucide-arrow-up-down");
+    expect(screen.getByRole("button", { name: "更新时间" }).querySelector("svg")).toHaveClass("lucide-arrow-up-down");
     expect(screen.getByText("2026-07-14")).toBeInTheDocument();
     expect(screen.getByText("2026-08-14")).toBeInTheDocument();
     expect(

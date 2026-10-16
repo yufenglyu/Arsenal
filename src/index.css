@@ -136,7 +136,7 @@
   body {
     margin: 0;
     overflow: hidden;
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground text-sm;
   }
   html {
     @apply font-sans;
@@ -265,6 +265,13 @@
   font-weight: 500;
 }
 
+.markdown-body img {
+  display: inline-block;
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+}
+
 .markdown-body strong {
   font-weight: 600;
 }
@@ -302,6 +309,11 @@
   background: transparent;
 }
 
+/* The list header stays fixed; the vertical scrollbar starts below it. */
+.skill-browser-list::-webkit-scrollbar-track:vertical {
+  margin-top: var(--skill-table-header-height, 0px);
+}
+
 ::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 3px;
@@ -334,4 +346,33 @@
 .inspector-document .markdown-body :is(h3, h4, h5, h6) {
   font-size: 0.8125rem;
   line-height: 1.5;
+}
+
+/* Section titles remain keyboard-operable native disclosure controls. */
+.overview-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  list-style: none;
+}
+summary.overview-section-title { cursor: pointer; }
+summary.overview-section-title::-webkit-details-marker { display: none; }
+
+/* Shared repository/skill title in the overview inspector. */
+.overview-item-title {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+}
+
+/* Text-associated icons follow the surrounding 14px/12px typography. */
+.lucide {
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+  vertical-align: middle;
 }

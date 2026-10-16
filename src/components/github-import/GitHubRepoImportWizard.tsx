@@ -723,12 +723,12 @@ export function GitHubRepoImportWizard({
                 {currentPreview.repo.owner}/{currentPreview.repo.repo}
               </span>
               {currentPreview.repo.branch ? (
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                   {currentPreview.repo.branch}
                 </span>
               ) : null}
             </div>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               <span>
                 {t("githubImport.githubImportFoundSkills", {
                   count: currentPreview.skills.length,
@@ -750,12 +750,12 @@ export function GitHubRepoImportWizard({
               rel="noopener noreferrer"
               className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-3 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
-              <ExternalLink className="size-3.5" />
+              <ExternalLink className="size-4" />
               <span>{t("githubImport.previewOpenSource")}</span>
             </a>
             <Button
               variant="outline"
-              className="h-7"
+
               onClick={handlePreviewSubmit}
               disabled={isPreviewLoading || !repoUrl.trim()}
             >
@@ -860,14 +860,14 @@ export function GitHubRepoImportWizard({
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-5">
             <div className="flex items-start gap-3">
               <div className="rounded-full bg-emerald-500/10 p-2 text-emerald-700 dark:text-emerald-300">
-                <PartyPopper className="size-5" />
+                <PartyPopper className="size-4" />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2 text-emerald-700 dark:text-emerald-300">
-                  <div className="text-base font-semibold">
+                  <div className="text-sm font-medium">
                     {t("githubImport.githubImportSuccessTitle")}
                   </div>
-                  <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium">
+                  <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium">
                     {currentImportResult.repo.owner}/{currentImportResult.repo.repo}
                   </span>
                 </div>
@@ -882,26 +882,26 @@ export function GitHubRepoImportWizard({
 
           <div className="grid gap-4 md:grid-cols-3">
             <div className="rounded-xl border border-border/70 bg-card/80 px-4 py-3">
-              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {t("githubImport.githubImportDecision.import")}
               </div>
-              <div className="mt-2 text-2xl font-semibold">
+              <div className="mt-2 text-sm font-normal">
                 {currentImportResult.importedSkills.length}
               </div>
             </div>
             <div className="rounded-xl border border-border/70 bg-card/80 px-4 py-3">
-              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {t("githubImport.githubImportDecision.skip")}
               </div>
-              <div className="mt-2 text-2xl font-semibold">
+              <div className="mt-2 text-sm font-normal">
                 {currentImportResult.skippedSkills.length}
               </div>
             </div>
             <div className="rounded-xl border border-border/70 bg-card/80 px-4 py-3">
-              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {t("githubImport.githubImportResultInstalledReady")}
               </div>
-              <div className="mt-2 text-2xl font-semibold">
+              <div className="mt-2 text-sm font-normal">
                 {currentImportResult.importedSkills.length}
               </div>
             </div>
@@ -920,7 +920,7 @@ export function GitHubRepoImportWizard({
                   >
                     <div className="min-w-0">
                       <div className="font-medium">{skill.skillName}</div>
-                      <code className="mt-1 inline-flex rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
+                      <code className="mt-1 inline-flex rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
                         {skill.importedSkillId}
                       </code>
                     </div>
@@ -1086,10 +1086,10 @@ export function GitHubRepoImportWizard({
                           key={key}
                           className="rounded-xl border border-border/70 bg-muted/20 px-3 py-2.5"
                         >
-                          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                             {label}
                           </div>
-                          <div className="mt-1 text-2xl font-semibold leading-tight">
+                          <div className="mt-1 text-sm font-normal leading-tight">
                             {value}
                           </div>
                         </div>
@@ -1126,7 +1126,7 @@ export function GitHubRepoImportWizard({
                                   <div className="font-medium">
                                     {skill.skillName}
                                   </div>
-                                  <div className="mt-1 text-[11px] text-muted-foreground">
+                                  <div className="mt-1 text-xs text-muted-foreground">
                                     {skill.sourcePath}
                                   </div>
                                 </div>
@@ -1237,7 +1237,7 @@ export function GitHubRepoImportWizard({
                         <div className="text-sm font-semibold">
                           {t("githubImport.githubImportSelectionTitle")}
                         </div>
-                        <span className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        <span className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                           {preview.skills.length}
                         </span>
                       </div>
@@ -1338,15 +1338,15 @@ export function GitHubRepoImportWizard({
                                   <div className="min-w-0 flex-1">
                                     {!isRenameEditing ? (
                                       <div className="flex flex-wrap items-center gap-2">
-                                        <div className="min-w-0 truncate text-base font-semibold">
+                                        <div className="min-w-0 truncate text-sm font-medium">
                                           {selectedPreviewSkill.skillName}
                                         </div>
-                                        <code className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                                        <code className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
                                           {selectedPreviewSkill.skillId}
                                         </code>
                                         <span
                                           className={cn(
-                                            "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                                            "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium",
                                             statusBadgeClassName,
                                           )}
                                         >
@@ -1441,7 +1441,7 @@ export function GitHubRepoImportWizard({
                                         </Button>
                                       </div>
                                     )}
-                                    <div className="mt-1 break-all text-[11px] text-muted-foreground">
+                                    <div className="mt-1 break-all text-xs text-muted-foreground">
                                       {!isRenameEditing ? (
                                         <>
                                           {selectedPreviewSkill.sourcePath}
@@ -1562,7 +1562,7 @@ export function GitHubRepoImportWizard({
                                           "githubImport.githubImportOpenOnGithub",
                                         )}
                                       >
-                                        <ExternalLink className="size-3.5" />
+                                        <ExternalLink className="size-4" />
                                       </a>
                                     ) : null}
                                   </div>
@@ -1661,7 +1661,7 @@ export function GitHubRepoImportWizard({
                                             )
                                           }
                                         >
-                                          <RefreshCw className="size-3.5" />
+                                          <RefreshCw className="size-4" />
                                           <span>
                                             {t(
                                               "githubImport.githubImportMarkdownRetry",
@@ -1744,7 +1744,7 @@ export function GitHubRepoImportWizard({
                                             ]?.isLoading
                                           }
                                         >
-                                          <RefreshCw className="size-3.5" />
+                                          <RefreshCw className="size-4" />
                                           <span>
                                             {t("detail.regenerateExplanation")}
                                           </span>

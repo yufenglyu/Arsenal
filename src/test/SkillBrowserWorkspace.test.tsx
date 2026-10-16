@@ -1,4 +1,6 @@
-import { type ReactElement } from "react";
+import { useRepositoryDocumentStore } from "@/stores/repositoryDocumentStore";
+import { TagFilters } from "@/components/skill/TagFilters";
+import { type ReactElement, type ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { openRowActions } from "./rowActions";
 import { fireEvent, render as testingRender, screen, within, waitFor } from "@testing-library/react";
@@ -8,7 +10,7 @@ import { SkillBrowserHeader } from "@/components/skill/SkillBrowserHeader";
 import { useShortcutStore } from "@/stores/shortcutStore";
 import { DEFAULT_SHORTCUTS } from "@/lib/shortcutKeys";
 import type { FolderTableItem, SkillTableItem } from "@/components/skill/SkillBrowserTable";
-vi.mock("@/components/skill/SkillDetailView", async (importOriginal) => ({ ...await importOriginal<typeof import("@/components/skill/SkillDetailView")>(), SkillDetailView: ({skillId,agentId,rowId,inspectorTab}:{skillId:string;agentId?:string;rowId?:string;inspectorTab:string}) => <div data-testid="inspector">{[skillId,agentId,rowId,inspectorTab].join("|")}</div> }));
+vi.mock("@/components/skill/SkillDetailView", async (importOriginal) => ({ ...await importOriginal<typeof import("@/components/skill/SkillDetailView")>(), SkillDetailView: ({skillId,agentId,rowId,inspectorTab,installationSummary}:{skillId:string;agentId?:string;rowId?:string;inspectorTab:string;installationSummary?:ReactNode}) => <div data-testid="inspector">{[skillId,agentId,rowId,inspectorTab].join("|")}{inspectorTab === "overview" && installationSummary}</div> }));
 const render = (ui: ReactElement) => ui.type === MemoryRouter ? testingRender(ui) : testingRender(ui, {wrapper: MemoryRouter});
 const remove = vi.fn();
 const skills: SkillTableItem[] = [
@@ -181,12 +183,13 @@ describe("tree browser workspace",()=>{
  });
 });
 
-it("uses detected enabled targets in the install tab and links to their pages", () => {
+it("uses detected enabled targets in overview installation statistics and links to their pages", () => {
  const targets = [{id:"cursor",display_name:"Cursor",global_skills_dir:"demo",is_detected:true,is_enabled:true,is_builtin:true}, {id:"missing",display_name:"Missing",global_skills_dir:"demo",is_detected:false,is_enabled:true,is_builtin:true}, {id:"disabled",display_name:"Disabled",global_skills_dir:"demo",is_detected:true,is_enabled:false,is_builtin:true}];
  render(<MemoryRouter><SkillBrowserWorkspace {...props} skills={[{...skills[0],isCentral:true,installAgents:targets}]}/></MemoryRouter>);
  fireEvent.keyDown(screen.getByRole("region",{name:"技能列表"}),{key:"+"});
  fireEvent.click(screen.getByRole("button",{name:"查看 First skill 的详情"}));
- fireEvent.click(screen.getByRole("tab",{name:"安装"}));
+ expect(screen.queryByRole("tab",{name:"安装"})).not.toBeInTheDocument();
+ expect(screen.getByRole("region",{name:"安装统计"})).toBeVisible();
  expect(screen.getByRole("link",{name:/Cursor/})).toHaveAttribute("href","/platform/cursor");
  expect(screen.queryByRole("link",{name:/Missing|Disabled/})).not.toBeInTheDocument();
 });
@@ -326,4 +329,98 @@ it("collapses a skill's parent and moves selection, focus and preview to that fo
  expect(list.queryByRole("button",{name:"查看 Second skill 的详情"})).not.toBeInTheDocument();
  expect(screen.getByRole("heading",{name:"Example/Tools"})).toBeInTheDocument();
  expect(screen.queryByTestId("inspector")).not.toBeInTheDocument();
+});
+
+it("shows a repository README and retains the document tab between repository and skill selections", async () => {
+  const read = vi.spyOn(useRepositoryDocumentStore.getState(), "readDocuments").mockResolvedValue([{name:"README.md",language:"default",content:"# Repository guide"}]);
+  try {
+    render(<SkillBrowserWorkspace {...props}/>);
+    fireEvent.click(screen.getByRole("button", {name:"Example/Tools"}));
+    fireEvent.click(screen.getByRole("tab", {name:"文档"}));
+    expect(await screen.findByRole("heading", {name:"Repository guide"})).toBeInTheDocument();
+    expect(read).toHaveBeenCalledWith("/demo/tools", "one");
+    expect(screen.queryByRole("region", {name:"技能清单"})).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("region", {name:"技能列表"}), {key:"+"});
+    fireEvent.click(screen.getByRole("button", {name:"查看 First skill 的详情"}));
+    expect(screen.getByTestId("inspector")).toHaveTextContent("one|||document");
+    fireEvent.click(screen.getByRole("button", {name:"Example/Tools"}));
+    expect(await screen.findByRole("heading", {name:"Repository guide"})).toBeInTheDocument();
+  } finally { read.mockRestore(); }
+});
+it("highlights the selected repository tags without changing filters and clears them on unmount", () => {
+  const change = vi.fn();
+  const {unmount} = render(<><TagFilters tags={[{key:"a",label:"A"},{key:"b",label:"B"}]} selected={[]} onChange={change}/>
+    <SkillBrowserWorkspace {...props} folders={[{...folders[0],tags:["A"]},{...folders[0],key:"other",name:"Other",tags:["B"],skillKeys:[]}]}/></>);
+  fireEvent.click(screen.getByRole("button",{name:"Example/Tools"}));
+  expect(screen.getByRole("button",{name:"A"})).toHaveAttribute("data-highlighted","true");
+  expect(screen.queryByRole("region",{name:"技能标签"})).not.toBeInTheDocument();
+  expect(screen.getByRole("button",{name:"A"})).toHaveAttribute("aria-pressed","false");
+  fireEvent.click(screen.getByRole("button",{name:"Other"}));
+  expect(screen.getByRole("button",{name:"A"})).not.toHaveAttribute("data-highlighted");
+  expect(screen.getByRole("button",{name:"B"})).toHaveAttribute("data-highlighted","true");
+  expect(change).not.toHaveBeenCalled();
+  unmount();
+  expect(useRepositoryDocumentStore.getState().highlightedTags).toEqual([]);
+});
+
+it.each(["repositories", "skills", "mixed"])("highlights the union of %s selections and updates it when deselecting", mode => {
+  const taggedSkills = [
+    {...skills[0], tags:[{key:"a",label:"A"},{key:"shared",label:"Shared"}]},
+    {...skills[1], tags:[{key:"b",label:"B"},{key:"shared",label:"Shared"}]},
+  ];
+  const taggedFolders = [
+    {...folders[0],tags:["A","Shared"],skillKeys:["one"]},
+    {...folders[0],key:"other",name:"Other",tags:["B","Shared"],skillKeys:["two"]},
+  ];
+  render(<><TagFilters tags={[{key:"a",label:"A"},{key:"b",label:"B"},{key:"shared",label:"Shared"}]} selected={[]} onChange={vi.fn()}/>
+    <SkillBrowserWorkspace {...props} skills={taggedSkills} folders={taggedFolders}/></>);
+  if (mode !== "repositories") fireEvent.keyDown(screen.getByRole("region",{name:"技能列表"}),{key:"+"});
+  const first = mode === "skills" ? "查看 First skill 的详情" : "Example/Tools";
+  const second = mode === "repositories" ? "Other" : "查看 Second skill 的详情";
+  fireEvent.click(screen.getAllByRole("button",{name:first})[0]);
+  fireEvent.click(screen.getAllByRole("button",{name:second})[0],{ctrlKey:true});
+  for (const tag of ["A","B","Shared"]) expect(screen.getByRole("button",{name:tag})).toHaveAttribute("data-highlighted","true");
+  fireEvent.click(screen.getAllByRole("button",{name:first})[0],{ctrlKey:true});
+  expect(screen.getByRole("button",{name:"A"})).not.toHaveAttribute("data-highlighted");
+  for (const tag of ["B","Shared"]) expect(screen.getByRole("button",{name:tag})).toHaveAttribute("data-highlighted","true");
+  fireEvent.click(screen.getAllByRole("button",{name:second})[0],{metaKey:true});
+  for (const tag of ["A","B","Shared"]) expect(screen.getByRole("button",{name:tag})).not.toHaveAttribute("data-highlighted");
+});
+it("updates range selection tags after selected skills are filtered out", () => {
+  const taggedSkills = skills.map((skill,index) => ({...skill,tags:[{key:String(index),label:String(index)}]}));
+  const {rerender} = render(<SkillBrowserWorkspace {...props} skills={taggedSkills}/>);
+  fireEvent.keyDown(screen.getByRole("region",{name:"技能列表"}),{key:"+"});
+  fireEvent.click(screen.getByRole("button",{name:"查看 First skill 的详情"}));
+  fireEvent.click(screen.getByRole("button",{name:"查看 Second skill 的详情"}),{shiftKey:true});
+  expect(useRepositoryDocumentStore.getState().highlightedTags).toEqual(["0","1"]);
+  rerender(<SkillBrowserWorkspace {...props} skills={[taggedSkills[1]]}/>);
+  expect(useRepositoryDocumentStore.getState().highlightedTags).toEqual(["1"]);
+  rerender(<SkillBrowserWorkspace {...props} skills={[]} folders={[]}/>);
+  expect(useRepositoryDocumentStore.getState().highlightedTags).toEqual([]);
+});
+
+it("updates the tag union when selecting and deselecting skills in the repository preview list", () => {
+  const taggedSkills = skills.map((skill,index) => ({...skill,tags:[{key:String(index),label:String(index)}]}));
+  render(<SkillBrowserWorkspace {...props} skills={taggedSkills}/>);
+  fireEvent.click(screen.getByRole("button",{name:"Example/Tools"}));
+  const list = within(screen.getByRole("region",{name:"技能清单"}));
+  fireEvent.click(list.getByRole("button",{name:"查看 First skill 的详情"}),{ctrlKey:true});
+  expect(useRepositoryDocumentStore.getState().highlightedTags).toEqual(["0"]);
+  fireEvent.click(list.getByRole("button",{name:"查看 Second skill 的详情"}),{ctrlKey:true});
+  expect(useRepositoryDocumentStore.getState().highlightedTags).toEqual(["0","1"]);
+  fireEvent.click(list.getByRole("button",{name:"查看 First skill 的详情"}),{ctrlKey:true});
+  expect(useRepositoryDocumentStore.getState().highlightedTags).toEqual(["1"]);
+  fireEvent.click(list.getByRole("button",{name:"查看 Second skill 的详情"}),{ctrlKey:true});
+  expect(useRepositoryDocumentStore.getState().highlightedTags).toEqual([]);
+});
+
+it("restores an obsolete install tab preference to overview and shows repository installation statistics", () => {
+ localStorage.setItem("skillshub.browser.tab",JSON.stringify("install"));
+ render(<SkillBrowserWorkspace {...props}/>);
+ fireEvent.click(screen.getByRole("button",{name:"Example/Tools"}));
+ expect(screen.getByRole("tab",{name:"概览"})).toHaveAttribute("aria-selected","true");
+ expect(screen.queryByRole("tab",{name:"安装"})).not.toBeInTheDocument();
+ expect(screen.getByRole("region",{name:"安装统计"})).toBeVisible();
+ fireEvent.click(screen.getByRole("tab",{name:"文档"}));
+ expect(screen.queryByRole("region",{name:"安装统计"})).not.toBeInTheDocument();
 });

@@ -99,7 +99,7 @@ function CommandInput({
               title={clearLabel}
               onClick={() => onValueChange("")}
             >
-              <XIcon className="size-3.5" />
+              <XIcon className="size-4" />
             </InputGroupButton>
           </InputGroupAddon>
         )}

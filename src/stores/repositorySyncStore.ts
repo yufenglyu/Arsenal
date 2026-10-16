@@ -1,3 +1,4 @@
+import { useRepositoryDocumentStore } from "./repositoryDocumentStore";
 import {activityAttention, pendingUpdateCount} from "@/lib/activityCenter";
 import {
   registerTaskExecutor,
@@ -27,8 +28,8 @@ export function hasRepositoryChanges(item: RepositorySyncPreview): boolean {
 
 interface RepositorySyncState {
   updateErrors: Record<string, string>;
-  isRefreshingStars: boolean;
-  refreshStars: (repositories?: string[]) => Promise<void>;
+  isRefreshingRepositories: boolean;
+  refreshRepositories: (repositories?: string[]) => Promise<void>;
   checkedAt: Record<string, number>;
   reportCheckedAt: number | null;
   reportGeneration: string | null;
@@ -68,10 +69,10 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
   persist(
     (set, get) => ({
       updateErrors: {},
-      isRefreshingStars: false,
-      refreshStars: async (repositories) => {
-        if (get().isRefreshingStars) return;
-        set({ isRefreshingStars: true });
+      isRefreshingRepositories: false,
+      refreshRepositories: async (repositories) => {
+        if (get().isRefreshingRepositories) return;
+        set({ isRefreshingRepositories: true });
         try {
           const library = useResourceLibraryStore.getState();
           if (library.error) throw new Error(library.error);
@@ -82,15 +83,15 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
           }))];
           const batchId = crypto.randomUUID();
           const ids = repos.map(repository => useTaskQueueStore.getState().enqueue({
-            batchId, batchLabel: i18n.t("workflow.refreshStars"),
-            key: `stars:${repository}`, kind: "check", label: `${i18n.t("workflow.refreshStars")} · ${repository}`,
+            batchId, batchLabel: i18n.t("workflow.refreshRepository"),
+            key: `repository-metadata:${repository}`, kind: "check", label: `${i18n.t("workflow.refreshRepository")} · ${repository}`,
             locks: [`repo:${repository}`],
-            steps: [{ command: "refresh_repository_stars", args: { repository }, label: repository }],
+            steps: [{ command: "refresh_repository", args: { repository }, label: repository }],
           }));
           await Promise.all(ids.map(waitForTask));
         } catch {
           toast.error(i18n.t("workflow.operationFailed"));
-        } finally { set({ isRefreshingStars: false }); }
+        } finally { set({ isRefreshingRepositories: false }); }
       },
       checkedAt: {},
       reportCheckedAt: null,
@@ -126,7 +127,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
         requested.forEach(repo => activeRechecks.add(repo));
         set({ checkingRepository: [...activeRechecks][0] });
         try {
-          const report = await checkInBackground(requested);
+          const report = await checkInBackground(requested, getReportTaskGeneration());
           set((state) => ({
             preview: state.preview ? {
               ...state.preview,
@@ -211,7 +212,11 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
       setPreview: (preview) => set({ preview }),
       clearCheckResults: () => {
         if (get().isChecking || get().checkingRepository || useTaskQueueStore.getState().tasks.some(task =>
-          isTaskActive(task) && task.steps.some(step => step.command === "preview_source_backed_resource_repository_updates"))) return;
+          isTaskActive(task) && (task.parentReportGeneration === get().reportGeneration || task.steps.some(step => step.command === "preview_source_backed_resource_repository_updates")))) return;
+        const generation = get().reportGeneration;
+        for (const task of useTaskQueueStore.getState().tasks) {
+          if (generation && task.parentReportGeneration === generation) useTaskQueueStore.getState().remove(task.id);
+        }
         useTaskQueueStore.getState().clearCheckHistory();
         set({preview:null, reportCheckedAt:null, checkedAt:{}, updateErrors:{}, error:null,
           reportGeneration:crypto.randomUUID(), repositories:null, requestedRepositories:null,
@@ -275,13 +280,24 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
   ),
 );
 
+// Persist the parent identity even for reports saved before task ownership existed.
+export function getReportTaskGeneration(): string {
+  const state = useRepositorySyncStore.getState();
+  if (state.reportGeneration) return state.reportGeneration;
+  const generation = crypto.randomUUID();
+  useRepositorySyncStore.setState({reportGeneration: generation});
+  return generation;
+}
+
 async function checkInBackground(
   repositories?: string[],
+  parentReportGeneration?: string,
 ): Promise<RepositorySyncPreviewReport> {
   const reportGeneration = useRepositorySyncStore.getState().reportGeneration;
   const id = useTaskQueueStore
     .getState()
     .enqueue({
+      parentReportGeneration,
       key: `check:${repositories?.slice().sort().join(",") ?? "all"}:${reportGeneration ?? "legacy"}`,
       kind: "check",
       locks: repositories?.length ? repositories.map(repo => `repo:${repo.toLowerCase()}`) : ["repo:*"],
@@ -355,9 +371,10 @@ registerTaskResult("update_source_backed_resource_skill", async () => {
   await useResourceLibraryStore.getState().loadResourceLibrary();
 });
 
-registerTaskResult("refresh_repository_stars", (step, result) => {
+for (const command of ["refresh_repository_stars", "refresh_repository"]) registerTaskResult(command, (step, result) => {
   const repository = String(step.args.repository).toLowerCase();
   if (typeof result !== "number") return;
+  if (command === "refresh_repository") useRepositoryDocumentStore.getState().invalidate();
   useResourceLibraryStore.setState(state => ({skills: state.skills.map(skill => skill.source_repo?.toLowerCase() === repository ? {...skill, github_stars: result} : skill)}));
   useCentralSkillsStore.setState(state => ({skills: state.skills.map(skill => skill.source_repo?.toLowerCase() === repository ? {...skill, github_stars: result} : skill)}));
 });

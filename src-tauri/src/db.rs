@@ -1967,8 +1967,12 @@ pub async fn set_setting(pool: &DbPool, key: &str, value: &str) -> Result<(), St
 }
 
 pub async fn save_github_stars(pool: &DbPool, repository: &str, stars: i64) -> Result<(), String> {
+    save_github_stars_with_executor(pool, repository, stars).await
+}
+
+pub(crate) async fn save_github_stars_with_executor<'e>(executor: impl sqlx::Executor<'e, Database = sqlx::Sqlite>, repository: &str, stars: i64) -> Result<(), String> {
     sqlx::query("INSERT INTO github_repository_stats (repository, stars, checked_at) VALUES (?, ?, ?) ON CONFLICT(repository) DO UPDATE SET stars=excluded.stars, checked_at=excluded.checked_at")
-        .bind(repository).bind(stars).bind(Utc::now().to_rfc3339()).execute(pool).await.map_err(|e| e.to_string())?;
+        .bind(repository).bind(stars).bind(Utc::now().to_rfc3339()).execute(executor).await.map_err(|e| e.to_string())?;
     Ok(())
 }
 

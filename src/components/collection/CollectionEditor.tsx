@@ -154,7 +154,7 @@ export function CollectionEditor({
           <Button onClick={handleSubmit} disabled={isSubmitting}>
             {isSubmitting ? (
               <>
-                <Loader2 className="size-3.5 animate-spin" />
+                <Loader2 className="size-4 animate-spin" />
                 {isEditMode ? t("collectionEditor.saving") : t("collectionEditor.creating")}
               </>
             ) : isEditMode ? (

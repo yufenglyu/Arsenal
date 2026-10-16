@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { invoke } from "@/lib/tauri";
+import {listen} from "@tauri-apps/api/event";
+import type {GitHubImportProgressPayload} from "@/types";
 import i18n from "@/i18n";
 
 export type TaskKind = "import" | "check" | "update" | "ai";
@@ -34,11 +36,14 @@ export interface BackgroundTask {
   clearRequested?: boolean;
   batchId?: string;
   batchLabel?: string;
+  parentReportGeneration?: string;
+  importProgress?: GitHubImportProgressPayload;
 }
 type Input = Pick<BackgroundTask, "key" | "kind" | "label" | "steps"> & {
   locks?: string[];
   batchId?: string;
   batchLabel?: string;
+  parentReportGeneration?: string;
 };
 type Handler = (step: TaskStep, result: unknown) => void | Promise<void>;
 const handlers = new Map<string, Handler>();
@@ -199,6 +204,7 @@ export const useTaskQueueStore = create<State>()(
           return;
         get().patch(id, {
           status: "queued",
+          importProgress: undefined,
           cancelRequested: false,
           steps: task.steps.map((step) => {
             if (step.status === "success") return step;
@@ -268,7 +274,7 @@ export const useTaskQueueStore = create<State>()(
         tasks: [
           ...s.tasks.filter(t => t.status !== "success" && !t.clearRequested),
           ...s.tasks.filter((t) => t.status === "success").slice(-100),
-        ],
+        ].map(task => ({...task, importProgress: undefined})),
       }),
       merge: (persisted, current) => {
         const tasks = (persisted as { tasks?: BackgroundTask[] })?.tasks ?? [];
@@ -320,7 +326,27 @@ async function execute(id: string) {
     state().patch(id, { steps: steps.map((s) => ({ ...s })) });
     const cancellable = step.command === "import_github_repo_skills" || step.command === "prepare_github_resource_import";
     if (cancellable) importOperations.set(id, step.command === "prepare_github_resource_import" && typeof step.args.operationId === "string" ? step.args.operationId : crypto.randomUUID());
+    let unlisten: (() => void) | undefined;
+    let progressTimer: ReturnType<typeof setTimeout> | undefined;
+    let latestProgress: GitHubImportProgressPayload | undefined;
+    const flushProgress = () => {
+      if (latestProgress && state().tasks.some(task => task.id === id && task.status === "running")) state().patch(id, {importProgress: latestProgress});
+      latestProgress = undefined;
+      progressTimer = undefined;
+    };
     try {
+      if (step.command === "import_github_repo_skills") {
+        state().patch(id, {importProgress: undefined});
+        const operationId = importOperations.get(id);
+        try {
+          unlisten = await listen<GitHubImportProgressPayload>("github-import:progress", ({payload}) => {
+            if (payload.operationId !== operationId) return;
+            latestProgress = payload;
+            // File events can be frequent; cap queue/UI updates at ten per second.
+            if (!progressTimer) progressTimer = setTimeout(flushProgress, 100);
+          });
+        } catch { /* Import still works when event registration is unavailable. */ }
+      }
       const args = cancellable ? {...step.args, operationId: importOperations.get(id)} : step.args;
       const result = await (executors.get(step.command)?.(args) ?? invoke(step.command, args));
       step.result = result;
@@ -357,6 +383,10 @@ async function execute(id: string) {
       } catch {
         /* Keep the original operation failure if a status observer fails. */
       }
+    } finally {
+      if (progressTimer) clearTimeout(progressTimer);
+      flushProgress();
+      try { void Promise.resolve(unlisten?.()).catch(() => {}); } catch { /* The event bridge may already be closed. */ }
     }
     importOperations.delete(id);
     state().patch(id, { steps: steps.map((s) => ({ ...s })) });

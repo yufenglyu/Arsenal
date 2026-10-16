@@ -1,3 +1,4 @@
+import { useRepositoryDocumentStore } from "@/stores/repositoryDocumentStore";
 import { ActionIcon } from "@/components/ui/action-icon";
 import { Pencil, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,7 @@ export function TagFilters({
   onChange: (tags: string[]) => void;
 }) {
   const { t } = useTranslation();
+  const highlighted = useRepositoryDocumentStore(state => state.highlightedTags);
   const [menu, setMenu] = useState<{
     tag: string;
     x: number;
@@ -109,6 +111,7 @@ export function TagFilters({
             key={tag.key}
             type="button"
             aria-pressed={selected.includes(tag.key)}
+            data-highlighted={highlighted.includes(tag.key) || undefined}
             data-drop-target={
               dropTarget?.key === tag.key
                 ? dropTarget.remove
@@ -159,7 +162,7 @@ export function TagFilters({
                 ? dropTarget.remove
                   ? "relative z-10 scale-110 text-destructive ring-2 ring-destructive shadow-sm"
                   : "relative z-10 scale-110 text-foreground ring-2 ring-primary shadow-sm"
-                : selected.includes(tag.key)
+                : selected.includes(tag.key) || highlighted.includes(tag.key)
                   ? "font-semibold text-primary"
                   : "hover:text-primary",
             )}

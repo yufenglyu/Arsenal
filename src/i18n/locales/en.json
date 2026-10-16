@@ -1,5 +1,8 @@
 {
   "browser": {
+    "readmeTitle": "README",
+    "chooseReadme": "Select README document",
+    "readmeLanguage": {"default": "Default", "zh": "Chinese", "en": "English"},
     "flatView": "Show all skills",
     "groupedView": "Group by repository",
     "selectedRows": "{{count}} rows selected",
@@ -30,6 +33,8 @@
     "selectItem": "Select a repository or skill to preview",
     "skillCount": "{{count}} skills",
     "localSkills": "Local skills",
+    "noReadme": "No README.md is available for this repository.",
+    "readmeError": "Failed to read the repository README.md.",
     "chooseDocument": "Select a skill in this repository to preview its documents."
   },
   "app": {
@@ -514,6 +519,7 @@
     "installing": "Installing..."
   },
   "detail": {
+    "chooseFile": "Choose file",
     "readingView": "Document reading view",
     "openReading": "Expand reading view",
     "closeReading": "Close reading view",
@@ -702,6 +708,7 @@
     "selectSkills": "Select skills"
   },
   "settings": {
+    "aiRepositoryNotePrompt": "AI repository note prompt",
     "aiServiceTitle": "AI Service",
     "aiSaveConfig": "Save configuration",
     "aiConfigSaved": "Configuration saved",
@@ -710,7 +717,7 @@
     "aiServiceDescription": "Configure the service, model, and prompts for AI notes and tags.",
     "aiNotePrompt": "AI note prompt",
     "aiTagsPrompt": "AI tags prompt",
-    "aiPromptsHelp": "Skill content is appended automatically. Tags remain 3–5 Chinese keywords. Save after restoring defaults. Existing saved notes and tags remain unchanged.",
+    "aiPromptsHelp": "SKILL.md is appended to skill prompts; README is appended to the repository note prompt. Tags remain 3–5 Chinese keywords. Save after restoring defaults. Existing saved notes and tags remain unchanged.",
     "aiPromptsReset": "Restore defaults",
     "aiPromptsSave": "Save",
     "aiPromptsSaved": "Prompts saved",
@@ -796,7 +803,7 @@
     },
     "backupTitle": "Backup and restore",
     "backupDesc": "Export or import the Skill Repository, Skill Bundles, custom platforms, and non-secret app settings. API keys, tokens, and passwords are excluded. Shared Hub is not backed up or restored.",
-    "backupLocalTitle": "Local backup file",
+    "backupLocalTitle": "Local backup",
     "backupLocalDesc": "Export a complete backup file, or restore from a local backup file.",
     "exportBackup": "Export backup",
     "importBackup": "Import backup",
@@ -1151,6 +1158,12 @@
     "githubPatSettingsHint": "Open Settings and save a GitHub Personal Access Token to use authenticated direct GitHub requests for this import flow."
   },
   "workflow": {
+    "generateRepositoryNote": "Generate repository notes from README",
+    "repositoryReadmeRequired": "No README is available. Import or update the repository documents first.",
+    "githubDropHint": "Drop to import GitHub repositories",
+    "githubDropQueued": "Added {{count}} GitHub links to import tasks.",
+    "githubDropUnsupported": "Drop a valid GitHub repository URL.",
+
     "checkFailed": "Check failed",
     "clearCheckResults": "Clear check results",
     "clearCheckResultsHint": "Clear check reports and records without deleting skill files or stopping imports and updates.",
@@ -1231,6 +1244,11 @@
       "skillDetails": "Skill details",
       "searchSkills": "Search skills…",
       "searchUpdates": "Search skills or repositories…",
+      "currentRepository": "Current repository: {{repository}}",
+      "currentSkill": "Current skill: {{name}}",
+      "currentFile": "Current file: {{path}}",
+      "fileProgress": "Files prepared {{completed}} / {{total}}",
+      "importStage": {"checking": "Checking the repository and reading the skill list…", "preparing": "Fetching the repository snapshot and preparing import…", "writing": "Preparing skill files…", "finalizing": "Committing skills and saving records…"},
       "importPreparing": "Checking the repository; skill details will appear when preparation finishes.",
       "importSummary": "Skills {{total}} · Imported {{imported}} · Skipped {{skipped}}",
       "importCommitHint": "Preparing and importing the selection; results update after the commit finishes.",
@@ -1277,7 +1295,7 @@
     "confirmScopedCheck": "Check all repositories in the current result scope again?",
     "viewLastCheck": "Last results",
     "startCheck": "Check updates",
-    "refreshStars": "Update stars",
+    "refreshRepository": "Update repositories",
     "checkTimeUnknown": "Check time unavailable",
     "fullCheckTime": "Full-library check completed",
     "scopedCheckTime": "Scoped check completed",

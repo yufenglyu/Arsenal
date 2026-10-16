@@ -16,6 +16,9 @@ pub struct Operation {
     signal: watch::Sender<bool>,
 }
 impl Operation {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
     pub fn start(id: String) -> Self {
         let signal = operations()
             .lock()

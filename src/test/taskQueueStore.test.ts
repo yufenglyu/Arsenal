@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
-const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
+const { invoke, listen } = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn(async (_event: string, _callback: (event: {payload: Record<string, unknown>}) => void) => vi.fn()) }));
 vi.mock("@/lib/tauri", () => ({ invoke }));
+vi.mock("@tauri-apps/api/event", () => ({listen}));
 import {
   useTaskQueueStore as queue,
   waitForTask,
@@ -14,6 +15,23 @@ const input = (key: string, locks: string[] = []) => ({
   steps: [{ command: "test", args: { key }, label: key }],
 });
 describe("background queue", () => {
+  it("routes live import progress by operation and cleans up listeners", async () => {
+    const callbacks: Array<(event: {payload: Record<string, unknown>}) => void> = [];
+    const stops: ReturnType<typeof vi.fn>[] = [];
+    listen.mockImplementation(async (_event, callback) => {callbacks.push(callback); const stop=vi.fn();stops.push(stop);return stop;});
+    const finishes: Array<() => void> = [];
+    invoke.mockImplementation(() => new Promise<void>(resolve => finishes.push(resolve)));
+    const ids = ["one", "two"].map(name => queue.getState().enqueue({...input(name),kind:"import",steps:[{command:"import_github_repo_skills",label:name,args:{repoUrl:`example/${name}`}}]}));
+    await waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    const operationId = invoke.mock.calls[0][1].operationId;
+    const payload={operationId,phase:"writing",currentSkill:"skills/one/SKILL.md",currentPath:"SKILL.md",completedFiles:2,totalFiles:5,completedBytes:2,totalBytes:5};
+    callbacks.forEach(callback => callback({payload}));
+    await waitFor(() => expect(queue.getState().tasks.find(task => task.id === ids[0])?.importProgress).toMatchObject(payload));
+    expect(queue.getState().tasks.find(task => task.id === ids[1])?.importProgress).toBeUndefined();
+    expect(localStorage.getItem("skillshub.background-tasks.v1")).not.toContain('"currentSkill"');
+    const waiters=ids.map(waitForTask);finishes.forEach(finish => finish());await Promise.all(waiters);
+    stops.forEach(stop=>expect(stop).toHaveBeenCalledOnce());
+  });
   it("sends cancellation to the backend import and resolves the task as cancelled", async () => {
     let rejectImport!: (error: Error) => void;
     invoke.mockImplementation((command) => command === "import_github_repo_skills"
@@ -21,6 +39,7 @@ describe("background queue", () => {
       : Promise.resolve(rejectImport(new Error("Operation cancelled"))));
     const id = queue.getState().enqueue({...input("import"), kind:"import",
       steps:[{command:"import_github_repo_skills",args:{repoUrl:"example/repo"},label:"import"}]});
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("import_github_repo_skills", expect.anything()));
     const operationId = invoke.mock.calls[0][1].operationId;
     const waiter = waitForTask(id);
     queue.getState().cancel(id);

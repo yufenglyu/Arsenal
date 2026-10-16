@@ -1,18 +1,36 @@
+import { NotebookPen } from "lucide-react";
 import { ActionIcon } from "@/components/ui/action-icon";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRepositoryDocumentStore } from "@/stores/repositoryDocumentStore";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { findFolderNote, useMetadataStore } from "@/stores/metadataStore";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-export function FolderNotesEditor({ skillIds }: { skillIds: string[] }) {
-  const { t } = useTranslation();
+export function FolderNotesEditor({ skillIds, directory }: { skillIds: string[]; directory?: string }) {
+  const { t, i18n } = useTranslation();
   const error = useMetadataStore((s) => s.folderError);
   const folders = useMetadataStore((s) => s.folders);
   const note = findFolderNote(folders, skillIds);
   const identity = note?.id ?? skillIds.join("|");
   const [value, setValue] = useState(note?.notes ?? "");
   const [busy, setBusy] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const request = useRef(0);
+  useEffect(() => () => { request.current += 1; }, [identity, directory]);
+  async function generate() {
+    if (!directory || generating) return;
+    const current = ++request.current;
+    setGenerating(true);
+    try {
+      const generated = await useRepositoryDocumentStore.getState().generateNote(directory, skillIds[0], i18n.language);
+      if (current === request.current) setValue(generated);
+    } catch (error) {
+      if (current === request.current) toast.error(error instanceof Error ? error.message : t("workflow.operationFailed"));
+    } finally {
+      if (current === request.current) setGenerating(false);
+    }
+  }
   useEffect(() => {
     setValue(note?.notes ?? "");
   }, [identity, note?.notes]);
@@ -37,19 +55,20 @@ export function FolderNotesEditor({ skillIds }: { skillIds: string[] }) {
         </p>
       )}
       <label className="block text-xs text-muted-foreground">
-        {t("workflow.folderNotes")}
+        <span className="mb-3 flex items-center gap-2 text-sm font-semibold"><NotebookPen className="size-4 shrink-0" aria-hidden="true"/>{t("workflow.folderNotes")}</span>
         <Textarea
-          className="mt-2"
+          className="mt-0"
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          disabled={busy}
+          disabled={busy || generating}
         />
       </label>
       <div className="flex justify-end gap-2">
+        {directory && <Button variant="outline" disabled={busy || generating} aria-label={t("workflow.generateRepositoryNote")} onClick={() => void generate()}><ActionIcon action="ai"/>{t(generating ? "detail.explanationLoading" : "workflow.ai")}</Button>}
         <Button
           size="sm"
           variant="outline"
-          disabled={busy}
+          disabled={busy || generating}
           onClick={() => void save(value)}
         ><ActionIcon action="save"/>
           {t("common.save")}
@@ -57,7 +76,7 @@ export function FolderNotesEditor({ skillIds }: { skillIds: string[] }) {
         <Button
           size="sm"
           variant="outline"
-          disabled={busy}
+          disabled={busy || generating}
           onClick={() => void save("")}
         ><ActionIcon action="delete"/>
           {t("workflow.clear")}

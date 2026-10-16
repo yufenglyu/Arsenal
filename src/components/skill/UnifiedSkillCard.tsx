@@ -84,7 +84,7 @@ function PlatformToggleIcon({
           "size-4 shrink-0 transition-all",
           isLinked ? "opacity-100 grayscale-0" : "opacity-40 grayscale"
         )}
-        size={16}
+        size={14}
       />
     </button>
   );
@@ -290,7 +290,7 @@ export function UnifiedSkillCard(props: UnifiedSkillCardProps) {
                 {name}
               </button>
             ) : (
-              <h3 className="text-sm font-medium truncate min-w-0 flex-1">{name}</h3>
+              <h3 className="text-sm font-semibold truncate min-w-0 flex-1">{name}</h3>
             )}
 
             {/* Icon action buttons */}
@@ -425,7 +425,7 @@ export function UnifiedSkillCard(props: UnifiedSkillCardProps) {
             {/* "Already in Shared Hub" badge */}
             {isCentral && (
               <span className="inline-flex items-center gap-1 text-xs text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded">
-                <Globe className="size-3" />
+                <Globe className="size-4" />
                 {t("skillCard.alreadyCentral")}
               </span>
             )}
@@ -441,22 +441,22 @@ export function UnifiedSkillCard(props: UnifiedSkillCardProps) {
             {/* Project badge */}
             {projectBadge && (
               <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                <Folder className="size-3" />
+                <Folder className="size-4" />
                 {projectBadge}
               </span>
             )}
 
             {/* Source label */}
             {publisher && (
-              <span className="text-[10px] text-muted-foreground truncate">{publisher}</span>
+              <span className="text-xs text-muted-foreground truncate">{publisher}</span>
             )}
 
             {sourceLabel && (
               <span
-                className="inline-flex max-w-full items-center gap-1 truncate rounded bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                className="inline-flex max-w-full items-center gap-1 truncate rounded bg-muted/50 px-1.5 py-0.5 text-xs text-muted-foreground"
                 title={sourceUrl ?? sourceLabel}
               >
-                <GitBranch className="size-3 shrink-0" />
+                <GitBranch className="size-4 shrink-0" />
                 <span className="truncate">{sourceLabel}</span>
               </span>
             )}
@@ -474,7 +474,7 @@ export function UnifiedSkillCard(props: UnifiedSkillCardProps) {
             {tags && tags.length > 0 && (
               <div className="flex items-center gap-1">
                 {tags.slice(0, 2).map((tag) => (
-                  <span key={tag.key} className="text-[10px] bg-muted/60 text-muted-foreground px-1.5 py-0.5 rounded">
+                  <span key={tag.key} className="text-xs bg-muted/60 text-muted-foreground px-1.5 py-0.5 rounded">
                     {tag.label}
                   </span>
                 ))}
@@ -486,7 +486,7 @@ export function UnifiedSkillCard(props: UnifiedSkillCardProps) {
           {hasPlatformIcons && targetPlatformAgents.length > 0 && (
             <div className="mt-auto space-y-1 pt-1">
               <div className="flex items-center gap-1.5">
-                <span className="w-14 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+                <span className="w-14 shrink-0 text-xs font-medium uppercase tracking-wider text-muted-foreground/70">
                   {t("sidebar.softwarePlatforms")}
                 </span>
                 <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden">
@@ -505,7 +505,7 @@ export function UnifiedSkillCard(props: UnifiedSkillCardProps) {
                     );
                   })}
                   {hiddenPlatformCount > 0 && (
-                    <span className="ml-0.5 rounded-md bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    <span className="ml-0.5 rounded-md bg-muted/60 px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
                       +{hiddenPlatformCount}
                     </span>
                   )}
@@ -542,10 +542,10 @@ function DateBadge({ label, value }: { label: string; value?: string | null }) {
 
   return (
     <span
-      className="inline-flex items-center gap-1 rounded bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+      className="inline-flex items-center gap-1 rounded bg-muted/50 px-1.5 py-0.5 text-xs text-muted-foreground"
       title={`${label}: ${value ?? dateLabel}`}
     >
-      <Calendar className="size-3 shrink-0" />
+      <Calendar className="size-4 shrink-0" />
       <span className="text-muted-foreground/80">{label}</span>
       <span>{dateLabel}</span>
     </span>
@@ -573,7 +573,7 @@ function SourceIndicator({
       )}
       title={t(hint)}
     >
-      {isSymlink ? <Link2 className="size-3 shrink-0" /> : <FolderOpen className="size-3 shrink-0" />}
+      {isSymlink ? <Link2 className="size-4 shrink-0" /> : <FolderOpen className="size-4 shrink-0" />}
       <span>{t(label)}</span>
     </div>
   );
@@ -594,7 +594,7 @@ function SourceOriginBadge({ originKind }: { originKind: PlatformSourceKind }) {
     <span
       title={hint}
       className={cn(
-        "inline-flex items-center rounded-full bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-700 ring-1 ring-violet-500/20 dark:text-violet-300"
+        "inline-flex items-center rounded-full bg-violet-500/10 px-2 py-0.5 text-xs font-medium text-violet-700 ring-1 ring-violet-500/20 dark:text-violet-300"
       )}
     >
       {label}
@@ -615,11 +615,11 @@ function ReadOnlyBadge() {
 
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-border/70"
+      className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-border/70"
       title={description}
       aria-label={`${label}: ${description}`}
     >
-      <Lock className="size-3 shrink-0" />
+      <Lock className="size-4 shrink-0" />
       {label}
     </span>
   );

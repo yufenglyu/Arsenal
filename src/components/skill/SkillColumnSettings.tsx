@@ -38,7 +38,7 @@ export function SkillColumnSettings({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <Columns3 className="size-3.5" />
+        <Columns3 className="size-4" />
       </Button>
 
       {open ? (
@@ -87,7 +87,7 @@ export function SkillColumnSettings({
               className="w-full justify-start"
               onClick={onReset}
             >
-              <RotateCcw className="size-3" />
+              <RotateCcw className="size-4" />
               {t("skillBrowser.resetColumns")}
             </Button>
           </div>

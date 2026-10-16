@@ -103,9 +103,9 @@ export function SidebarTagFilter({
               /* In-memory state is sufficient. */
             }
           }}
-          className="flex min-w-0 flex-1 items-center gap-2 py-1 text-xs font-medium text-muted-foreground"
+          className="flex min-w-0 flex-1 items-center gap-2 py-1 text-sm font-semibold text-muted-foreground"
         >
-          <Tags className="size-3.5" />
+          <Tags className="size-4" />
           {t("central.tagFilter")}
         </button>
         {open && onClear && (
@@ -117,7 +117,7 @@ export function SidebarTagFilter({
             onClick={onClear}
             className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30 disabled:pointer-events-none"
           >
-            <FilterX className="size-3.5" />
+            <FilterX className="size-4" />
           </button>
         )}
       </div>

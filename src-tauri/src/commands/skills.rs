@@ -1,3 +1,4 @@
+use super::repository_docs;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -2329,6 +2330,19 @@ async fn add_resource_skills_from_local_dir_impl(
 
     }
 
+    if skipped_skills.len() < candidates.len() {
+        let mut directory = resource_root.clone();
+        for segment in target_base_segments { directory.push(segment); }
+        if preserve_collection_folder {
+            if let Some(name) = collection_name.as_deref() { directory.push(name); }
+        }
+        for (index, (name, bytes)) in repository_docs::files(&source_dir)?.into_iter().enumerate() {
+            let staged = files_transaction.root.join(format!("repository-readme-{index}"));
+            std::fs::write(&staged, bytes).map_err(|e| format!("Failed to stage repository README: {e}"))?;
+            files_transaction.install(&staged, &directory.join(name), true)?;
+        }
+    }
+
     let now = Utc::now().to_rfc3339();
     let mut added_skills = Vec::new();
     for candidate in &candidates {
@@ -3256,6 +3270,50 @@ pub async fn read_skill_content(
 
     std::fs::read_to_string(&skill.file_path)
         .map_err(|e| format!("Failed to read '{}': {}", skill.file_path, e))
+}
+
+fn repository_readme_path(directory: &Path) -> Result<Option<PathBuf>, String> {
+    if !directory.exists() { return Ok(None); }
+    let mut paths = std::fs::read_dir(directory).map_err(|e| format!("Failed to inspect repository documentation: {e}"))?
+        .filter_map(Result::ok).filter(|entry| entry.file_name().to_string_lossy().eq_ignore_ascii_case("README.md"))
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .map(|entry| entry.path()).collect::<Vec<_>>();
+    paths.sort();
+    Ok(paths.into_iter().next())
+}
+
+pub(crate) fn read_repository_readme_impl(directory: &Path) -> Result<Option<String>, String> {
+    repository_readme_path(directory)?.map(|path| std::fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read repository README: {e}"))).transpose()
+}
+
+async fn repository_document_directory(pool: &DbPool, directory: String, skill_id: Option<String>) -> Result<PathBuf, String> {
+    // Shared/platform views install skill links, so read their repository document
+    // from the main resource library instead of requiring a second installed copy.
+    if let Some(id) = skill_id {
+        if let Some(skill) = db::get_skill_by_id(pool, &id).await? {
+            let root = resource_root_path(pool).await?;
+            let root = root.canonicalize().unwrap_or(root);
+            if let Some(path) = skill.canonical_path {
+                let path = PathBuf::from(path);
+                let path = path.canonicalize().unwrap_or(path);
+                if let Some(repository) = repository_docs::group_directory(&root, &path) { return Ok(repository); }
+            }
+        }
+    }
+    Ok(PathBuf::from(directory))
+}
+
+#[tauri::command]
+pub async fn read_repository_readme(state: State<'_, AppState>, directory: String, skill_id: Option<String>) -> Result<Option<String>, String> {
+    let directory = repository_document_directory(&state.db, directory, skill_id).await?;
+    read_repository_readme_impl(&directory)
+}
+
+#[tauri::command]
+pub async fn read_repository_documents(state: State<'_, AppState>, directory: String, skill_id: Option<String>) -> Result<Vec<repository_docs::RepositoryDocument>, String> {
+    let directory = repository_document_directory(&state.db, directory, skill_id).await?;
+    repository_docs::read(&directory)
 }
 
 #[tauri::command]
@@ -5699,6 +5757,9 @@ mod tests {
             "---\nname: Beta Skill\n---\n\n# Beta\n",
         )
         .unwrap();
+        fs::write(source_dir.join("readme.md"), "# Local repository").unwrap();
+        fs::write(source_dir.join("README_CN.md"), "# 本地仓库").unwrap();
+        fs::write(source_dir.join("README.en.md"), "# English repository").unwrap();
         fs::write(beta_dir.join("references").join("notes.md"), "# Notes").unwrap();
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
             .await
@@ -5715,6 +5776,9 @@ mod tests {
         .await
         .unwrap();
 
+        assert_eq!(read_repository_readme_impl(&resource_dir.join("local/starter-pack")).unwrap(), Some("# Local repository".into()));
+        let documents = repository_docs::read(&resource_dir.join("local/starter-pack")).unwrap();
+        assert_eq!(documents.iter().map(|doc| doc.language).collect::<Vec<_>>(), vec!["default", "zh", "en"]);
         assert_eq!(result.import_kind, LocalResourceImportKind::Collection);
         assert_eq!(result.collection_name.as_deref(), Some("starter-pack"));
         assert_eq!(result.added_skills.len(), 2);

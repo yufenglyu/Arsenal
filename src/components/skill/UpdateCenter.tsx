@@ -4,7 +4,7 @@ import {repositoryUpdateRows, updateCategories as categories, updateItemKey, typ
 import { useMemo, useState, type ReactNode } from "react";
 import { ChevronRight, Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useRepositorySyncStore } from "@/stores/repositorySyncStore";
+import { getReportTaskGeneration, useRepositorySyncStore } from "@/stores/repositorySyncStore";
 import {
   useTaskQueueStore,
   isTaskActive,
@@ -23,6 +23,9 @@ export function UpdateCenter({ embedded = false, taskLayout = false }: { embedde
   const [confirmCheck, setConfirmCheck] = useState(false);
   const state = useRepositorySyncStore();
   const tasks = useTaskQueueStore((s) => s.tasks);
+  const reportTasks = tasks.filter(task => !!state.reportGeneration && task.parentReportGeneration === state.reportGeneration && !task.clearRequested);
+  const activeReportTasks = reportTasks.filter(isTaskActive);
+  const stoppingReport = activeReportTasks.length > 0 && activeReportTasks.every(task => task.cancelRequested);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [retryChoices, setRetryChoices] = useState<Record<string, boolean>>({});
   const [choices, setChoices] = useState<Record<string, boolean>>({});
@@ -77,10 +80,12 @@ export function UpdateCenter({ embedded = false, taskLayout = false }: { embedde
   }
   function apply(items = regularUpdatesToApply) {
     const batchId = crypto.randomUUID();
+    const parentReportGeneration = getReportTaskGeneration();
     for (const row of items) {
       useTaskQueueStore.getState().enqueue({
         key: row.key,
         batchId,
+        parentReportGeneration,
         batchLabel: t("workflow.updateBatch", {count: items.length}),
         kind: "update",
         label: row.item.name,
@@ -118,22 +123,27 @@ export function UpdateCenter({ embedded = false, taskLayout = false }: { embedde
       {key:null,label:t("workflow.allUpdates"),count:rows.filter(row => !ignored(row.key)).length + failedRepositories.length},
     ] as const;
     return <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 px-5 py-4">
-        <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0 flex-1"><h3 className="text-base font-semibold">{t(state.repositories?.length ? "workflow.taskPanel.scopedCheck" : "workflow.taskPanel.fullCheck")}</h3><p className="mt-1 text-xs text-muted-foreground">{t("workflow.repositoryCheckTime")} · {state.reportCheckedAt ? new Date(state.reportCheckedAt).toLocaleString(i18n.language) : t("workflow.checkTimeUnknown")}</p></div>
-          <Button size="sm" variant="ghost" title={t("workflow.clearCheckResultsHint")} disabled={checking || tasks.some(task => isTaskActive(task) && task.kind === "check")} onClick={state.clearCheckResults}><ActionIcon action="delete"/>{t("workflow.clearCheckResults")}</Button>
+      <div className="shrink-0 px-4 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0 flex-1"><h3 className="text-sm font-semibold">{t(state.repositories?.length ? "workflow.taskPanel.scopedCheck" : "workflow.taskPanel.fullCheck")}</h3><p className="mt-1 text-xs text-muted-foreground">{t("workflow.repositoryCheckTime")} · {state.reportCheckedAt ? new Date(state.reportCheckedAt).toLocaleString(i18n.language) : t("workflow.checkTimeUnknown")}</p></div>
+          <div className="flex items-center gap-2">
+            {activeReportTasks.length > 0 && <Button variant="outline" disabled={stoppingReport} onClick={() => activeReportTasks.forEach(task => useTaskQueueStore.getState().cancel(task.id))}><ActionIcon action="stop"/>{t("workflow.stopTask")}</Button>}
+            <Button size="sm" variant="ghost" title={t("workflow.clearCheckResultsHint")} disabled={checking || activeReportTasks.length > 0 || tasks.some(task => isTaskActive(task) && task.kind === "check")} onClick={state.clearCheckResults}><ActionIcon action="delete"/>{t("workflow.clearCheckResults")}</Button>
+          </div>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">{t("workflow.taskPanel.resultSummary",{skills:rows.length,changes:attention.length,failures:failedRepositories.length})}</p>
+        {activeReportTasks.length > 0 && <p role="status" className="mt-3 text-xs text-muted-foreground">{t("workflow.batchProgress",{completed:reportTasks.filter(task => task.status === "success").length,running:activeReportTasks.filter(task => task.status === "running").length,queued:activeReportTasks.filter(task => task.status === "queued").length,failed:reportTasks.filter(task => ["failed","partial","interrupted"].includes(task.status)).length})}</p>}
+        {stoppingReport && <p className="mt-3 text-xs text-muted-foreground">{t("workflow.stopAfterStep")}</p>}
       </div>
-      <div className="shrink-0 space-y-3 px-5 pb-3">
+      <div className="shrink-0 space-y-3 px-4 pb-3">
         <div className="flex flex-wrap gap-1" aria-label={t("workflow.taskPanel.detailFilter")}>{filters.map(item => <Button key={String(item.key)} size="sm" variant="ghost" aria-pressed={filter === item.key} className={cn("text-xs",filter === item.key && "bg-primary/10 font-semibold text-primary")} onClick={() => setFilter(item.key)}>{item.label} {item.count}</Button>)}</div>
         {attention.some(row => row.category === "deleted") && <p className="text-xs text-muted-foreground">{t("workflow.taskPanel.deletionHint")}</p>}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto px-5 pb-4">
+      <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
         {state.error && <div className="mb-3 flex items-center gap-2 text-xs"><p className="text-destructive">{taskErrorMessage(state.error)}</p><Button size="sm" variant="ghost" onClick={() => state.dismissFailedCheck()}>{t("workflow.removeCheckResult")}</Button></div>}
-        <table className="w-full min-w-[28rem] table-fixed text-left text-xs">
+        <table className="w-full min-w-[28rem] table-fixed text-left text-sm">
           <thead className="sticky top-0 z-10 bg-popover text-muted-foreground"><tr><th className="w-7 border-b py-2"><span className="sr-only">{t("workflow.selectAll")}</span></th><th className="border-b py-2 font-medium">{t("workflow.taskPanel.skillRepository")}</th><th className="w-24 border-b py-2 font-medium">{t("workflow.taskPanel.change")}</th><th className="w-24 border-b py-2 font-medium">{t("workflow.taskPanel.status")}</th><th className="w-28 border-b py-2 font-medium">{t("workflow.taskPanel.actions")}</th></tr></thead>
           <tbody>
-            {visibleFailures.map(repo => <tr key={`failed:${repo.repository}`}><td className="border-b border-border/70 py-3 align-top"><input type="checkbox" aria-label={repo.repository} checked={!!retryChoices[repo.repository]} onChange={event => setRetryChoices(previous => ({...previous,[repo.repository]:event.target.checked}))}/></td><td className="border-b border-border/70 py-3 pr-3"><span className="break-all font-medium">{repo.repository}</span><p className="mt-1 text-destructive">{taskErrorMessage(repo.error)}</p></td><td className="border-b border-border/70 py-3 align-top text-muted-foreground">{t("workflow.taskPanel.repository")}</td><td className="border-b border-border/70 py-3 align-top text-destructive">{t("workflow.checkFailed")}</td><td className="border-b border-border/70 py-3 align-top"><div className="flex flex-wrap gap-1"><Button size="sm" variant="ghost" disabled={checking || repositoryChecking(repo.repository)} onClick={() => void state.recheckRepository(repo.repository)}>{t("workflow.recheck")}</Button><Button size="sm" variant="ghost" aria-label={t("workflow.taskPanel.dismissRepositoryFailure",{name:repo.repository})} disabled={checking || repositoryChecking(repo.repository)} onClick={() => state.dismissFailedCheck(repo.repository)}><ActionIcon action="delete"/></Button></div></td></tr>)}
+            {visibleFailures.map(repo => <tr key={`failed:${repo.repository}`}><td className="border-b border-border/70 py-3 align-top"><input type="checkbox" aria-label={repo.repository} checked={!!retryChoices[repo.repository]} onChange={event => setRetryChoices(previous => ({...previous,[repo.repository]:event.target.checked}))}/></td><td className="border-b border-border/70 py-3 pr-3"><span className="break-all font-medium">{repo.repository}</span><p className="mt-1 text-destructive">{taskErrorMessage(repo.error)}</p></td><td className="border-b border-border/70 py-3 align-top text-muted-foreground">{t("workflow.taskPanel.repository")}</td><td className="border-b border-border/70 py-3 align-top text-destructive">{repositoryChecking(repo.repository) ? t("workflow.taskStatus.running") : t("workflow.checkFailed")}</td><td className="border-b border-border/70 py-3 align-top"><div className="flex flex-wrap gap-1"><Button size="sm" variant="ghost" disabled={checking || repositoryChecking(repo.repository)} onClick={() => void state.recheckRepository(repo.repository)}>{t("workflow.recheck")}</Button><Button size="sm" variant="ghost" aria-label={t("workflow.taskPanel.dismissRepositoryFailure",{name:repo.repository})} disabled={checking || repositoryChecking(repo.repository)} onClick={() => state.dismissFailedCheck(repo.repository)}><ActionIcon action="delete"/></Button></div></td></tr>)}
             {visible.map(row => <tr key={row.key}>
               <td className="border-b border-border/70 py-3 align-top"><input type="checkbox" aria-label={row.item.name} checked={checked(row)} disabled={!selectable(row)} onChange={event => setChoices(previous => ({...previous,[row.pairKey]:event.target.checked}))}/></td>
               <td className="border-b border-border/70 py-3 pr-3"><span className="break-all font-medium">{row.item.name}</span><p className="mt-1 break-all text-muted-foreground">{row.repo}</p>
@@ -144,14 +154,14 @@ export function UpdateCenter({ embedded = false, taskLayout = false }: { embedde
                 {!!row.item.files?.length && <details className="mt-2 text-muted-foreground"><summary className="cursor-pointer">{t("workflow.files",{count:row.item.files.length})}</summary>{row.item.files.map(file => <p className="break-all" key={file.path}>{t(`workflow.change.${file.status}`)} · {file.path}</p>)}</details>}
               </td>
               <td className="border-b border-border/70 py-3 align-top text-muted-foreground">{t(row.category === "updated" ? "workflow.updated" : `workflow.changeType.${row.category}`)}</td>
-              <td className={cn("border-b border-border/70 py-3 align-top", failed(row.key) ? "text-destructive" : "text-muted-foreground")}>{busy(row.key) ? t(tasks.find(task => task.key === row.key && isTaskActive(task))?.cancelRequested ? "workflow.stopping" : "workflow.taskStatus.running") : ignored(row.key) ? t("workflow.ignored") : failed(row.key) ? t("workflow.updateFailed") : t(row.category === "updated" ? "workflow.updated" : row.category === "unchanged" ? "workflow.changeType.unchanged" : row.category === "deleted" ? "workflow.pendingDecision" : "workflow.pendingUpdate")}</td>
+              <td className={cn("border-b border-border/70 py-3 align-top", failed(row.key) ? "text-destructive" : "text-muted-foreground")}>{busy(row.key) ? t(tasks.find(task => task.key === row.key && isTaskActive(task))?.cancelRequested ? "workflow.stopping" : `workflow.taskStatus.${tasks.find(task => task.key === row.key && isTaskActive(task))?.status}`) : ignored(row.key) ? t("workflow.ignored") : failed(row.key) ? t("workflow.updateFailed") : t(row.category === "updated" ? "workflow.updated" : row.category === "unchanged" ? "workflow.changeType.unchanged" : row.category === "deleted" ? "workflow.pendingDecision" : "workflow.pendingUpdate")}</td>
               <td className="border-b border-border/70 py-3 align-top">{applicable(row) && <Button size="sm" variant="ghost" className="text-primary" onClick={() => requestApply([row])}>{t(failed(row.key) ? "workflow.retryTask" : row.replacement ? "workflow.replaceDeletedCompact" : row.category === "deleted" ? "workflow.removeLocal" : "workflow.updateOne")}</Button>}{filter === "ignored" && <Button size="sm" variant="ghost" onClick={() => state.setIgnored(state.ignored.filter(key => key !== row.key))}>{t("workflow.restoreIgnored")}</Button>}</td>
             </tr>)}
           </tbody>
         </table>
         {!visible.length && !visibleFailures.length && <p className="py-10 text-center text-xs text-muted-foreground">{t(state.preview ? "workflow.noFilteredCheckResults" : "workflow.noPendingUpdates")}</p>}
       </div>
-      <div className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-t border-border px-5 py-2">
+      <div className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-t border-border px-4 py-2">
         <label className="mr-auto flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" aria-label={t("workflow.selectAll")} checked={allSelected} aria-checked={partiallySelected ? "mixed" : allSelected} ref={node => {if(node)node.indeterminate=partiallySelected;}} disabled={!selectableCount} onChange={event => toggleAll(event.target.checked)}/>{t("workflow.selectedCompact",{count:selectedCount})}</label>
         <Button size="sm" variant="outline" disabled={!updatesToApply.length} onClick={() => state.setIgnored([...new Set([...state.ignored,...updatesToApply.map(row => row.key)])])}><ActionIcon action="ignore"/>{t("workflow.ignore")}</Button>
         <Button size="sm" variant="outline" disabled={state.isChecking || !repositoriesToRecheck.length} onClick={() => void state.recheckRepositories(repositoriesToRecheck)}><ActionIcon action="check"/>{t("workflow.recheckSelected")}</Button>
@@ -313,7 +323,7 @@ export function UpdateCenter({ embedded = false, taskLayout = false }: { embedde
                       </div>
                       {row.candidates.length > 0 && <div className="mt-2 space-y-1">
                         <p className="flex items-center gap-1 text-xs">{t("workflow.reimportSource")}
-                          <button type="button" className="rounded text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring" title={t("workflow.replaceDeletedHint")} aria-label={t("workflow.replaceDeletedHint")}><Info className="size-3.5"/></button>
+                          <button type="button" className="rounded text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring" title={t("workflow.replaceDeletedHint")} aria-label={t("workflow.replaceDeletedHint")}><Info className="size-4"/></button>
                         </p>
                         <select aria-label={t("workflow.replacementFor",{name:row.item.name})} className="w-full rounded border bg-background p-1" disabled={busy(row.key)}
                           value={row.replacement ? updateItemKey(row.repo,row.replacement) : ""}

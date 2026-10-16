@@ -89,7 +89,7 @@ export function InstallTargetList({
       {sections.map((section) => (
         <section key={section.key} className="space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               {section.title}
             </h3>
             <span className="text-xs text-muted-foreground">

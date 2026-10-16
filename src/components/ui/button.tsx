@@ -2,7 +2,7 @@ import { Button as ButtonPrimitive } from "@base-ui/react/button"
 import * as React from "react"
 import { type VariantProps } from "class-variance-authority"
 
-import { buttonVariants } from "@/components/ui/button-variants"
+import { buttonVariants, buttonGeometry, iconButtonGeometry, statusButtonGeometry } from "@/components/ui/button-variants"
 import { cn } from "@/lib/utils"
 
 const Button = React.forwardRef<
@@ -21,7 +21,7 @@ const Button = React.forwardRef<
     <ButtonPrimitive
       ref={ref}
       data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={cn(buttonVariants({ variant, size }), className, size === "status" ? statusButtonGeometry : size?.startsWith("icon") ? iconButtonGeometry : buttonGeometry, "disabled:opacity-50 focus-visible:ring-2")}
       {...props}
     />
   )

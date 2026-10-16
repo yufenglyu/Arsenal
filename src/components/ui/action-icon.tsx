@@ -12,5 +12,5 @@ const icons = {
 export type ActionIconName = keyof typeof icons;
 export function ActionIcon({ action }: { action: ActionIconName }) {
   const Icon = icons[action];
-  return <Icon className="size-4 shrink-0" aria-hidden="true" />;
+  return <Icon className="size-[1em] shrink-0" aria-hidden="true" />;
 }

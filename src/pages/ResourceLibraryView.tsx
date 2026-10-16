@@ -651,7 +651,7 @@ export function ResourceLibraryView() {
       <SidebarTagFilter hasSelection={selectedTags.length > 0} onClear={() => setSelectedTags([])}><TagFilters tags={availableTags} selected={selectedTags} onChange={setSelectedTags}/></SidebarTagFilter>
       <SkillBrowserWorkspace onRefresh={handleRefresh} allowFlatView toolbar={viewControl => <SkillBrowserHeader viewControl={viewControl} title={<div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold">{t("resource.title")}</h1>
+            <h1 className="text-sm font-semibold">{t("resource.title")}</h1>
             <Button
               variant="ghost"
               size="icon"
@@ -697,9 +697,10 @@ export function ResourceLibraryView() {
                       name: group.name,
                       sourceRepo: group.skills.find(skill => skill.source_repo?.toLowerCase() === group.name.toLowerCase())?.source_repo,
                       path: group.path,
+                      tags: [...new Set(group.skills.flatMap(skill => skill.tags ?? []))],
                       skillCount: group.skillCount,
  skillKeys: group.skills.map(skill => skill.id),
-                      notesEditor: <FolderNotesEditor skillIds={group.skills.map(skill=>skill.id)} />,
+                      notesEditor: <FolderNotesEditor key={group.relativePath} directory={group.path} skillIds={group.skills.map(skill=>skill.id)} />,
                       githubStars: group.skills.find((skill) => skill.github_stars != null)?.github_stars ?? null,
                       installAgents: agents,
                       installSummaryMembers: group.skills,

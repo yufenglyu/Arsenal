@@ -151,7 +151,7 @@ export function AddSkillsDialog({
       >
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><PackagePlus className="size-5" aria-hidden="true"/>{t("resource.addSkills")}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2"><PackagePlus className="size-4" aria-hidden="true"/>{t("resource.addSkills")}</DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-[4rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-4 py-2">
             <label htmlFor="add-github">GitHub</label>

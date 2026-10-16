@@ -617,7 +617,7 @@ describe("Sidebar", () => {
     expect(titleRow).toBeInTheDocument();
     expect(titleRow?.querySelector("svg")).toBeInTheDocument();
     expect(heading.className).toContain("text-sm");
-    expect(heading.className).toContain("font-medium");
+    expect(heading.className).toContain("font-semibold");
   });
 
   it("uses a distinct icon for the software platform heading and platform items", () => {

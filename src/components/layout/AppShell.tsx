@@ -1,3 +1,4 @@
+import { GitHubUrlDrop } from "./GitHubUrlDrop";
 import { focusPageSearch } from "@/lib/focusPageSearch";
 import { SettingsView } from "@/pages/SettingsView";
 import { useEffect, useRef, useState } from "react";
@@ -65,6 +66,7 @@ export function AppShell({ settingsOpen = false, onCloseSettings }: {settingsOpe
 
   return (
     <div className="flex h-screen bg-background text-foreground overflow-hidden">
+      <GitHubUrlDrop />
       <Sidebar settingsOpen={settingsOpen} />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <main ref={mainRef} className="flex-1 min-h-0 min-w-0 overflow-hidden">

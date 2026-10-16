@@ -21,7 +21,7 @@ interface PlatformIconProps {
   brand?: boolean;
   displayName?: string;
   className?: string;
-  /** Icon size in pixels (default: 16). */
+  /** Icon size in pixels (default: 14). */
   size?: number;
 }
 
@@ -33,7 +33,7 @@ const brandIcons = {
 };
 const abbreviations: Record<string, string> = { warp: "W", workbuddy: "WB", codebuddy: "CB", kiro: "K", pi: "π", "codearts-agent": "CA", hermes: "H", openclaw: "OC" };
 
-export function PlatformIcon({ agentId, className, size = 16, brand = false, displayName }: PlatformIconProps) {
+export function PlatformIcon({ agentId, className, size = 14, brand = false, displayName }: PlatformIconProps) {
   const icon = usePlatformIconStore(state => state.icons[agentId]);
   if (icon && !isProjectAgentId(agentId)) return <img src={icon} alt="" width={size} height={size} className={cn("shrink-0 rounded-sm bg-white object-contain p-px", className)} />;
   if (brand && !isProjectAgentId(agentId)) {

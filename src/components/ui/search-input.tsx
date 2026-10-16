@@ -71,7 +71,7 @@ export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProps>(
               clearButtonClassName
             )}
           >
-            <X className="size-3.5" />
+            <X className="size-4" />
           </button>
         )}
         {trailing && <div className="absolute right-1 top-1/2 z-30 -translate-y-1/2">{trailing}</div>}

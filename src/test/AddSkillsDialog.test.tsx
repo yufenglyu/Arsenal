@@ -1,3 +1,4 @@
+import { enqueueGitHubUrlImport } from "@/stores/importPreparationStore";
 import { beforeEach, it, expect, vi } from "vitest";
 import {
   act,
@@ -256,4 +257,24 @@ it("records a detached preview failure and retries with a new preview", async ()
   await Promise.all(queue.getState().tasks.map(task => waitForTask(task.id)));
   expect(previews).toBe(2);
   expect(queue.getState().tasks.every(task => task.status === "success")).toBe(true);
+});
+
+it("deduplicates dropped URLs before preview and leaves conflicts awaiting review", async () => {
+  invoke.mockResolvedValue({repo:{owner:"owner",repo:"repo"},skills:[{sourcePath:"skills/a",skillId:"a",conflict:{existingSkillId:"a"}}]});
+  const first = enqueueGitHubUrlImport("https://github.com/owner/repo");
+  const duplicate = enqueueGitHubUrlImport("https://github.com/owner/repo");
+  expect(first).toBe(duplicate);
+  await waitFor(() => expect(queue.getState().tasks[0].status).toBe("awaiting_input"));
+  expect(invoke.mock.calls.filter(([command]) => command === "preview_github_repo_import")).toHaveLength(1);
+  expect(invoke).not.toHaveBeenCalledWith("import_github_repo_skills", expect.anything());
+});
+it("automatically imports dropped URLs without conflicts", async () => {
+  invoke.mockImplementation(command => Promise.resolve(command === "preview_github_repo_import"
+    ? {repo:{owner:"owner",repo:"repo",branch:"a".repeat(40)},skills:[{sourcePath:"skills/a",skillId:"a"}]}
+    : {importedSkills:[],skippedSkills:[]}));
+  enqueueGitHubUrlImport("https://github.com/owner/repo");
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("import_github_repo_skills", expect.objectContaining({
+    repoUrl:`https://github.com/owner/repo/tree/${"a".repeat(40)}`,selections:[{sourcePath:"skills/a",resolution:"overwrite"}],
+  })));
+  for (const task of queue.getState().tasks) await waitForTask(task.id);
 });

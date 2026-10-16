@@ -81,6 +81,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::remote_sources::apply_repository_update_item,
             commands::github_import::refresh_repository_stars,
+            commands::github_import::refresh_repository,
             commands::skills::preview_local_resource_skills,
             commands::metadata::get_folder_notes, commands::metadata::save_folder_note, commands::metadata::count_skill_tag, commands::metadata::change_skill_tag, commands::metadata::rename_skill_tag,
             // Scanner
@@ -120,6 +121,8 @@ pub fn run() {
             commands::skills::get_skill_detail,
             commands::skills::read_skill_content,
             commands::skills::read_file_by_path,
+            commands::skills::read_repository_readme,
+            commands::skills::read_repository_documents,
             commands::skills::list_skill_directory,
             commands::skills::open_in_file_manager,
             commands::skills::export_resource_skill_directory_list,
@@ -171,6 +174,7 @@ pub fn run() {
             commands::remote_sources::preview_source_backed_resource_repository_updates,
             commands::remote_sources::sync_source_backed_resource_skills,
             commands::remote_sources::explain_skill,
+            commands::remote_sources::generate_repository_note,
             commands::remote_sources::generate_skill_tags,
             commands::remote_sources::get_skill_explanation,
             commands::remote_sources::explain_skill_stream,

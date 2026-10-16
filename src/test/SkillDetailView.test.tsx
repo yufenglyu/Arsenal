@@ -434,7 +434,7 @@ describe("SkillDetailView", () => {
     renderView("frontend-design", "page", { skipMockSetup: true });
 
     const metadataRegion = screen.getByRole("region", { name: /基本信息/i });
-    expect(within(metadataRegion).getByText("技能存储路径")).toBeInTheDocument();
+    expect(within(metadataRegion).getByText("存储路径")).toBeInTheDocument();
     expect(
       within(metadataRegion).getByText("D:\\SkillsHub\\repository\\owner\\repo\\frontend-design")
     ).toBeInTheDocument();
@@ -759,8 +759,8 @@ describe("SkillDetailView", () => {
     expect(buttonRow).toHaveClass("flex");
     expect(aiButton.querySelector(".lucide-sparkles")).not.toBeNull();
     expect(saveButton.querySelector(".lucide-save")).not.toBeNull();
-    expect(aiButton).toHaveClass("h-7", "border");
-    expect(saveButton).toHaveClass("h-7", "border");
+    expect(aiButton).toHaveClass("h-8", "border");
+    expect(saveButton).toHaveClass("h-8", "border");
   });
 
   it("renders markdown content by default in preview", () => {
@@ -825,6 +825,27 @@ describe("SkillDetailView", () => {
 
     expect(screen.getByText("docs/notes.txt")).toBeInTheDocument();
     expect(screen.queryByTestId("react-markdown")).not.toBeInTheDocument();
+  });
+
+  it("defaults inspector documents to SKILL.md and browses folders in the file dropdown", async () => {
+    applyStoreMocks();
+    render(<MemoryRouter><SkillDetailView skillId="frontend-design" variant="inspector" inspectorTab="document" /></MemoryRouter>);
+    const select = screen.getByRole("button",{name:"选择文件"});
+    await waitFor(() => expect(select).toBeEnabled());
+    expect(select).toHaveTextContent("SKILL.md");
+    expect(screen.queryByRole("region",{name:/技能文件/})).not.toBeInTheDocument();
+    fireEvent.click(select);
+    const folder = await screen.findByRole("button",{name:"docs"});
+    expect(folder).toHaveAttribute("aria-expanded","false");
+    expect(screen.queryByRole("button",{name:"notes.txt"})).not.toBeInTheDocument();
+    fireEvent.click(folder);
+    fireEvent.click(await screen.findByRole("button",{name:"notes.txt"}));
+    expect(await screen.findByText(mockNotesContent)).toBeVisible();
+    expect(select).toHaveTextContent("docs/notes.txt");
+    expect(screen.queryByRole("button",{name:"docs"})).not.toBeInTheDocument();
+    fireEvent.click(select);
+    fireEvent.click(await screen.findByRole("button",{name:"SKILL.md"}));
+    await waitFor(() => expect(screen.getByTestId("react-markdown")).toBeVisible());
   });
 
   it("loads cached explanation when content is available", async () => {
@@ -1376,8 +1397,8 @@ describe("AI tags", () => {
     const other = screen.getByRole("region", {name: regionName === "技能备注" ? "技能标签" : "技能备注"});
     fireEvent.click(within(region).getByRole("button", {name: action}));
     expect(within(other).getByRole("button", {name: "保存"})).toBeInTheDocument();
-    expect(within(other).getByRole("button", {name: "保存"})).toHaveClass("disabled:opacity-100");
-    expect(within(other).getByRole("button", {name: "清空"})).toHaveClass("disabled:opacity-100");
+    expect(within(other).getByRole("button", {name: "保存"})).toHaveClass("disabled:opacity-50");
+    expect(within(other).getByRole("button", {name: "清空"})).toHaveClass("disabled:opacity-50");
     expect(other.querySelector(".animate-spin")).toBeNull();
     expect(region.querySelectorAll(".animate-spin")).toHaveLength(1);
     if (action === "清空") expect(within(region).getByRole("button", {name: "保存"})).toBeInTheDocument();

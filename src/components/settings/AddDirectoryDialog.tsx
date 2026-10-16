@@ -204,7 +204,7 @@ export function AddDirectoryDialog({
           <Button onClick={() => void handleSubmit()} disabled={isSubmitting}>
             {isSubmitting ? (
               <>
-                <Loader2 className="size-3.5 animate-spin" />
+                <Loader2 className="size-4 animate-spin" />
                 {isEditMode ? t("addDir.saving") : t("addDir.adding")}
               </>
             ) : (

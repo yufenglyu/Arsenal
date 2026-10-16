@@ -58,7 +58,7 @@ export function OpenableDirectoryPath({
         iconOnly && "mt-0 inline-flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-muted hover:no-underline",
         className
       )}
-      title={iconOnly ? `${openLabel}: ${displayed}` : openLabel}
+      title={`${openLabel}: ${displayed}`}
       aria-label={`${openLabel}: ${displayed}`}
     >
       {iconOnly ? <FolderOpen className="size-4" /> : displayed}

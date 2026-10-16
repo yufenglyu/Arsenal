@@ -23,6 +23,18 @@ describe("background repository preview", () => {
     expect(useRepositorySyncStore.getState().preview).not.toBeNull();
     expect(useRepositorySyncStore.getState().reportGeneration).toBe("active");
   });
+  it("keeps active child updates and clears only this report's finished children", () => {
+    const child:BackgroundTask = {id:"child",key:"child",kind:"update",label:"Child",status:"running",createdAt:1,cancelRequested:false,locks:[],parentReportGeneration:"current",steps:[{command:"apply_repository_update_item",label:"Apply",args:{}}]};
+    const unrelated = {...child,id:"unrelated",parentReportGeneration:undefined,status:"success" as const};
+    queue.setState({tasks:[child,unrelated]});
+    useRepositorySyncStore.setState({preview:{repositories:[]},reportGeneration:"current",isChecking:false,checkingRepository:null});
+    useRepositorySyncStore.getState().clearCheckResults();
+    expect(useRepositorySyncStore.getState().preview).not.toBeNull();
+    queue.setState({tasks:[{...child,status:"failed"},unrelated]});
+    useRepositorySyncStore.getState().clearCheckResults();
+    expect(useRepositorySyncStore.getState().preview).toBeNull();
+    expect(queue.getState().tasks).toEqual([unrelated]);
+  });
   it("scans before a full check and preserves its report time on a repository retry", async () => {
     const order:string[]=[];
     useResourceLibraryStore.setState({error:null});
@@ -33,6 +45,7 @@ describe("background repository preview", () => {
     expect(useRepositorySyncStore.getState().reportCheckedAt).toEqual(expect.any(Number));
     useRepositorySyncStore.setState({reportCheckedAt:1000});
     await useRepositorySyncStore.getState().recheckRepository("example/repo");
+    expect(queue.getState().tasks.at(-1)?.parentReportGeneration).toBe(useRepositorySyncStore.getState().reportGeneration);
     expect(useRepositorySyncStore.getState().reportCheckedAt).toBe(1000);
     expect(useRepositorySyncStore.getState().checkedAt["example/repo"]).toBeGreaterThan(1000);
     expect(order).toEqual(["scan","check","check"]);

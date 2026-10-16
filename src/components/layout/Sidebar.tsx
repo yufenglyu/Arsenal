@@ -52,8 +52,10 @@ function NavItem({
   count,
   status,
   onContextMenu,
+  nested = false,
 }: {
   label: string;
+  nested?: boolean;
   ariaLabel?: string;
   title?: string;
   isActive: boolean;
@@ -79,7 +81,8 @@ function NavItem({
         aria-label={accessibleLabel}
         aria-current={isActive ? "page" : undefined}
         className={cn(
-          "flex items-center w-full rounded-md font-medium transition-colors cursor-pointer",
+          "flex items-center w-full rounded-md transition-colors cursor-pointer",
+          nested ? "font-normal" : "font-semibold",
           !isActive && "hover:bg-primary/15 hover:text-primary",
           isActive && "bg-hover-bg text-white",
           expanded ? "gap-2.5 px-2.5 py-1.5 text-sm" : "justify-center py-2 px-1.5 text-sm"
@@ -103,7 +106,7 @@ function NavItem({
             )}
             {count !== undefined && (
               <span className={cn(
-                "min-w-7 text-center text-xs font-medium tabular-nums px-1.5 py-0.5 rounded-full shrink-0",
+                "min-w-7 text-center text-xs font-normal tabular-nums px-1.5 py-0.5 rounded-full shrink-0",
                 isActive
                   ? "text-white"
                   : "text-sidebar-foreground"
@@ -333,7 +336,7 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
               aria-label={t("sidebar.centralSkills")}
               title={t("sidebar.centralSkills")}
               className={cn(
-                "flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-sm font-medium transition-colors",
+                "flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-sm font-semibold transition-colors",
                 pathname === "/central"
                   ? "bg-hover-bg text-white"
                   : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
@@ -344,7 +347,7 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
               {centralSkillsCount > 0 && (
                 <span
                   className={cn(
-                    "min-w-7 text-center text-xs font-medium tabular-nums px-1.5 py-0.5 rounded-full shrink-0",
+                    "min-w-7 text-center text-xs font-normal tabular-nums px-1.5 py-0.5 rounded-full shrink-0",
                     pathname === "/central"
                       ? "text-white"
                       : "text-sidebar-foreground"
@@ -383,7 +386,7 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
                 data-testid="software-platform-heading-icon"
                 className="size-4 shrink-0"
               />
-              <span className="truncate text-left text-sm font-medium">
+              <span className="truncate text-left text-sm font-semibold">
                 {t("sidebar.softwarePlatforms")}
               </span><span className="ml-auto min-w-7 text-center text-xs tabular-nums">{platformAgents.length}</span>
             </button>
@@ -405,11 +408,11 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
             {!softwareCollapsed && platformAgents.length > 0 && (
               <div onKeyDown={softwareExpansionKeys} className={expanded ? "ml-3 border-l border-sidebar-border/70 pl-2" : ""}>
                 {platformAgents.map((agent) => (
-                  <PlatformMenu key={agent.id} platform={agent}><NavItem
+                  <PlatformMenu key={agent.id} platform={agent}><NavItem nested
                     label={agent.display_name}
                     isActive={pathname === `/platform/${encodeURIComponent(agent.id)}`}
                     onClick={() => navigate(`/platform/${encodeURIComponent(agent.id)}`)}
-                    icon={<PlatformIcon agentId={agent.id} brand displayName={agent.display_name} className={expanded ? "size-4" : "size-5"} size={expanded ? 16 : 20} />}
+                    icon={<PlatformIcon agentId={agent.id} brand displayName={agent.display_name} className={expanded ? "size-[1em]" : "size-5"} size={expanded ? 14 : 20} />}
                     expanded={expanded}
                     count={skillsByAgent[agent.id] ?? 0}
                     status={{
@@ -439,7 +442,7 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
                   className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
                 >
                   <FolderTree className="size-4 shrink-0" />
-                  <span className="truncate text-left text-sm font-medium">
+                  <span className="truncate text-left text-sm font-semibold">
                     {t("sidebar.projectDirectories")}
                   </span><span className="ml-auto min-w-7 text-center text-xs tabular-nums">{projectAgents.length}</span>
                 </button>
@@ -450,7 +453,7 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
             {!projectsCollapsed && projectAgents.length > 0 && (
               <div onKeyDown={projectExpansionKeys} className={expanded ? "ml-3 border-l border-sidebar-border/70 pl-2" : ""}>
                 {projectAgents.map((agent) => (
-                  <ProjectDirectoryMenu key={agent.id} agentId={agent.id}><NavItem
+                  <ProjectDirectoryMenu key={agent.id} agentId={agent.id}><NavItem nested
                     key={agent.id}
                     label={agent.display_name}
                     isActive={pathname === `/platform/${encodeURIComponent(agent.id)}`}

@@ -1,5 +1,8 @@
 {
   "browser": {
+    "readmeTitle": "README",
+    "chooseReadme": "选择 README 文档",
+    "readmeLanguage": {"default": "默认", "zh": "中文", "en": "English"},
     "flatView": "平铺所有技能",
     "groupedView": "按仓库分组",
     "selectedRows": "已选 {{count}} 行",
@@ -30,6 +33,8 @@
     "selectItem": "选择仓库或技能以查看详情",
     "skillCount": "{{count}} 个技能",
     "localSkills": "本地技能",
+    "noReadme": "此仓库没有 README.md 文档。",
+    "readmeError": "读取仓库 README.md 失败。",
     "chooseDocument": "选择此仓库中的技能以预览文档。"
   },
   "app": {
@@ -514,6 +519,7 @@
     "installing": "安装中..."
   },
   "detail": {
+    "chooseFile": "选择文件",
     "readingView": "文档阅读视图",
     "openReading": "展开阅读视图",
     "closeReading": "关闭阅读视图",
@@ -606,7 +612,7 @@
     "sourceStatus": "来源状态",
     "sourceStatusRegion": "来源状态",
     "openSourceFailed": "无法打开来源链接，请检查系统默认浏览器。",
-    "storagePath": "技能存储路径",
+    "storagePath": "存储路径",
     "installationPath": "当前安装路径",
     "directoryPath": "目录路径",
     "linkPath": "链接路径",
@@ -702,6 +708,7 @@
     "selectSkills": "选择技能"
   },
   "settings": {
+    "aiRepositoryNotePrompt": "AI 仓库备注提示词",
     "aiServiceTitle": "AI 服务",
     "aiSaveConfig": "保存配置",
     "aiConfigSaved": "配置已保存",
@@ -710,7 +717,7 @@
     "aiServiceDescription": "配置用于生成 AI 备注和标签的服务、模型及提示词。",
     "aiNotePrompt": "AI 备注提示词",
     "aiTagsPrompt": "AI 标签提示词",
-    "aiPromptsHelp": "技能正文会自动附加。标签固定为 3～5 个中文关键词；恢复默认后需点击保存，已保存的备注和标签不会改变。",
+    "aiPromptsHelp": "技能提示词会自动附加 SKILL.md，仓库备注提示词会自动附加 README。标签固定为 3～5 个中文关键词；恢复默认后需点击保存，已保存的备注和标签不会改变。",
     "aiPromptsReset": "恢复默认",
     "aiPromptsSave": "保存",
     "aiPromptsSaved": "提示词已保存",
@@ -796,7 +803,7 @@
     },
     "backupTitle": "备份恢复",
     "backupDesc": "导出或导入技能仓库、技能合集、自定义平台和普通应用配置，不包含 API Key、Token 或密码类设置。共享中心不会被备份或恢复。",
-    "backupLocalTitle": "本地备份文件",
+    "backupLocalTitle": "本地备份",
     "backupLocalDesc": "导出完整备份文件，或从本地备份文件恢复。",
     "exportBackup": "导出备份",
     "importBackup": "导入备份",
@@ -1151,6 +1158,12 @@
     "githubPatSettingsHint": "请前往设置并保存 GitHub Personal Access Token，让该导入流程改用经过认证的直连 GitHub 请求。"
   },
   "workflow": {
+    "generateRepositoryNote": "基于 README 生成仓库备注",
+    "repositoryReadmeRequired": "没有可用的 README 文档，请先导入或更新仓库文档。",
+    "githubDropHint": "松开以导入 GitHub 仓库",
+    "githubDropQueued": "已将 {{count}} 个 GitHub 链接加入导入任务。",
+    "githubDropUnsupported": "请拖入有效的 GitHub 仓库网址。",
+
     "checkFailed": "检查失败",
     "clearCheckResults": "清空检查结果",
     "clearCheckResultsHint": "清除检查报告和检查记录，不删除技能文件，也不停止导入或更新任务。",
@@ -1231,6 +1244,11 @@
       "skillDetails": "技能明细",
       "searchSkills": "搜索技能…",
       "searchUpdates": "搜索技能或仓库…",
+      "currentRepository": "当前仓库：{{repository}}",
+      "currentSkill": "当前技能：{{name}}",
+      "currentFile": "当前文件：{{path}}",
+      "fileProgress": "文件准备 {{completed}} / {{total}}",
+      "importStage": {"checking": "正在检查仓库并读取技能清单…", "preparing": "正在获取仓库快照并准备导入…", "writing": "正在准备技能文件…", "finalizing": "正在提交技能与保存记录…"},
       "importPreparing": "正在检查仓库；技能明细将在准备完成后显示。",
       "importSummary": "技能 {{total}} · 已导入 {{imported}} · 已跳过 {{skipped}}",
       "importCommitHint": "正在准备并导入所选技能，提交完成后更新导入结果。",
@@ -1277,7 +1295,7 @@
     "confirmScopedCheck": "将重新检查本次结果范围内的来源仓库，是否开始？",
     "viewLastCheck": "上次结果",
     "startCheck": "检查更新",
-    "refreshStars": "更新星标数",
+    "refreshRepository": "更新仓库",
     "checkTimeUnknown": "未记录检查时间",
     "fullCheckTime": "全库检查完成时间",
     "scopedCheckTime": "本次范围检查完成时间",

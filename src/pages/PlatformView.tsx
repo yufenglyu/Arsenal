@@ -423,7 +423,7 @@ export function PlatformView() {
       <SkillBrowserWorkspace onRefresh={() => Promise.all([getSkillsByAgent(agent.id), refreshCounts()])} toolbar={viewControl => <SkillBrowserHeader viewControl={viewControl} title={<div>
         <div className="flex items-center gap-2.5">
           <Button variant="ghost" size="icon" title={t("collection.refresh")} aria-label={t("collection.refresh")} disabled={isLoading} onClick={() => void Promise.all([getSkillsByAgent(agent.id), refreshCounts()])}><RotateCw className={cn("size-4", isLoading && "animate-spin")} /></Button>
-          <h1 className="text-xl font-semibold">{agent.display_name}</h1>
+          <h1 className="text-sm font-semibold">{agent.display_name}</h1>
         </div>
         <OpenableDirectoryPath iconOnly path={agent.global_skills_dir} />
         </div>} search={<div className="flex items-center gap-2"><SearchInput
@@ -565,7 +565,7 @@ export function PlatformView() {
               disabled={isFolderUninstalling || folderUninstallableSkills.length === 0}
               onClick={() => void handleConfirmUninstallFolder()}
             >
-              <Trash2 className="size-3.5" />
+              <Trash2 className="size-4" />
               {t("platform.uninstallFolderConfirm")}
             </Button>
           </DialogFooter>

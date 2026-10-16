@@ -22,15 +22,15 @@ it("opens saved results without scanning or checking",()=>{
   expect(check).not.toHaveBeenCalled();
 });
 it("keeps four icon actions in order and refreshes stars independently",()=>{
-  const refresh=vi.spyOn(store.getState(),"refreshStars").mockResolvedValue();
+  const refresh=vi.spyOn(store.getState(),"refreshRepositories").mockResolvedValue();
   const check=vi.spyOn(store.getState(),"checkForUpdates").mockResolvedValue();
   const {container}=render(<RepositoryCheckConfirm open onOpenChange={vi.fn()}/>);
   const footer=document.querySelector('[data-slot="dialog-footer"]')!;
-  expect(Array.from(footer.querySelectorAll('button')).map(button=>button.textContent)).toEqual(["上次结果","检查更新","更新星标数","取消"]);
+  expect(Array.from(footer.querySelectorAll('button')).map(button=>button.textContent)).toEqual(["上次结果","检查更新","更新仓库","取消"]);
   expect(footer.querySelectorAll('button svg')).toHaveLength(4);
   expect(screen.getByRole("button",{name:"上次结果"})).toBeDisabled();
   expect(screen.getByRole("heading",{name:"更新技能"}).querySelector('svg')).not.toBeNull();
-  fireEvent.click(screen.getByRole("button",{name:"更新星标数"}));
+  fireEvent.click(screen.getByRole("button",{name:"更新仓库"}));
   expect(refresh).toHaveBeenCalledExactlyOnceWith(undefined);
   expect(check).not.toHaveBeenCalled();
   expect(container).toBeInTheDocument();

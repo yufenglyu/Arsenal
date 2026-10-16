@@ -296,7 +296,7 @@ export function CollectionView() {
   if (isLoadingDetail) {
     return (
       <div className="flex items-center justify-center h-full gap-3 text-muted-foreground">
-        <Loader2 className="size-5 animate-spin" />
+        <Loader2 className="size-4 animate-spin" />
         <span className="text-sm">{t("collection.loading")}</span>
       </div>
     );
@@ -329,7 +329,7 @@ export function CollectionView() {
       <div className="border-b border-border px-6 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl font-semibold truncate">
+            <h1 className="text-sm font-semibold truncate">
               {currentDetail.name}
               <span className="font-normal text-muted-foreground">
                 {" "}· {currentDetail.skills.length}
@@ -348,7 +348,7 @@ export function CollectionView() {
               size="sm"
               onClick={() => setIsNewEditorOpen(true)}
             >
-              <Plus className="size-3.5" />
+              <Plus className="size-4" />
               <span>{t("sidebar.newCollectionLabel")}</span>
             </Button>
             <Button
@@ -357,7 +357,7 @@ export function CollectionView() {
               onClick={() => setIsEditorOpen(true)}
               aria-label={t("collection.editLabel")}
             >
-              <Pencil className="size-3.5" />
+              <Pencil className="size-4" />
               <span>{t("collection.edit")}</span>
             </Button>
             <Button
@@ -369,9 +369,9 @@ export function CollectionView() {
               className="text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
             >
               {isDeleting ? (
-                <Loader2 className="size-3.5 animate-spin" />
+                <Loader2 className="size-4 animate-spin" />
               ) : (
-                <Trash2 className="size-3.5" />
+                <Trash2 className="size-4" />
               )}
               <span>{t("collection.delete")}</span>
             </Button>
@@ -382,7 +382,7 @@ export function CollectionView() {
               disabled={currentDetail.skills.length === 0}
               aria-label={t("collection.batchInstallLabel")}
             >
-              <PackagePlus className="size-3.5" />
+              <PackagePlus className="size-4" />
               <span>{t("collection.batchInstall")}</span>
             </Button>
             <Button
@@ -391,7 +391,7 @@ export function CollectionView() {
               onClick={() => setIsPickerOpen(true)}
               aria-label={t("collection.addSkillLabel")}
             >
-              <Plus className="size-3.5" />
+              <Plus className="size-4" />
               <span>{t("collection.addSkill")}</span>
             </Button>
           </div>

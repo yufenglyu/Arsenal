@@ -3,6 +3,19 @@ import {isTaskActive} from "@/stores/taskQueueStore";
 
 export type TaskTab = "import" | "update";
 export type TaskFilter = "all" | "active" | "attention" | "failed" | "finished";
+// Extract only the public repository identity, never URL credentials/query/ref.
+export function importRepository(tasks: Pick<BackgroundTask, "steps">[]): string | null {
+  for (const task of tasks) for (const step of task.steps) {
+    if (!["prepare_github_resource_import", "import_github_repo_skills"].includes(step.command) || typeof step.args.repoUrl !== "string") continue;
+    let path = step.args.repoUrl.trim();
+    if (/^https?:\/\//i.test(path)) {
+      try {const url = new URL(path); if(url.hostname.toLowerCase() !== "github.com") continue; path = url.pathname.replace(/^\//, "");} catch {continue;}
+    }
+    const match = /^([\w-]+)\/([\w.-]+)(?:\/|$)/.exec(path);
+    if (match) return `${match[1]}/${match[2].replace(/\.git$/, "")}`;
+  }
+  return null;
+}
 export function taskTab(task: BackgroundTask): TaskTab {
   return task.kind === "import" ? "import" : "update";
 }
@@ -49,7 +62,8 @@ export function importDetailRows(tasks: BackgroundTask[]): ImportDetailRow[] {
     if (imported.length || skipped.length) return [...imported, ...skipped];
     if (step.command === "import_github_repo_skills") {
       return records(step.args.selections).flatMap((selection, i) => typeof selection.sourcePath === "string" ? [{
-        key:`${key}:${i}`,name:selection.sourcePath,status:selection.resolution === "skip" ? "skipped" : step.status ?? task.status,error:step.error,
+        key:`${key}:${i}`,name:selection.sourcePath,status:selection.resolution === "skip" ? "skipped" : step.status === "running"
+          ? task.importProgress?.currentSkill === selection.sourcePath ? "running" : "queued" : step.status ?? task.status,error:step.error,
       }] : []);
     }
     return [{key,name:step.label,status:step.status ?? task.status,error:step.error}];

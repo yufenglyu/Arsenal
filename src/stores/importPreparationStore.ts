@@ -8,6 +8,7 @@ import {
 } from "./taskQueueStore";
 import type { GitHubRepoPreview, GitHubSkillImportSelection } from "@/types";
 import i18n from "@/i18n";
+import {importRepository} from "@/lib/taskPresentation";
 import { toast } from "sonner";
 
 import { invoke } from "@/lib/tauri";
@@ -68,7 +69,7 @@ export function enqueueGitHubImport(
 // Reuse the preview already requested by the dialog. A retry after restart previews again.
 export function continueGitHubImportInBackground(
   repoUrl: string,
-  preview: Promise<GitHubRepoPreview>,
+  preview?: Promise<GitHubRepoPreview>,
   operationId?: string,
 ) {
   const key = `prepare-import:${repoUrl.trim().toLowerCase()}`;
@@ -76,19 +77,25 @@ export function continueGitHubImportInBackground(
     ["queued", "running", "awaiting_input"].includes(task.status) && !task.cancelRequested);
   if (existing) return existing.id;
   const requestId = crypto.randomUUID();
-  pendingPreviews.set(requestId, preview);
+  const label = importRepository([{steps:[{command:PREPARE_GITHUB_IMPORT,args:{repoUrl},label:""}]}]) ?? i18n.t("workflow.githubImportTask");
+  if (preview) pendingPreviews.set(requestId, preview);
   return useTaskQueueStore.getState().enqueue({
     key,
     kind: "import",
-    label: i18n.t("workflow.githubImportTask"),
+    label,
     batchId: requestId,
-    batchLabel: i18n.t("workflow.githubImportTask"),
+    batchLabel: label,
     steps: [{
       command: PREPARE_GITHUB_IMPORT,
       label: i18n.t("workflow.prepareImport"),
       args: { repoUrl, requestId, ...(operationId ? {operationId} : {}) },
     }],
   });
+}
+
+// Queue preparation first so duplicate drops do not start duplicate downloads.
+export function enqueueGitHubUrlImport(repoUrl: string) {
+  return continueGitHubImportInBackground(repoUrl, undefined, crypto.randomUUID());
 }
 
 registerTaskExecutor(PREPARE_GITHUB_IMPORT, async (args) => {
