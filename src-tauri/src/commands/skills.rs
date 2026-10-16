@@ -3287,7 +3287,7 @@ pub(crate) fn read_repository_readme_impl(directory: &Path) -> Result<Option<Str
         .map_err(|e| format!("Failed to read repository README: {e}"))).transpose()
 }
 
-async fn repository_document_directory(pool: &DbPool, directory: String, skill_id: Option<String>) -> Result<PathBuf, String> {
+pub(crate) async fn repository_document_directory(pool: &DbPool, directory: String, skill_id: Option<String>) -> Result<PathBuf, String> {
     // Shared/platform views install skill links, so read their repository document
     // from the main resource library instead of requiring a second installed copy.
     if let Some(id) = skill_id {

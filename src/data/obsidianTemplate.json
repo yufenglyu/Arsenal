@@ -1,0 +1,3 @@
+{
+  "template": "---\nskillshub_schema: 2\nskillshub_note_id: {{noteId}}\nskillshub_note_uri: {{obsidianUri}}\nskillshub_repository_id: {{repositoryUid}}\nskillshub_uri: {{skillshubUri}}\nskillshub_repository: {{fullName}}\nskillshub_url: {{url}}\nskillshub_description: {{description}}\nskillshub_stars: {{stars}}\nskillshub_tags: {{tags}}\nskillshub_categories: {{categories}}\n---\n"
+}

@@ -1,3 +1,4 @@
+import { NotebookSettings } from "@/components/notebook/NotebookSettings";
 import { ActionIcon } from "@/components/ui/action-icon";
 import { PlatformIcon } from "@/components/platform/PlatformIcon";
 import { useAiConnectionStore, type AiConnections } from "@/stores/aiConnectionStore";
@@ -1162,6 +1163,7 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
       {/* Content */}
       <div className="flex-1 overflow-auto p-4 space-y-4">
 
+        <NotebookSettings />
         {/* Section 1: Path settings */}
         <Card>
           <details className="group/settings-section">

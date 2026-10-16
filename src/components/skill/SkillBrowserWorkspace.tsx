@@ -1,3 +1,6 @@
+import { useNotebookStore } from "@/stores/notebookStore";
+import { RepositoryNotebook } from "@/components/notebook/RepositoryNotebook";
+import { BookOpen } from "lucide-react";
 import { RepositoryDocument } from "./RepositoryDocument";
 import { useRepositoryDocumentStore } from "@/stores/repositoryDocumentStore";
 import { ActionIcon } from "@/components/ui/action-icon";
@@ -16,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { useSkillTableColumns } from "@/hooks/useSkillTableColumns";
 import { cn } from "@/lib/utils";
 
-type Tab = "overview" | "document";
+type Tab = "overview" | "document" | "notebook";
 type Props = Omit<SkillBrowserTableProps, "kind" | "visibleColumns"> & { storageKey: string; searchActive?: boolean; agentId?: string; loading?: boolean; toolbar?: ReactNode | ((viewControl: ReactNode) => ReactNode); onRefresh?: () => void | Promise<unknown>; collectionsMode?: boolean; allowFlatView?: boolean };
 function readPreference<T>(key: string, fallback: T): T {
   try { return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback; } catch { return fallback; }
@@ -34,6 +37,8 @@ function writePreference(key: string, value: unknown) { try { localStorage.setIt
 export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], searchActive = false, agentId, loading = false, toolbar, collectionsMode = false, allowFlatView = true, onRefresh, ...tableProps }: Props) {
   const { t } = useTranslation();
   const { pathname } = useLocation();
+  const notebooks = useNotebookStore(state => state.rows);
+  useEffect(() => { void useNotebookStore.getState().load(); }, []);
   const key = `skillshub.browser.${storageKey}.${agentId ?? ""}`;
   const [flatPreference, setFlatPreference] = useState(() => readPreference(`${key}.flat`, false));
   const flat = allowFlatView && flatPreference;
@@ -53,8 +58,13 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
   const [selected, setSelected] = useState<{ kind: "skill" | "folder"; key: string } | null>(null);
   const [tab, setTab] = useState<Tab>(() => {
     const saved = readPreference<string>("skillshub.browser.tab", "overview");
-    return ["overview", "document"].includes(saved) ? saved as Tab : "overview";
+    return ["overview", "document", "notebook"].includes(saved) ? saved as Tab : "overview";
   });
+  useEffect(() => {
+    const open = () => setTab("notebook");
+    window.addEventListener("skillshub-open-notebook", open);
+    return () => window.removeEventListener("skillshub-open-notebook", open);
+  }, []);
   const [width, setWidth] = useState(readWidth);
   const [collapsed, setCollapsed] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -124,8 +134,9 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
     () => { setExpanded(new Set()); writePreference(`${key}.expanded`, []); },
   );
   const selectedSkill = selected?.kind === "skill" ? skills.find(s => id(s) === selected.key) : undefined;
-  const activeTab = collectionsMode && !selectedSkill && tab === "document" ? "overview" : tab;
   const selectedFolder = selected?.kind === "folder" ? groups.find(g => g.key === selected.key) : undefined;
+  const canUseNotebook = (folder?: FolderTableItem) => !collectionsMode && !!folder && Boolean(folder.path || folder.sourceRepo || folder.children?.some(child => child.sourceRepo));
+  const activeTab = (tab === "notebook" && !canUseNotebook(selectedFolder)) || (collectionsMode && !selectedSkill && tab === "document") ? "overview" : tab;
   const selectionTags = useMemo(() => {
     const keys = new Set(selectedRowKeys);
     return [
@@ -147,6 +158,8 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
   const chooseSkill = (skill: SkillTableItem) => { setSelectedRowKeys([`skill:${id(skill)}`]); setSelected({kind:"skill",key:id(skill)}); setCollapsed(false); };
   const toggle = (folderKey: string) => setExpanded(previous => { const next = new Set(previous); if(next.has(folderKey)) next.delete(folderKey); else next.add(folderKey); writePreference(`${key}.expanded`, [...next]); return next; });
   const treeRows = groups.map(folder => ({ ...folder,
+    hasNotebook: canUseNotebook(folder) && notebooks.some(note => (note.notebook.trim() || note.obsidian) && folder.children?.some(child => note.skillIds.includes(child.detailRequest?.skillId ?? child.rowKey ?? ""))),
+    onNotebook: !canUseNotebook(folder) ? undefined : () => { setSelectedRowKeys([`folder:${folder.key}`]); setSelected({kind:"folder",key:folder.key}); setCollapsed(false); setTab("notebook"); },
     highlighted: selectedFolder?.key === folder.key,
     scrollToRow: folder.highlighted,
     expanded: folder.expandable !== false && (searchActive || expanded.has(folder.key) || Boolean(folder.children?.some(s => s.highlighted))),
@@ -192,12 +205,13 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
         onKeyDown={e=>{if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();const next=Math.min(70,Math.max(30,width+(e.key==="ArrowLeft"?2:-2)));setWidth(next);writePreference("skillshub.browser.width",next);}}}/>
       <aside style={{flexBasis:`${width}%`}} className="flex min-w-0 shrink-0 flex-col overflow-hidden" aria-label={t("browser.preview")}>
         <div role="tablist" className="flex h-11 shrink-0 items-stretch gap-4 border-b border-border px-4">
-          {((selectedSkill || !collectionsMode ? ["overview","document"] : ["overview"]) as Tab[]).map(value=><button role="tab" aria-selected={activeTab===value} key={value} onClick={()=>{setTab(value);writePreference("skillshub.browser.tab",value);}} className={cn("inline-flex items-center gap-2 border-b-2 border-transparent px-1 text-sm font-semibold text-muted-foreground",activeTab===value&&"border-primary text-primary")}><ActionIcon action={value === "document" ? "document" : "info"}/>{t(`browser.${value}`)}</button>)}
+          {((selectedSkill ? ["overview","document"] : !collectionsMode && selectedFolder ? ["overview","document", ...(canUseNotebook(selectedFolder) ? ["notebook"] : [])] : ["overview"]) as Tab[]).map(value=><button role="tab" aria-selected={activeTab===value} key={value} onClick={()=>{setTab(value);writePreference("skillshub.browser.tab",value);}} className={cn("inline-flex items-center gap-2 border-b-2 border-transparent px-1 text-sm font-semibold text-muted-foreground",activeTab===value&&"border-primary text-primary")}>{value === "notebook" ? <BookOpen className="size-[1em]"/> : <ActionIcon action={value === "document" ? "document" : "info"}/>}{t(`browser.${value}`)}</button>)}
           <Button className="my-auto ml-auto text-muted-foreground hover:text-foreground" size="icon-sm" variant="ghost" aria-label={t("browser.hidePreview")} onClick={()=>setCollapsed(true)}><PanelRight className="size-4 shrink-0"/></Button>
         </div>
         {selectedSkill && request ? <>
           <div className="min-h-0 flex-1"><SkillDetailView key={JSON.stringify(request)} {...request} variant="inspector" inspectorTab={activeTab==="document"?"document":"overview"} installationSummary={installationSummary}/></div>
-        </> : selectedFolder && activeTab === "document" ? <RepositoryDocument key={selectedFolder.key} directory={selectedFolder.path} skillId={selectedFolder.children?.[0]?.detailRequest?.skillId ?? selectedFolder.children?.[0]?.rowKey} revision={selectedFolder.updatedAt}
+        </> : selectedFolder && activeTab === "notebook" ? <div className="min-h-0 flex-1"><RepositoryNotebook key={selectedFolder.key} directory={selectedFolder.path} skillId={selectedFolder.children?.[0]?.detailRequest?.skillId ?? selectedFolder.children?.[0]?.rowKey ?? ""}/></div>
+        : selectedFolder && activeTab === "document" ? <RepositoryDocument key={selectedFolder.key} directory={selectedFolder.path} skillId={selectedFolder.children?.[0]?.detailRequest?.skillId ?? selectedFolder.children?.[0]?.rowKey} revision={selectedFolder.updatedAt}
           sourceUrl={selectedFolder.sourceRepo ? `https://github.com/${selectedFolder.sourceRepo}/blob/HEAD/README.md` : undefined}/>
         : selectedFolder ? <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4">
           <div className="flex items-center gap-2"><FolderOpen className="size-4 shrink-0 text-muted-foreground" aria-hidden="true"/><h2 className="overview-item-title min-w-0 break-all font-semibold">{selectedFolder.name}</h2></div>

@@ -91,6 +91,9 @@
     ]
   },
   "plugins": {
+    "deep-link": {
+      "desktop": { "schemes": ["skillshub"] }
+    },
     "sql": {
       "preload": []
     }

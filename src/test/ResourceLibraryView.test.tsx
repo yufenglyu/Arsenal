@@ -144,13 +144,13 @@ vi.mock("@/stores/skillStore", () => ({
 }));
 
 vi.mock("@/stores/appStatusStore", () => ({
-  useAppStatusStore: (selector: (state: Record<string, unknown>) => unknown) =>
+  useAppStatusStore: Object.assign((selector: (state: Record<string, unknown>) => unknown) =>
     selector({
       startTask: mockStartTask,
       updateTask: mockUpdateTask,
       completeTask: mockCompleteTask,
       failTask: mockFailTask,
-    }),
+    }), {getState: () => ({startTask: mockStartTask, updateTask: mockUpdateTask, completeTask: mockCompleteTask, failTask: mockFailTask})}),
 }));
 
 vi.mock("@/lib/tauri", () => ({

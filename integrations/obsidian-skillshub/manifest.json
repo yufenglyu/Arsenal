@@ -1,0 +1,9 @@
+{
+  "id": "skillshub-link",
+  "name": "SkillsHub Link",
+  "version": "0.2.0",
+  "minAppVersion": "1.8.7",
+  "description": "Open SkillsHub notes by stable UUID after renaming or moving files.",
+  "author": "SkillsHub",
+  "isDesktopOnly": true
+}

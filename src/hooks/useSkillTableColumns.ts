@@ -14,6 +14,7 @@ export const DEFAULT_FOLDER_COLUMNS = [
   "index",
   "name",
   "skillCount",
+  "notebook",
   "createdAt",
   "updatedAt",
   "installSummary",
@@ -30,7 +31,7 @@ function storageKey(kind: SkillTableKind) {
 
 function defaultsFor(kind: SkillTableKind) {
   if (kind === "flat") return ["index", "name", "repository", "createdAt", "updatedAt"];
-  return kind === "tree" ? ["index", "name", "skillCount", "githubStars", "createdAt", "updatedAt"] : kind === "skill" ? DEFAULT_SKILL_COLUMNS : DEFAULT_FOLDER_COLUMNS;
+  return kind === "tree" ? ["index", "name", "skillCount", "notebook", "githubStars", "createdAt", "updatedAt"] : kind === "skill" ? DEFAULT_SKILL_COLUMNS : DEFAULT_FOLDER_COLUMNS;
 }
 
 function readColumns(kind: SkillTableKind) {
@@ -41,6 +42,14 @@ function readColumns(kind: SkillTableKind) {
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return new Set<string>(defaultsFor(kind));
+    if (kind === "tree" || kind === "folder") {
+      const migration = `${storageKey(kind)}.notebook`;
+      if (!window.localStorage.getItem(migration)) {
+        if (!parsed.includes("notebook")) parsed.push("notebook");
+        window.localStorage.setItem(storageKey(kind), JSON.stringify(parsed));
+        window.localStorage.setItem(migration, "1");
+      }
+    }
     return new Set<string>([...parsed.map(String).filter((column: string) => !REMOVED_COLUMNS.has(column)), ...FIXED_COLUMNS]);
   } catch {
     return new Set<string>(defaultsFor(kind));
@@ -60,6 +69,7 @@ export function useSkillTableColumns(kind: SkillTableKind) {
     (next: Set<string>) => {
       try {
         window.localStorage.setItem(storageKey(kind), JSON.stringify([...next]));
+        if (kind === "tree" || kind === "folder") window.localStorage.setItem(`${storageKey(kind)}.notebook`, "1");
       } catch {
         // Keep in-memory columns if localStorage is unavailable.
       }

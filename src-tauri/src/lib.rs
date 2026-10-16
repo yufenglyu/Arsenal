@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod config_store;
 pub mod db;
+mod protocol;
 pub mod path_utils;
 pub mod platforms;
 pub mod platform_icons;
@@ -9,6 +10,7 @@ use db::DbPool;
 use std::fs;
 use std::path::Path;
 use tauri::Manager;
+use tauri_plugin_deep_link::DeepLinkExt;
 
 /// Application state shared across Tauri commands.
 pub struct AppState {
@@ -47,6 +49,13 @@ fn migrate_legacy_app_data_if_needed(new_dir: &Path, legacy_dir: &Path) -> Resul
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(commands::notebook::NotebookRuntime::default())
+        .manage(protocol::ProtocolRuntime::default())
+        .plugin(tauri_plugin_single_instance::init(|app, args, _| {
+            commands::notebook::queue_navigation(app, args);
+        }))
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
@@ -76,9 +85,41 @@ pub fn run() {
             });
 
             app.manage(AppState { db: pool });
+            #[cfg(all(windows, not(debug_assertions)))]
+            if app.config().identifier == "com.iamzhihuix.skillsmanage" {
+                if let Err(error) = protocol::register(app.handle()) {
+                    protocol::remember_startup_error(app.handle(), error);
+                }
+            }
+            if let Some(urls) = app.deep_link().get_current()? {
+                commands::notebook::queue_navigation(app.handle(), urls.into_iter().map(|u| u.to_string()));
+            }
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                commands::notebook::queue_navigation(&handle, event.urls().into_iter().map(|u| u.to_string()));
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::notebook_repository::ensure_repository_notebook,
+            commands::notebook_repository::save_internal_notebook,
+            commands::notebook_repository::get_notebook_settings,
+            commands::notebook_repository::save_notebook_settings,
+            commands::notebook_repository::list_repository_notebooks,
+            commands::notebook::read_notebook,
+            commands::notebook::inspect_notebook,
+            commands::notebook::preview_notebook_properties,
+            commands::notebook::bind_notebook,
+            commands::notebook::save_notebook,
+            commands::notebook::rename_notebook,
+            commands::notebook::unlink_notebook,
+            commands::notebook::clear_legacy_notebook,
+            commands::notebook::open_obsidian,
+            commands::notebook::notebook_asset,
+            commands::notebook::watch_notebook,
+            commands::notebook::take_notebook_navigation,
+            protocol::register_skillshub_protocol,
+            protocol::take_protocol_registration_error,
             commands::remote_sources::apply_repository_update_item,
             commands::github_import::refresh_repository_stars,
             commands::github_import::refresh_repository,

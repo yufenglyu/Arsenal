@@ -179,6 +179,8 @@ struct AppBackup {
     repository_stats: Vec<RepositoryStatsBackup>,
     #[serde(default)]
     folder_notes: Vec<super::metadata::FolderNote>,
+    #[serde(default)]
+    repository_notebooks: Vec<super::notebook_repository::Repository>,
     schema_version: u32,
     exported_at: String,
     #[serde(default)]
@@ -1020,6 +1022,7 @@ async fn export_app_backup_data_impl(
         .into_iter().filter(|stats| repositories.contains(&stats.repository.to_ascii_lowercase())).collect();
     let mut backup = AppBackup {
         repository_stats,
+        repository_notebooks: if options.include_resource_library { super::notebook_repository::list(pool).await? } else { Vec::new() },
         folder_notes: if options.include_resource_library { super::metadata::folder_notes(pool).await? } else { Vec::new() },
         schema_version: BACKUP_SCHEMA_VERSION,
         exported_at: Utc::now().to_rfc3339(),
@@ -1187,6 +1190,8 @@ async fn import_app_backup_data_impl(pool: &DbPool, backup: AppBackup) -> Result
         ));
     }
 
+    super::notebook_repository::validate(&backup.repository_notebooks)?;
+
     // Resolve all filesystem roots from the current database before reading any
     // backup-controlled settings or legacy path fields.
     // Restore never writes skill bundles into Central Skills. Keep reading the
@@ -1202,6 +1207,7 @@ async fn import_app_backup_data_impl(pool: &DbPool, backup: AppBackup) -> Result
             return Err("Backup contains invalid repository statistics".into());
         }
     }
+    super::notebook_repository::restore(pool, &backup.repository_notebooks).await?;
     for note in &backup.folder_notes { super::metadata::save_note(pool, note).await?; }
 
     for setting in backup.settings {
@@ -2187,6 +2193,31 @@ mod tests {
         import_app_backup_data_impl(&restored,backup).await.unwrap();
         let notes=super::super::metadata::folder_notes(&restored).await.unwrap();
         assert_eq!(notes[0].notes,"memo");assert_eq!(notes[0].skill_ids,vec!["member"]);
+    }
+
+    #[tokio::test]
+    async fn repository_backup_preserves_notebook_identities_without_accessing_external_files() {
+        use super::super::notebook_repository as notebooks;
+        let (pool, _dir) = setup_test_db().await;
+        let mut row = notebooks::Repository::new(42, "fixture/project".into());
+        row.notebook = "historical internal body".into();
+        let note_id = uuid::Uuid::new_v4().to_string();
+        row.obsidian = Some(super::super::notebook::Binding {
+            binding_version: 2, note_id: Some(note_id.clone()), vault_key: "default".into(),
+            relative_path: "Missing Vault/renamed.md".into(), obsidian_uri: format!("obsidian://skillshub-note?id={note_id}"),
+        });
+        notebooks::put(&pool, &row).await.unwrap();
+        let backup = export_app_backup_data_impl(&pool, repository_backup_options()).await.unwrap();
+        assert_eq!(backup.repository_notebooks.len(), 1);
+        let (restored, _other) = setup_test_db().await;
+        import_app_backup_data_impl(&restored, backup).await.unwrap();
+        let result = notebooks::list(&restored).await.unwrap().remove(0);
+        assert_eq!(result.repository_uid, row.repository_uid);
+        assert_eq!(result.notebook, row.notebook);
+        assert_eq!(result.obsidian, row.obsidian);
+        // Restoring the same backup never duplicates the stable record.
+        notebooks::restore(&restored, &[result]).await.unwrap();
+        assert_eq!(notebooks::list(&restored).await.unwrap().len(), 1);
     }
 
     async fn configure_agent_root(pool: &DbPool, agent_id: &str, root: &Path) {

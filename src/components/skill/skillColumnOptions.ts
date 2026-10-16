@@ -18,6 +18,7 @@ export const SKILL_COLUMN_OPTIONS: SkillColumnOption[] = [
 export const FOLDER_COLUMN_OPTIONS: SkillColumnOption[] = [
   { key: "index", labelKey: "skillBrowser.columns.index", fixed: true },
   { key: "name", labelKey: "skillBrowser.columns.name", fixed: true },
+  { key: "notebook", labelKey: "skillBrowser.columns.notebook" },
   { key: "skillCount", labelKey: "skillBrowser.columns.skillCount" },
   { key: "githubStars", labelKey: "skillBrowser.columns.githubStars" },
   { key: "installSummary", labelKey: "skillBrowser.columns.installSummary" },

@@ -1,3 +1,4 @@
+vi.mock("@/components/notebook/RepositoryNotebook", () => ({ RepositoryNotebook: ({skillId}: {skillId: string}) => <div data-testid="repository-notebook">{skillId}</div> }));
 import { useRepositoryDocumentStore } from "@/stores/repositoryDocumentStore";
 import { TagFilters } from "@/components/skill/TagFilters";
 import { type ReactElement, type ReactNode } from "react";
@@ -82,7 +83,7 @@ describe("tree browser workspace",()=>{
   fireEvent.click(screen.getByRole("button",{name:"展开 Example/Tools"}));
   fireEvent.click(screen.getAllByRole("button",{name:"查看 First skill 的详情"})[0]);
   expect(screen.getByTestId("inspector")).toHaveTextContent("one|||overview");
-  expect(screen.getAllByRole("columnheader").map(h=>h.getAttribute("aria-label"))).toEqual(["序号","名称","技能数","星标数","创建时间","更新时间"]);
+  expect(screen.getAllByRole("columnheader").map(h=>h.getAttribute("aria-label"))).toEqual(["序号","名称","技能数","笔记","星标数","创建时间","更新时间"]);
  });
  it("selects skill rows from non-interactive cells",()=>{
   render(<SkillBrowserWorkspace {...props}/>);fireEvent.keyDown(screen.getByRole("region",{name:"技能列表"}),{key:"+"});
@@ -423,4 +424,27 @@ it("restores an obsolete install tab preference to overview and shows repository
  expect(screen.getByRole("region",{name:"安装统计"})).toBeVisible();
  fireEvent.click(screen.getByRole("tab",{name:"文档"}));
  expect(screen.queryByRole("region",{name:"安装统计"})).not.toBeInTheDocument();
+});
+
+it("exposes the notebook tab only on repository rows", () => {
+  render(<SkillBrowserWorkspace {...props}/>);
+  fireEvent.click(screen.getByRole("button", {name: "Example/Tools"}));
+  fireEvent.click(screen.getByRole("tab", {name: "笔记"}));
+  expect(screen.getByTestId("repository-notebook")).toHaveTextContent("one");
+  fireEvent.keyDown(screen.getByRole("region", {name: "技能列表"}), {key: "+"});
+  fireEvent.click(screen.getByRole("button", {name: "查看 First skill 的详情"}));
+  expect(screen.queryByRole("tab", {name: "笔记"})).not.toBeInTheDocument();
+  expect(screen.getByTestId("inspector")).toHaveTextContent("overview");
+});
+it("keeps notebooks out of collection rows", () => {
+  render(<SkillBrowserWorkspace {...props} collectionsMode/>);
+  fireEvent.click(screen.getByRole("button", {name: "Example/Tools"}));
+  expect(screen.queryByRole("tab", {name: "笔记"})).not.toBeInTheDocument();
+  expect(screen.queryByRole("columnheader", {name: "笔记"})).not.toBeInTheDocument();
+});
+
+it("does not treat the loose local-skills grouping as a repository notebook", () => {
+  render(<SkillBrowserWorkspace storageKey="local" skills={[{rowKey: "local", name: "Loose local skill"}]} />);
+  fireEvent.click(screen.getByRole("button", {name: "本地技能"}));
+  expect(screen.queryByRole("tab", {name: "笔记"})).not.toBeInTheDocument();
 });

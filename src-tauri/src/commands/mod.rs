@@ -12,3 +12,6 @@ pub mod skills;
 pub mod metadata;
 
 pub(crate) mod repository_docs;
+
+pub mod notebook;
+pub mod notebook_repository;

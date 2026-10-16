@@ -1,3 +1,4 @@
+import { NotebookNavigation } from "@/components/notebook/NotebookNavigation";
 import { useRef } from "react";
 import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
@@ -16,7 +17,7 @@ function App() {
   if (!settingsOpen) previousPage.current = location;
   const background = previousPage.current;
   return (
-    <Routes location={settingsOpen ? background : location}>
+    <><NotebookNavigation/><Routes location={settingsOpen ? background : location}>
       <Route path="/" element={<AppShell settingsOpen={settingsOpen} onCloseSettings={() => navigate({pathname:background.pathname, search:background.search, hash:background.hash}, {replace:true, state:background.state})} />}>
         {/* Default redirect to Skill Repository */}
         <Route index element={<Navigate to="/resources" replace />} />
@@ -33,7 +34,7 @@ function App() {
         {/* Settings */}
         <Route path="settings" element={<SettingsView />} />
       </Route>
-    </Routes>
+    </Routes></>
   );
 }
 

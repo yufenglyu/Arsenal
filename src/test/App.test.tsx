@@ -1,3 +1,4 @@
+vi.mock("../components/notebook/NotebookNavigation", () => ({NotebookNavigation: () => null}));
 vi.mock("../stores/settingsStore", () => {
   const state = {scanDirectories: [], loadScanDirectories: vi.fn()};
   return {useSettingsStore: (selector?: (value: typeof state) => unknown) => selector ? selector(state) : state};

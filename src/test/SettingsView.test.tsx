@@ -1,3 +1,4 @@
+vi.mock("../components/notebook/NotebookSettings", () => ({ NotebookSettings: () => null }));
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";

@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { ActionIcon } from "@/components/ui/action-icon";
 import { browserStats } from "@/lib/browserStats";
 import { formatRepositoryName } from "@/lib/repositoryName";
@@ -9,6 +10,7 @@ import { createPortal } from "react-dom";
 import { ActionMenuContext } from "@/components/ui/action-menu-context";
 import { isProjectAgentId } from "@/lib/projectTargets";
 import {
+  BookOpen,
   Check,
   ArrowLeftRight,
   ArrowUpDown,
@@ -74,6 +76,8 @@ import {
 type InstallationSource = "independent" | "shared";
 
 export interface FolderTableItem {
+  onNotebook?: () => void;
+  hasNotebook?: boolean;
   sourceRepo?: string | null;
   batchOperations?: BatchOperations;
   expandable?: boolean;
@@ -187,6 +191,7 @@ const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   notes: 256,
   skillCount: 100,
   githubStars: 110,
+  notebook: 68,
   actions: 180,
 };
 const MIN_COLUMN_WIDTH = 80;
@@ -876,12 +881,12 @@ export function SkillBrowserTable({
   const tableRef = useRef<HTMLTableElement | null>(null);
   const columns = kind === "skill"
     ? ["index", "name", "repository", "createdAt", "updatedAt", "installSummary"]
-    : ["index", "name", "skillCount", ...(showGithubStars ? ["githubStars"] : []), "createdAt", "updatedAt", "installSummary"];
+    : ["index", "name", "skillCount", ...(folders.some(folder => folder.onNotebook) ? ["notebook"] : []), ...(showGithubStars ? ["githubStars"] : []), "createdAt", "updatedAt", "installSummary"];
   const orderedColumns = [...columnOrder.filter(column => columns.includes(column)), ...columns.filter(column => !columnOrder.includes(column))];
   const activeColumns = orderedColumns.filter(
     column => column === "index" || (!tree && column === "githubStars") || visibleColumns.has(column)
   );
-  const columnOptions = useMemo(() => optionsForSkillTable(kind).filter(option => option.key !== "githubStars" || showGithubStars), [kind, showGithubStars]);
+  const columnOptions = useMemo(() => optionsForSkillTable(kind).filter(option => (option.key !== "githubStars" || showGithubStars) && (option.key !== "notebook" || folders.some(folder => folder.onNotebook))), [kind, showGithubStars, folders]);
   const resolvedColumnWidths = useMemo(
     () =>
       Object.fromEntries(
@@ -1135,7 +1140,7 @@ export function SkillBrowserTable({
                       if (column === "notes") {
                         return <td key={column} className="px-3 py-2 text-muted-foreground"><NotesCell notes={skill.notes} /></td>;
                       }
-                      if (column === "skillCount" || column === "githubStars") return <td key={column} />;
+                      if (column === "skillCount" || column === "githubStars" || column === "notebook") return <td key={column} />;
                       return <td key={column} className="px-3 py-2"><SkillActions skill={skill} /></td>;
                     })}
                   </tr>
@@ -1312,6 +1317,7 @@ export function SkillBrowserTable({
                           </td>
                         );
                       }
+                      if (column === "notebook") return <td key={column} className="px-3 py-2">{folder.hasNotebook && folder.onNotebook && <Button variant="ghost" size="icon" title={t("g.notebook")} aria-label={t("g.notebook")} onClick={e => { e.stopPropagation(); folder.onNotebook?.(); }}><BookOpen/></Button>}</td>;
                       if (column === "source" || column === "notes") return <td key={column} />;
                       if (column === "githubStars") {
                         return <td key={column} className="px-3 py-2 tabular-nums text-muted-foreground">{folder.githubStars == null ? "" : folder.githubStars.toLocaleString()}</td>;

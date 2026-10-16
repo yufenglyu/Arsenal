@@ -1,6 +1,7 @@
 export const SHORTCUT_STORAGE_KEY = "skills-manage.shortcuts.v1";
 
 export type ShortcutActionId =
+  | "saveNotebook"
   | "expandSection"
   | "collapseSection"
   | "focusPageSearch"
@@ -21,6 +22,7 @@ export interface ShortcutDefinition {
 }
 
 export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
+  { id: "saveNotebook", defaultCombo: "mod+s", labelKey: "g.save", descriptionKey: "g.notebook" },
   { id: "focusPageSearch", defaultCombo: "mod+f", labelKey: "settings.shortcuts.focusPageSearch", descriptionKey: "settings.shortcuts.focusPageSearchDesc" },
   { id: "expandSection", defaultCombo: "plus", labelKey: "settings.shortcuts.expandSection", descriptionKey: "settings.shortcuts.expandSectionDesc" },
   { id: "collapseSection", defaultCombo: "-", labelKey: "settings.shortcuts.collapseSection", descriptionKey: "settings.shortcuts.collapseSectionDesc" },
