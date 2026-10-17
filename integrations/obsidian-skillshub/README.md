@@ -4,6 +4,14 @@
 
 按稳定笔记 UUID 打开 Obsidian 笔记，文件改名、移动后保留相同链接。插件不写笔记、不开网络服务、不读取 SkillsHub 数据库。
 
+## 随应用打包
+
+执行 `pnpm tauri build`、三平台 `package:release:*` 或 CI 发布构建时，会自动安装插件锁定依赖、构建插件、运行插件测试，并在应用发布目录生成 `skillshub_<应用版本>_obsidian-plugin.zip`。ZIP 只包含 `skillshub-link/` 下的 `main.js`、`manifest.json` 和本说明。
+
+也可单独执行 `pnpm package:obsidian`；使用 `--output-dir <目录>` 指定输出位置。应用版本用于 ZIP 文件名，插件自身版本仍由其 manifest/package.json 管理。`SkipBuild` 和仅更新版本的模式不会生成插件包；跳过安装或测试的选项同步作用于插件。
+
+解压后将整个 `skillshub-link` 文件夹放入库的 `.obsidian/plugins/`，再手动启用插件。打包不会安装到或读取任何 Obsidian 库。
+
 ## 安装
 
 1. 运行 `pnpm install`、`pnpm build`（在本目录）；发行包已包含编译后的 `main.js`。

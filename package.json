@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "package:obsidian": "node scripts/package-obsidian.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "icon:desktop": "tauri icon src-tauri/icons/icon-source.png",

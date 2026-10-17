@@ -467,6 +467,13 @@ Write-BuildOutputGuide -Root $root -OutDir $outPath
 Ensure-Dependencies -Root $root
 Run-Checks -Root $root
 
+if (-not $SkipBuild) {
+  $pluginArgs = @((Join-Path $root "scripts/package-obsidian.mjs"), "--output-dir", $outPath)
+  if ($SkipInstall) { $pluginArgs += "--skip-install" }
+  if ($SkipTests) { $pluginArgs += "--skip-tests" }
+  Run "node" $pluginArgs
+}
+
 Write-Host "Packaging target: windows" -ForegroundColor Yellow
 Build-App -Root $root
 

@@ -529,6 +529,13 @@ print_build_output_layout "$root" "$out_path"
 
 ensure_dependencies "$root"
 run_checks "$root"
+if [[ "$skip_build" -eq 0 ]]; then
+  plugin_args=("$root/scripts/package-obsidian.mjs" --output-dir "$out_path")
+  if [[ "$skip_install" -eq 1 ]]; then plugin_args+=(--skip-install); fi
+  if [[ "$skip_tests" -eq 1 ]]; then plugin_args+=(--skip-tests); fi
+  run node "${plugin_args[@]}"
+fi
+
 echo "Packaging target: macos"
 build_app "$root"
 
