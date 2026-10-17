@@ -101,3 +101,66 @@ async fn synthetic_json_baseline() {
         println!("STORAGE_BASELINE count={count} seed_batch_ms={seed_ms} lookup_p95_us={} platform_p95_us={} collection_p95_us={} edit_p95_us={} reopen_first_read_us={reopen_us} retained_object_bytes={bytes}", p95(&mut lookup), p95(&mut platform), p95(&mut members), p95(&mut edits));
     }
 }
+
+// Complement the original sparse-note baseline: every skill has metadata and
+// some rows carry large bodies. This exposes whole-table rewrite/COW costs.
+#[tokio::test]
+#[ignore = "synthetic dense metadata benchmark; run without concurrent builds"]
+async fn synthetic_dense_metadata() {
+    for count in [1_000usize, 10_000, 50_000] {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::storage::store::Store::open(directory.path()).unwrap();
+        store.write(|data| {
+            for index in 0..count {
+                let id = format!("fixture-{index}");
+                let notes = if index % 1000 == 0 { "x".repeat(64 * 1024) } else { "x".repeat(128) };
+                data.table_mut("skill_metadata").insert(id.clone(), serde_json::json!({
+                    "skill_id": id, "notes": notes, "tags": "[\"fixture\"]", "updated_at": "2026-01-01"
+                }));
+            }
+            Ok(())
+        }).await.unwrap();
+        let mut edits = Vec::new();
+        for index in 0..20 {
+            let start = Instant::now();
+            db::upsert_skill_metadata(
+                &store,
+                "fixture-1",
+                Some(&format!("Synthetic edit {index}")),
+                &["fixture".into()],
+            )
+            .await
+            .unwrap();
+            edits.push(start.elapsed().as_micros());
+        }
+        drop(store);
+        let mut reopens = Vec::new();
+        for _ in 0..5 {
+            let start = Instant::now();
+            let store = crate::storage::store::Store::open(directory.path()).unwrap();
+            store
+                .read(|data| {
+                    assert_eq!(data.table("skill_metadata").len(), count);
+                    assert_eq!(
+                        data.table("skill_metadata")["fixture-1"]["notes"],
+                        "Synthetic edit 19"
+                    );
+                    assert_eq!(
+                        data.table("skill_metadata")["fixture-0"]["notes"]
+                            .as_str()
+                            .unwrap()
+                            .len(),
+                        64 * 1024
+                    );
+                    Ok(())
+                })
+                .unwrap();
+            reopens.push(start.elapsed().as_micros());
+        }
+        println!(
+            "STORAGE_DENSE count={count} edit_p95_us={} reopen_p95_us={}",
+            p95(&mut edits),
+            p95(&mut reopens)
+        );
+    }
+}
