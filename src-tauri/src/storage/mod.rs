@@ -5,3 +5,6 @@ pub mod store;
 
 #[cfg(test)]
 pub mod fixtures;
+
+#[cfg(test)]
+mod durability_tests;
