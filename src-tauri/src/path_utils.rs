@@ -221,6 +221,18 @@ pub fn copy_app_data_dir(from: &Path, to: &Path) -> Result<(), String> {
     if to.starts_with(from) {
         return Err("Config directory cannot be inside the current config directory".to_string());
     }
+    // Share the app/migrator gate before creating destination store files.
+    std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
+    let access_lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(to.join(".store-access.lock"))
+        .map_err(|e| e.to_string())?;
+    access_lock
+        .try_lock()
+        .map_err(|_| "Destination data directory is already open".to_string())?;
     let store = to.join("store");
     std::fs::create_dir_all(&store).map_err(|e| e.to_string())?;
     let lock = std::fs::OpenOptions::new()
@@ -263,7 +275,9 @@ fn copy_app_data_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     {
         let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
         let name = entry.file_name();
-        if name == "database-path"
+        if name == ".store-access.lock"
+            || name == ".json-migration.lock"
+            || name == "database-path"
             || name == "db.sqlite"
             || name == "db.sqlite-wal"
             || name == "db.sqlite-shm"

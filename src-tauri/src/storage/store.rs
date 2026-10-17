@@ -550,6 +550,8 @@ mod table_failure_tests {
         let output = std::process::Command::new("python").arg(script).arg("--export-fixture").arg(temp.path()).output().unwrap();
         assert!(output.status.success(), "synthetic migration process failed");
         let store = Store::open(temp.path()).unwrap();
+        let probe = std::process::Command::new("python").arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/test_json_migration.py")).arg("--probe-lock").arg(temp.path()).output().unwrap();
+        assert_eq!(probe.status.code(), Some(73), "Python migration must respect the Rust store lock");
         let skill = crate::db::get_skill_by_id(&store, "skill").await.unwrap().unwrap();
         assert!(skill.is_central);
         assert_eq!(crate::db::get_skill_installations(&store,"skill").await.unwrap()[0].created_at,"first");
@@ -560,6 +562,7 @@ mod table_failure_tests {
         assert!(crate::db::get_agent_by_id(&store,"agent").await.unwrap().unwrap().is_enabled);
         assert_eq!(crate::db::metadata::folder_notes(&store).await.unwrap()[0].skill_ids,vec!["skill"]);
         assert_eq!(crate::db::notebooks::list(&store).await.unwrap()[0].notebook,"Text");
+        assert_eq!(crate::db::notebooks::next_id(&store).await.unwrap(),43);
         store.read(|d| {
             assert_eq!(d.table("skill_explanations")[&crate::db::key2("skill","zh")]["explanation"],"cached");
             assert_eq!(d.table("skill_installations")[&crate::db::key2("skill","agent")]["is_managed"],true);

@@ -51,7 +51,11 @@ pub fn installations(pool: &DbPool) -> Result<Vec<SkillInstallationMethodRow>, S
 pub fn stats(pool: &DbPool) -> Result<Vec<RepositoryStatsBackup>, String> {
     pool.read(|data| {
         let mut rows = super::rows::<RepositoryStatsBackup>(data, "github_repository_stats")?;
-        rows.sort_by(|a, b| a.repository.cmp(&b.repository));
+        rows.sort_by(|a, b| {
+            a.repository
+                .to_ascii_lowercase()
+                .cmp(&b.repository.to_ascii_lowercase())
+        });
         Ok(rows)
     })
 }
@@ -59,7 +63,11 @@ pub fn directories(pool: &DbPool) -> Result<Vec<RepositoryDirectoryBackup>, Stri
     pool.read(|data| {
         let mut rows =
             super::rows::<RepositoryDirectoryBackup>(data, "repository_local_directories")?;
-        rows.sort_by(|a, b| a.repository.cmp(&b.repository));
+        rows.sort_by(|a, b| {
+            a.repository
+                .to_ascii_lowercase()
+                .cmp(&b.repository.to_ascii_lowercase())
+        });
         Ok(rows)
     })
 }
@@ -130,8 +138,20 @@ fn timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
         .ok()
         .map(|v| v.with_timezone(&chrono::Utc))
         .or_else(|| {
-            chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
-                .ok()
+            [
+                "%Y-%m-%d %H:%M:%S%.f",
+                "%Y-%m-%dT%H:%M:%S%.f",
+                "%Y-%m-%d %H:%M",
+                "%Y-%m-%dT%H:%M",
+            ]
+            .iter()
+            .find_map(|format| chrono::NaiveDateTime::parse_from_str(value, format).ok())
+            .map(|v| v.and_utc())
+        })
+        .or_else(|| {
+            chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                .ok()?
+                .and_hms_opt(0, 0, 0)
                 .map(|v| v.and_utc())
         })
 }
@@ -150,7 +170,11 @@ pub async fn restore_stats(pool: &DbPool, rows: &[RepositoryStatsBackup]) -> Res
                     .is_some_and(|(new, old)| new >= old),
             };
             if replace {
-                super::put(data, "github_repository_stats", key, row)?;
+                let mut row = row.clone();
+                if let Some(name) = existing.and_then(|r| r["repository"].as_str()) {
+                    row.repository = name.to_owned();
+                }
+                super::put(data, "github_repository_stats", key, &row)?;
             }
         }
         Ok(())
@@ -228,4 +252,55 @@ pub fn collection_details(
             })
             .collect()
     })
+}
+
+#[cfg(test)]
+mod equivalence_tests {
+    use super::*;
+    #[tokio::test]
+    async fn stats_keep_original_spelling_and_ascii_nocase_order() {
+        let pool = DbPool::memory().unwrap();
+        super::super::save_github_stars(&pool, "a/repo", 1)
+            .await
+            .unwrap();
+        super::super::save_github_stars(&pool, "B/repo", 2)
+            .await
+            .unwrap();
+        super::super::save_github_stars(&pool, "A/REPO", 3)
+            .await
+            .unwrap();
+        let result = stats(&pool).unwrap();
+        assert_eq!(result[0].repository, "a/repo");
+        assert_eq!(result[0].stars, 3);
+        assert_eq!(result[1].repository, "B/repo");
+    }
+    #[tokio::test]
+    async fn restore_accepts_sqlite_date_forms_without_overwriting_newer_stats() {
+        let pool = DbPool::memory().unwrap();
+        for (stamp, stars) in [
+            ("2026-01-01", 1),
+            ("2026-01-02 00:00:00.500", 2),
+            ("2026-01-02T00:00:00.499Z", 3),
+            ("invalid", 4),
+        ] {
+            restore_stats(
+                &pool,
+                &[RepositoryStatsBackup {
+                    repository: if stars == 1 {
+                        "Mixed/Repo"
+                    } else {
+                        "mixed/repo"
+                    }
+                    .into(),
+                    stars,
+                    checked_at: stamp.into(),
+                }],
+            )
+            .await
+            .unwrap();
+        }
+        let result = stats(&pool).unwrap();
+        assert_eq!(result[0].stars, 2);
+        assert_eq!(result[0].repository, "Mixed/Repo");
+    }
 }

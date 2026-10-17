@@ -149,6 +149,14 @@ pub fn get_platform_dir_impl() -> String {
 }
 
 pub async fn update_app_data_dir_impl(pool: &DbPool, path: &str) -> Result<String, String> {
+    update_app_data_dir_with_publish(pool, path, write_app_data_dir_override).await
+}
+
+async fn update_app_data_dir_with_publish(
+    pool: &DbPool,
+    path: &str,
+    publish: impl FnOnce(&std::path::Path) -> Result<(), String>,
+) -> Result<String, String> {
     let next = normalize_app_data_dir(path)?;
     let current = pool.directory();
     if next == current {
@@ -164,8 +172,8 @@ pub async fn update_app_data_dir_impl(pool: &DbPool, path: &str) -> Result<Strin
     }
     // Opening validates checksums and also rejects a directory owned by another process.
     let validated = crate::storage::store::Store::open(&next)?;
+    publish(&next)?;
     drop(validated);
-    write_app_data_dir_override(&next)?;
     Ok(path_to_string(&next))
 }
 
@@ -813,5 +821,122 @@ mod tests {
         let pool = setup_test_db().await;
         let err = update_app_data_dir_impl(&pool, "  ").await.unwrap_err();
         assert!(err.contains("empty"));
+    }
+}
+
+#[cfg(test)]
+mod json_directory_tests {
+    use super::*;
+    use crate::storage::store::Store;
+    use serde_json::json;
+    #[tokio::test]
+    async fn directory_copy_reopens_same_committed_data() {
+        let fixture = tempfile::tempdir().unwrap();
+        let source = fixture.path().join("source/.skillshub");
+        let destination = fixture.path().join("target/.skillshub");
+        let store = Store::open(&source).unwrap();
+        store
+            .write(|d| {
+                d.table_mut("skills")
+                    .insert("fixture".into(), json!({"id":"fixture"}));
+                d.table_mut("skill_metadata")
+                    .insert("fixture".into(), json!({"notes":"synthetic"}));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        std::fs::write(source.join("config.json"), b"{}").unwrap();
+        let called = std::cell::Cell::new(false);
+        update_app_data_dir_with_publish(&store, destination.to_str().unwrap(), |path| {
+            assert_eq!(path, destination);
+            called.set(true);
+            assert!(Store::open(path).is_err());
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert!(called.get());
+        let copied = Store::open(&destination).unwrap();
+        assert_eq!(
+            store
+                .read(|d| Ok(serde_json::to_value(d).unwrap()))
+                .unwrap(),
+            copied
+                .read(|d| Ok(serde_json::to_value(d).unwrap()))
+                .unwrap()
+        );
+    }
+    #[tokio::test]
+    async fn occupied_destination_does_not_publish_pointer() {
+        let fixture = tempfile::tempdir().unwrap();
+        let store = Store::open(&fixture.path().join("source/.skillshub")).unwrap();
+        let destination = fixture.path().join("target/.skillshub");
+        let occupied = Store::open(&destination).unwrap();
+        occupied
+            .write(|d| {
+                d.table_mut("skills").insert("owner".into(), json!(1));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let called = std::cell::Cell::new(false);
+        assert!(
+            update_app_data_dir_with_publish(&store, destination.to_str().unwrap(), |_| {
+                called.set(true);
+                Ok(())
+            })
+            .await
+            .is_err()
+        );
+        assert!(!called.get());
+        assert_eq!(
+            occupied
+                .read(|d| Ok(d.table("skills")["owner"].clone()))
+                .unwrap(),
+            json!(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn occupied_empty_destination_rejects_copy_before_writing() {
+        let fixture = tempfile::tempdir().unwrap();
+        let source = fixture.path().join("source/.skillshub");
+        let store = Store::open(&source).unwrap();
+        std::fs::write(source.join("config.json"), b"{}").unwrap();
+        let destination = fixture.path().join("target/.skillshub");
+        let _occupied = Store::open(&destination).unwrap();
+        let called = std::cell::Cell::new(false);
+        assert!(
+            update_app_data_dir_with_publish(&store, destination.to_str().unwrap(), |_| {
+                called.set(true);
+                Ok(())
+            })
+            .await
+            .is_err()
+        );
+        assert!(!called.get());
+        assert!(!destination.join("config.json").exists());
+    }
+    #[tokio::test]
+    async fn corrupt_destination_does_not_publish_pointer() {
+        let fixture = tempfile::tempdir().unwrap();
+        let store = Store::open(&fixture.path().join("source/.skillshub")).unwrap();
+        let destination = fixture.path().join("target/.skillshub");
+        std::fs::create_dir_all(destination.join("store")).unwrap();
+        std::fs::write(destination.join("store/manifest.json"), b"corrupt").unwrap();
+        let called = std::cell::Cell::new(false);
+        assert!(
+            update_app_data_dir_with_publish(&store, destination.to_str().unwrap(), |_| {
+                called.set(true);
+                Ok(())
+            })
+            .await
+            .is_err()
+        );
+        assert!(!called.get());
+        assert_eq!(
+            std::fs::read(destination.join("store/manifest.json")).unwrap(),
+            b"corrupt"
+        );
     }
 }
