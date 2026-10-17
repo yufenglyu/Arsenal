@@ -151,8 +151,10 @@ function Assert-Compatible-AppIdentity {
 
   $pathUtils = Read-TextFile (Join-Path $Root "src-tauri/src/path_utils.rs")
   $lib = Read-TextFile (Join-Path $Root "src-tauri/src/lib.rs")
-  if ($pathUtils -notmatch 'join\("\.skillshub"\)' -or $pathUtils -notmatch 'legacy_app_data_dir' -or $lib -notmatch 'migrate_legacy_app_data_if_needed') {
-    throw "Refusing to package: app data must default to ~/.skillshub and keep legacy ~/.skillsmanage migration support."
+  if ($pathUtils -notmatch 'join\("\.skillshub"\)' -or $pathUtils -notmatch 'legacy_app_data_dir' -or
+      $lib -notmatch 'check_storage_migration' -or $lib -notmatch 'storage::store::Store::open' -or
+      -not (Test-Path (Join-Path $Root 'scripts/migrate-sqlite-to-json.py'))) {
+    throw "Refusing to package: preserve the .skillshub location, JSON store startup, and explicit legacy migration support."
   }
 }
 

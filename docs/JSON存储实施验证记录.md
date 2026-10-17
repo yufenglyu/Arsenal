@@ -182,3 +182,9 @@ Windows 打包最终结果：`pnpm tauri build` 成功，生成 MSI 与 NSIS 两
 离线工具支持核心列完全匹配、整组六张仓库镜像/地址/导入恢复表尚未出现的旧版本；只为缺失领域生成空 JSON，不改写源数据库。仅缺其中一张的可疑结构仍拒绝。合成迁移测试增至 11 项并通过。
 
 增加可选原生验收测试 `verify_migrated_data_on_disposable_store`，通过 `SKILLSHUB_VERIFY_JSON_DIR` 指定待验证 JSON 目录：读取技能、平台安装、集合详情、来源、同步、备注、笔记及逻辑备份入口，然后在临时 Store 上验证编辑与重开。源业务数据不做编辑，不输出记录内容。此项不能代替完整桌面交互、联网导入或真实 WebDAV 验收。
+
+Windows 发布脚本兼容修正：保留产品名、identifier、WiX upgradeCode 和 .skillshub 默认目录检查，将已删除的旧自动数据库复制函数检查更新为 JSON Store 启动、旧库阻止提示及独立迁移工具存在性检查。避免已完成 JSON 迁移的版本被过期检查误拒绝。
+
+Windows 发布产物验收：保持 1.2.0，生成 Windows x64 MSI 与便携 ZIP（另有自动构建的 Obsidian 插件 ZIP），统一输出到 release-assets/windows-json-20261017。类型检查、Rust 测试编译、插件 4 项测试、前端及 Rust release 构建通过。微软 WebView2 下载两次中断；将既有且 Authenticode 验证有效的微软引导程序放入目标构建目录后，独立 bundle 阶段成功，保留 embedBootstrapper 模式。
+
+ZIP CRC、内置可执行文件与当前目标构建 SHA-256、一致的 manifest/对象摘要均验证通过。默认业务表为空、设置和项目清单为空，不含 SQLite 文件或用户数据；生成 SHA256SUMS.txt。未执行 MSI 安装或覆盖现有应用数据。
