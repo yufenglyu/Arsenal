@@ -61,3 +61,34 @@ pub async fn canonical_paths(pool: &DbPool) -> Result<Vec<(String, String)>, Str
             .collect())
     })
 }
+
+#[cfg(test)]
+mod durability_tests {
+    use super::*;
+    #[tokio::test]
+    async fn import_receipt_and_metadata_publish_together_across_reopen() {
+        let root = tempfile::tempdir().unwrap();
+        let store = DbPool::open(root.path()).unwrap();
+        let skill = Skill { id:"synthetic".into(), name:"Synthetic".into(), description:None,
+            file_path:"/synthetic/SKILL.md".into(), canonical_path:Some("/synthetic".into()),
+            is_central:false, source:Some("github".into()), content:None, scanned_at:"2026-01-01".into() };
+        let source = SkillSource { skill_id:skill.id.clone(), source_type:"github".into(),
+            source_url:None, source_author:Some("fixture".into()), source_repo:Some("repo".into()),
+            source_path:None, updated_at:"2026-01-01".into() };
+        let mut tx = ImportCommit::begin(&store).await.unwrap();
+        tx.skill(&skill).await.unwrap(); tx.source(&source).await.unwrap(); tx.receipt("receipt").await.unwrap();
+        store.fail_table_write("skill_sources");
+        assert!(tx.commit().await.is_err());
+        drop(store);
+        let store = DbPool::open(root.path()).unwrap();
+        assert!(!has_receipt(&store,"receipt").await.unwrap());
+        assert!(crate::db::get_skill_by_id(&store,"synthetic").await.unwrap().is_none());
+        let mut tx = ImportCommit::begin(&store).await.unwrap();
+        tx.skill(&skill).await.unwrap(); tx.source(&source).await.unwrap(); tx.receipt("receipt").await.unwrap();
+        tx.commit().await.unwrap(); drop(store);
+        let store = DbPool::open(root.path()).unwrap();
+        assert!(has_receipt(&store,"receipt").await.unwrap());
+        assert_eq!(crate::db::get_skill_by_id(&store,"synthetic").await.unwrap().unwrap().name,"Synthetic");
+        assert_eq!(store.read(|d|Ok(d.table("skill_sources")["synthetic"]["source_repo"].clone())).unwrap(),"repo");
+    }
+}
