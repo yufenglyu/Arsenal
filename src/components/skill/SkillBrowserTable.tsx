@@ -76,6 +76,7 @@ import {
 type InstallationSource = "independent" | "shared";
 
 export interface FolderTableItem {
+  onChangeRepositoryAddress?: () => void;
   onNotebook?: () => void;
   hasNotebook?: boolean;
   sourceRepo?: string | null;
@@ -496,6 +497,7 @@ function FolderActions({ folder }: {folder: FolderTableItem}) {
                                 )}
                               </ActionButton>
                             ) : null}
+                            {folder.onChangeRepositoryAddress && <ActionButton label={t("workflow.address.title")} onClick={folder.onChangeRepositoryAddress}><Link2 className="size-4"/></ActionButton>}
                             {folder.onUpdate || folder.updateLabel ? (
                               <ActionButton
                                 label={folder.updateLabel ?? t("resource.updateAction")}

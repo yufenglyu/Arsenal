@@ -1,3 +1,4 @@
+import {RepositoryAddressButton} from "@/components/skill/RepositoryAddressButton";
 import { ActionIcon } from "@/components/ui/action-icon";
 import { RepositoryCheckConfirm } from "@/components/skill/RepositoryCheckConfirm";
 import { useTaskQueueStore } from "@/stores/taskQueueStore";
@@ -100,6 +101,7 @@ function earliestSkillCreatedAt(skills: SkillWithLinks[]) {
 
 export function ResourceLibraryView() {
   const [locationParams, setLocationParams] = useSearchParams();
+  const [addressRepository,setAddressRepository] = useState<string | null>(null);
   const [locationReady, setLocationReady] = useState(false);
   const [locatedSkillId, setLocatedSkillId] = useState<string | null>(null);
   const [locatedFolderKey, setLocatedFolderKey] = useState<string | null>(null);
@@ -695,7 +697,8 @@ export function ResourceLibraryView() {
                       highlighted: locatedFolderKey === group.relativePath,
                       onSearch: () => handleSearchSkill({ ...group.skills[0], name: group.name }),
                       name: group.name,
-                      sourceRepo: group.skills.find(skill => skill.source_repo?.toLowerCase() === group.name.toLowerCase())?.source_repo,
+                      onChangeRepositoryAddress: group.skills.every(skill => skill.source_repo && skill.source_repo.toLowerCase() === group.skills[0]?.source_repo?.toLowerCase()) ? () => setAddressRepository(group.skills[0].source_repo!) : undefined,
+                      sourceRepo: group.skills.every(skill => skill.source_repo && skill.source_repo.toLowerCase() === group.skills[0]?.source_repo?.toLowerCase()) ? group.skills[0]?.source_repo : undefined,
                       path: group.path,
                       tags: [...new Set(group.skills.flatMap(skill => skill.tags ?? []))],
                       skillCount: group.skillCount,
@@ -856,6 +859,7 @@ export function ResourceLibraryView() {
       />
 
 
+      {addressRepository && <RepositoryAddressButton repository={addressRepository} open onOpenChange={open=>{if(!open)setAddressRepository(null);}}/>}
       <Dialog
         open={!!deleteTargetSkill}
         onOpenChange={(open) => {

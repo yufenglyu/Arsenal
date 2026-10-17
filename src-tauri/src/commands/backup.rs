@@ -173,8 +173,13 @@ struct RepositoryStatsBackup {
     checked_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+struct RepositoryDirectoryBackup { repository: String, directory: String }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AppBackup {
+    #[serde(default)]
+    repository_directories: Vec<RepositoryDirectoryBackup>,
     #[serde(default)]
     repository_stats: Vec<RepositoryStatsBackup>,
     #[serde(default)]
@@ -1020,7 +1025,12 @@ async fn export_app_backup_data_impl(
         "SELECT repository, stars, checked_at FROM github_repository_stats ORDER BY repository"
     ).fetch_all(pool).await.map_err(|error| error.to_string())?
         .into_iter().filter(|stats| repositories.contains(&stats.repository.to_ascii_lowercase())).collect();
+    let repository_directories = if options.include_resource_library {
+        sqlx::query_as::<_, RepositoryDirectoryBackup>("SELECT repository,directory FROM repository_local_directories ORDER BY repository")
+            .fetch_all(pool).await.map_err(|e| e.to_string())?
+    } else { Vec::new() };
     let mut backup = AppBackup {
+        repository_directories,
         repository_stats,
         repository_notebooks: if options.include_resource_library { super::notebook_repository::list(pool).await? } else { Vec::new() },
         folder_notes: if options.include_resource_library { super::metadata::folder_notes(pool).await? } else { Vec::new() },
@@ -1207,6 +1217,29 @@ async fn import_app_backup_data_impl(pool: &DbPool, backup: AppBackup) -> Result
             return Err("Backup contains invalid repository statistics".into());
         }
     }
+    let mut mapping_keys = HashSet::new();
+    let mut mapping_paths = HashSet::new();
+    for mapping in &backup.repository_directories {
+        let relative = normalize_relative_path(&mapping.directory)?;
+        if !is_portable_github_repo(&mapping.repository) || relative.components().count() != 2
+            || !mapping_keys.insert(mapping.repository.to_lowercase()) || !mapping_paths.insert(relative_path_key(&relative)?) {
+            return Err("Backup contains invalid repository directory mappings".into());
+        }
+        super::repository_mirror::ensure_owned_path(&resource_root, &resource_root.join(&relative))?;
+        let existing: Vec<(String,String)> = sqlx::query_as("SELECT repository,directory FROM repository_local_directories WHERE repository=? COLLATE NOCASE OR directory=? COLLATE NOCASE")
+            .bind(&mapping.repository).bind(&mapping.directory).fetch_all(pool).await.map_err(|e|e.to_string())?;
+        if existing.iter().any(|(repo,dir)| !repo.eq_ignore_ascii_case(&mapping.repository) || dir != &mapping.directory) {
+            return Err("Backup repository directory mapping conflicts with local data".into());
+        }
+    }
+    let mut mapping_tx = pool.begin().await.map_err(|e|e.to_string())?;
+    for mapping in &backup.repository_directories {
+        sqlx::query("INSERT OR IGNORE INTO repository_local_directories(repository,directory) VALUES(?,?)")
+            .bind(&mapping.repository).bind(path_to_portable_relative(&normalize_relative_path(&mapping.directory)?).ok_or("Invalid repository directory")?).execute(&mut *mapping_tx).await.map_err(|e|e.to_string())?;
+        sqlx::query("INSERT OR IGNORE INTO repository_mirrors(repository) VALUES(?)")
+            .bind(&mapping.repository).execute(&mut *mapping_tx).await.map_err(|e|e.to_string())?;
+    }
+    mapping_tx.commit().await.map_err(|e|e.to_string())?;
     super::notebook_repository::restore(pool, &backup.repository_notebooks).await?;
     for note in &backup.folder_notes { super::metadata::save_note(pool, note).await?; }
 
@@ -2181,6 +2214,24 @@ mod tests {
             .await
             .expect("resource path");
         (pool, dir)
+    }
+
+    #[tokio::test]
+    async fn repository_backup_preserves_migrated_directories_and_rejects_unsafe_paths() {
+        let (pool, _dir) = setup_test_db().await;
+        sqlx::query("INSERT INTO repository_local_directories(repository,directory) VALUES('new/repo','old/repo')").execute(&pool).await.unwrap();
+        let backup = export_app_backup_data_impl(&pool, repository_backup_options()).await.unwrap();
+        assert_eq!(backup.repository_directories.len(), 1);
+        let (restored, _other) = setup_test_db().await;
+        import_app_backup_data_impl(&restored, backup.clone()).await.unwrap();
+        let root = db::get_skill_resource_library_dir(&restored).await.unwrap();
+        assert_eq!(super::super::repository_address::directory(&restored, &root, "new", "new/repo").await.unwrap(), root.join("old/repo"));
+        let mut invalid = backup;
+        invalid.repository_directories[0].directory = "../escape".into();
+        let (fresh, _fresh_dir) = setup_test_db().await;
+        assert!(import_app_backup_data_impl(&fresh, invalid).await.is_err());
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_local_directories").fetch_one(&fresh).await.unwrap();
+        assert_eq!(count, 0);
     }
 
     #[tokio::test]

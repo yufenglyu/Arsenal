@@ -232,6 +232,8 @@ export function splitResourceLibrarySkillsByFolder(
 
     group.skills.push(skill);
     group.skills = sortSkillsByName(group.skills);
+    const sourceRepo = group.skills[0]?.source_repo;
+    if (sourceRepo && group.skills.every(item => item.source_repo?.toLowerCase() === sourceRepo.toLowerCase())) group.name = sourceRepo;
     group.skillCount = group.skills.length;
     group.linkedAgentIds = uniqueIds(group.skills.flatMap((item) => item.linked_agents));
     group.readOnlyAgentIds = uniqueIds(

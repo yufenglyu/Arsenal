@@ -1,3 +1,4 @@
+import {RepositoryAddressButton} from "./RepositoryAddressButton";
 import { useNotebookStore } from "@/stores/notebookStore";
 import { RepositoryNotebook } from "@/components/notebook/RepositoryNotebook";
 import { BookOpen } from "lucide-react";
@@ -224,6 +225,7 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
               </div>
               </details>
             </section>}
+            {pathname === "/resources" && selectedFolder.sourceRepo && <RepositoryAddressButton repository={selectedFolder.sourceRepo}/>}
             {selectedFolder.notesEditor}
             {installationSummary}
             <section aria-label={t("browser.skillList")}>

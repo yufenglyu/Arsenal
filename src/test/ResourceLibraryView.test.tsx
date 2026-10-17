@@ -599,7 +599,10 @@ describe("ResourceLibraryView delete", () => {
     );
 
     await switchBrowserViewMode("folders");
-    const folderRow = await screen.findByRole("row", { name: /example/i });
+    const folderRow = await screen.findByRole("row", { name: /owner\/repo/i });
+    fireEvent.click(openRowActions(folderRow).getByRole("menuitem", {name:"修改仓库地址"}));
+    expect(screen.getByLabelText("新仓库地址")).toHaveValue("owner/repo");
+    fireEvent.click(screen.getByRole("button", {name:/取消|Cancel/i}));
     fireEvent.click(openRowActions(folderRow).getByRole("menuitem", { name: /^更新$|^Update$/i }));
 
     await waitFor(() => {

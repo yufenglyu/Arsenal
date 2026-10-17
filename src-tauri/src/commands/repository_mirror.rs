@@ -8,7 +8,6 @@ use super::{
 };
 use crate::{
     db::{self, DbPool},
-    path_utils::source_grouped_skill_dir,
     AppState,
 };
 use serde::{Deserialize, Serialize};
@@ -75,8 +74,9 @@ fn matching<'a>(group: &'a [(db::SkillSource, db::Skill)], path: &str) -> Option
         })
         .map(|(_, skill)| skill)
 }
+#[cfg(test)]
 fn repo_directory(root: &Path, repo: &github::GitHubRepoRef) -> PathBuf {
-    source_grouped_skill_dir(
+    crate::path_utils::source_grouped_skill_dir(
         root,
         Some(&repo.owner),
         Some(&format!("{}/{}", repo.owner, repo.repo)),
@@ -202,7 +202,7 @@ async fn preview(pool: &DbPool, snapshot: &Snapshot) -> Result<RepositorySyncPre
     }
     let root = db::get_skill_resource_library_dir(pool).await?;
     report.document_changes = remote_sources::compare_files(
-        &repository_docs::files(&repo_directory(&root, &snapshot.repo))?,
+        &repository_docs::files(&super::repository_address::directory(pool, &root, &snapshot.repo.owner, &format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo)).await?)?,
         &github::snapshot_readmes(&snapshot.contents),
     );
     Ok(report)
@@ -391,7 +391,7 @@ pub async fn apply_repository_snapshot(
 pub(crate) async fn apply(pool: &DbPool, id: &str) -> Result<(), String> {
     let _guard = MIRROR_LOCK.lock().await;
     resume_interrupted(pool).await?;
-    let row = sqlx::query("SELECT payload,digest FROM repository_mirror_snapshots WHERE id=?")
+    let row = sqlx::query("SELECT payload,digest FROM repository_mirror_snapshots WHERE id=? AND state<>'invalidated'")
         .bind(id)
         .fetch_optional(pool)
         .await
@@ -468,6 +468,7 @@ async fn apply_contents(pool: &DbPool, id: &str, snapshot: &Snapshot) -> Result<
             return Err("LOCAL_IDENTITY_CHANGED: duplicate ownership".into());
         }
     }
+    let repository_directory = super::repository_address::directory(pool, &root, &snapshot.repo.owner, &repository).await?;
     let mut selections = Vec::new();
     let mut retained = HashSet::new();
     for candidate in &candidates {
@@ -476,7 +477,7 @@ async fn apply_contents(pool: &DbPool, id: &str, snapshot: &Snapshot) -> Result<
             .and_then(|s| s.canonical_path.as_deref())
             .map(PathBuf::from)
             .unwrap_or_else(|| {
-                repo_directory(&root, &snapshot.repo).join(&candidate.skill_directory_name)
+                repository_directory.join(&candidate.skill_directory_name)
             });
         ensure_owned_path(&root, &target)?;
         if existing.is_none() && target.exists() {
@@ -571,7 +572,7 @@ async fn apply_contents(pool: &DbPool, id: &str, snapshot: &Snapshot) -> Result<
             .await?;
         }
     }
-    if repository_docs::files(&repo_directory(&root, &snapshot.repo))?
+    if repository_docs::files(&super::repository_address::directory(pool, &root, &snapshot.repo.owner, &format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo)).await?)?
         != github::snapshot_readmes(&snapshot.contents)
     {
         return Err("WRITE_FAILED: repository document verification failed".into());
@@ -589,7 +590,7 @@ async fn apply_contents(pool: &DbPool, id: &str, snapshot: &Snapshot) -> Result<
         .map_err(|e| e.to_string())?;
     Ok(())
 }
-fn ensure_owned_path(root: &Path, target: &Path) -> Result<(), String> {
+pub(crate) fn ensure_owned_path(root: &Path, target: &Path) -> Result<(), String> {
     if std::fs::symlink_metadata(root).is_ok_and(|m| m.file_type().is_symlink()) {
         return Err("UNSAFE_TARGET".into());
     }
@@ -947,6 +948,88 @@ mod tests {
         apply(&pool, &id).await.unwrap();
         assert!(std::fs::symlink_metadata(&link.central_path).is_err());
     }
+    #[tokio::test]
+    async fn address_migration_preserves_relations_and_syncs_in_original_directory() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let original = db::get_skill_by_id(&pool, "one").await.unwrap().unwrap();
+        db::upsert_skill_metadata(&pool, "one", Some("keep note"), &["keep tag".into()]).await.unwrap();
+        let collection = db::create_collection(&pool, "fixture", None).await.unwrap();
+        db::add_skill_to_collection(&pool, &collection.id, "one").await.unwrap();
+        linker::install_resource_skill_to_agent_impl(&pool, "one", "claude-code", "copy").await.unwrap();
+        let link = linker::add_resource_skill_to_central_impl(&pool, "one").await.unwrap();
+        let mut notebook = super::super::notebook_repository::Repository::new(1, "example/fixtures".into());
+        notebook.notebook = "keep notebook".into();
+        super::super::notebook_repository::put(&pool, &notebook).await.unwrap();
+        let before_installs = db::get_skill_installations(&pool, "one").await.unwrap();
+        super::super::repository_address::migrate(&pool, "example/fixtures", "new-owner/new-repo").await.unwrap();
+        assert_eq!(apply(&pool, &id).await.unwrap_err(), "PREVIEW_EXPIRED");
+        assert_eq!(db::get_skill_installations(&pool, "one").await.unwrap().len(), before_installs.len());
+        let saved = super::super::notebook_repository::get(&pool, 1).await.unwrap();
+        assert_eq!(saved.repository_uid, notebook.repository_uid);
+        assert_eq!(saved.notebook, notebook.notebook);
+        assert_eq!(saved.full_name, "new-owner/new-repo");
+        let mut next = capture(&pool, snapshot).await;
+        next.repo.owner = "new-owner".into(); next.repo.repo = "new-repo".into();
+        next.repo.normalized_url = "https://github.com/new-owner/new-repo".into();
+        next.originals = remote_sources::github_repo_source_groups(&pool, false).await.unwrap().remove("new-owner/new-repo").unwrap();
+        next.contents.files.insert("skills/one/extra.txt".into(), b"new file".to_vec());
+        next.contents.files.insert("skills/three/SKILL.md".into(), b"---\nname: three\ndescription: third\n---\nnew".to_vec());
+        next.contents.files.insert("README.md".into(), b"new docs".to_vec());
+        let id = persist_snapshot(&pool, &next).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let after = db::get_skill_by_id(&pool, "one").await.unwrap().unwrap();
+        assert_eq!(after.canonical_path, original.canonical_path);
+        let metadata = db::get_skill_metadata(&pool, "one").await.unwrap();
+        assert_eq!(db::parse_skill_metadata_tags(metadata.as_ref()), vec!["keep tag"]);
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM collection_skills WHERE skill_id='one' AND collection_id=?").bind(&collection.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(std::fs::read(Path::new(&link.central_path).join("extra.txt")).unwrap(), b"new file");
+        for install in db::get_skill_installations(&pool, "one").await.unwrap() {
+            assert_eq!(std::fs::read(Path::new(&install.installed_path).join("extra.txt")).unwrap(), b"new file");
+        }
+        let container = Path::new(original.canonical_path.as_ref().unwrap()).parent().unwrap();
+        assert_eq!(std::fs::read(container.join("README.md")).unwrap(), b"new docs");
+        let third = db::get_skill_by_id(&pool, "three").await.unwrap().unwrap();
+        assert_eq!(Path::new(third.canonical_path.as_ref().unwrap()).parent().unwrap(), container);
+        // The old address cannot reclaim a container now owned by the new source.
+        let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
+        assert!(super::super::repository_address::directory(&pool, &root, "example", "example/fixtures").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn address_migration_rejects_conflicts_and_interrupted_sync_without_changes() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        sqlx::query("INSERT INTO repository_mirrors(repository) VALUES('new/repo')").execute(&pool).await.unwrap();
+        assert_eq!(super::super::repository_address::migrate(&pool, "example/fixtures", "new/repo").await.unwrap_err(), "addressConflict");
+        sqlx::query("UPDATE repository_mirror_snapshots SET state='applying' WHERE id=?").bind(&id).execute(&pool).await.unwrap();
+        assert_eq!(super::super::repository_address::migrate(&pool, "EXAMPLE/FIXTURES", "other/repo").await.unwrap_err(), "addressBusy");
+        assert_eq!(db::get_skill_source(&pool, "one").await.unwrap().unwrap().source_repo.as_deref(), Some("example/fixtures"));
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_local_directories").fetch_one(&pool).await.unwrap();
+        assert_eq!(count, 0);
+        sqlx::query("UPDATE repository_mirror_snapshots SET state='applied' WHERE id=?").bind(&id).execute(&pool).await.unwrap();
+        sqlx::query("CREATE TRIGGER reject_address BEFORE INSERT ON repository_local_directories BEGIN SELECT RAISE(ABORT, 'fixture failure'); END").execute(&pool).await.unwrap();
+        assert_eq!(super::super::repository_address::migrate(&pool, "example/fixtures", "other/repo").await.unwrap_err(), "addressDatabase");
+        assert_eq!(db::get_skill_source(&pool, "one").await.unwrap().unwrap().source_repo.as_deref(), Some("example/fixtures"));
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_mirrors WHERE repository='example/fixtures'").fetch_one(&pool).await.unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn address_migration_supports_empty_repository_and_repeated_moves() {
+        let (_dir, pool, mut snapshot) = fixture().await;
+        snapshot.contents.files.clear();
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        super::super::repository_address::migrate(&pool, "example/fixtures", "next/repo").await.unwrap();
+        super::super::repository_address::migrate(&pool, "next/repo", "third/repo").await.unwrap();
+        let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
+        assert_eq!(super::super::repository_address::directory(&pool, &root, "third", "third/repo").await.unwrap(), repo_directory(&root, &snapshot.repo));
+    }
+
     #[test]
     fn rejects_case_collisions_and_escaping_paths() {
         let contents = github::GitHubRepoSnapshot {

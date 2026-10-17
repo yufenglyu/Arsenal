@@ -1,3 +1,4 @@
+import {RepositoryAddressButton} from "./RepositoryAddressButton";
 import {useState} from "react";
 import {useTranslation} from "react-i18next";
 import {ChevronRight, FolderSync} from "lucide-react";
@@ -25,9 +26,9 @@ export function UpdateCenter({embedded = false, taskLayout = false}: {embedded?:
   const libraryChanged = !!coverage && (coverage.length !== currentSkills.length || coverage.some(item=>!currentSkills.some(skill=>skill.id===item.skillId)));
   const pending = (repo:RepositorySyncPreview) => hasRepositoryChanges(repo);
   const active = (repo:RepositorySyncPreview) => tasks.some(task => isTaskActive(task) && task.locks.includes(`repo:${repo.repository.toLowerCase()}`));
-  const canApply = (repo:RepositorySyncPreview) => !!repo.snapshotId && !repo.error && !active(repo);
+  const canApply = (repo:RepositorySyncPreview) => !!repo.snapshotId && !repo.error && !state.migratingRepository && !active(repo);
   const choices = repos.filter(repo => selected[repo.repository] && canApply(repo));
-  const busy = state.isChecking || !!state.checkingRepository;
+  const busy = state.isChecking || !!state.checkingRepository || !!state.migratingRepository;
   const apply = () => {
     const batchId = crypto.randomUUID();
     const parentReportGeneration = getReportTaskGeneration();
@@ -61,6 +62,7 @@ export function UpdateCenter({embedded = false, taskLayout = false}: {embedded?:
             <input type="checkbox" aria-label={repo.repository} checked={!!selected[repo.repository]} disabled={!canApply(repo)} onChange={e=>setSelected(prev=>({...prev,[repo.repository]:e.target.checked}))}/>
             <span className="min-w-0 flex-1 break-all text-sm font-semibold">{repo.repository}</span>
             <span className="text-xs text-muted-foreground">{active(repo) ? t(`workflow.taskStatus.${task?.status ?? "running"}`) : error ? t("workflow.updateFailed") : repo.error ? t("workflow.checkFailed") : pending(repo) ? t("workflow.pendingUpdate") : t("workflow.changeType.unchanged")}</span>
+            <RepositoryAddressButton repository={repo.repository}/>
             <Button variant="outline" disabled={busy || active(repo)} onClick={()=>void state.recheckRepository(repo.repository)}>{t("workflow.recheck")}</Button>
             <Button disabled={!canApply(repo)} onClick={()=>setConfirmation([repo.snapshotId!])}>{t(error ? "workflow.mirror.retry" : "workflow.mirror.apply")}</Button>
           </div>

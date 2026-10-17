@@ -1,3 +1,4 @@
+import {useNotebookStore} from "./notebookStore";
 import {invoke, isTauriRuntime} from "@/lib/tauri";
 import { useRepositoryDocumentStore } from "./repositoryDocumentStore";
 import {activityAttention, pendingUpdateCount} from "@/lib/activityCenter";
@@ -28,6 +29,8 @@ export function hasRepositoryChanges(item: RepositorySyncPreview): boolean {
 }
 
 interface RepositorySyncState {
+  migratingRepository: string | null;
+  changeRepositoryAddress: (repository: string, newAddress: string) => Promise<void>;
   updateErrors: Record<string, string>;
   isRefreshingRepositories: boolean;
   refreshRepositories: (repositories?: string[]) => Promise<void>;
@@ -69,6 +72,27 @@ const activeRechecks = new Set<string>();
 export const useRepositorySyncStore = create<RepositorySyncState>()(
   persist(
     (set, get) => ({
+      migratingRepository: null,
+      changeRepositoryAddress: async (repository, newAddress) => {
+        if (get().migratingRepository || get().isChecking || get().checkingRepository || useTaskQueueStore.getState().tasks.some(isTaskActive)) throw new Error("addressBusy");
+        set({migratingRepository: repository});
+        try {
+          const target = await invoke<string>("change_repository_address", {repository, newAddress});
+          const pending: RepositorySyncPreview = {repository:target.toLowerCase(),snapshotId:null,currentRef:null,remoteRef:null,added:[],modified:[],deleted:[],unchanged:[],updated:[],documentChanges:[],error:null};
+          // A committed migration must invalidate the visible preview before any reload.
+          set(state => ({preview: state.preview ? {...state.preview,
+            coverage: state.preview.coverage?.map(row => row.repository?.toLowerCase() === repository.toLowerCase() ? {...row, repository:target.toLowerCase(),status:"pending"} : row),
+            repositories: state.preview.repositories.filter(row => row.repository.toLowerCase() !== repository.toLowerCase() && row.repository.toLowerCase() !== target.toLowerCase()).concat(pending),
+          } : null, error:null,
+            repositories:state.repositories?.map(row => row.toLowerCase() === repository.toLowerCase() ? target : row) ?? null,
+            requestedRepositories:state.requestedRepositories?.map(row => row.toLowerCase() === repository.toLowerCase() ? target : row) ?? null,
+            checkedAt:Object.fromEntries(Object.entries(state.checkedAt).filter(([row])=>row.toLowerCase() !== repository.toLowerCase())),
+            applied:false, appliedRepositories:state.appliedRepositories.filter(row => row.toLowerCase() !== repository.toLowerCase())}));
+          await useResourceLibraryStore.getState().loadResourceLibrary();
+          await useNotebookStore.getState().load();
+          await get().recheckRepository(target);
+        } finally { set({migratingRepository:null}); }
+      },
       updateErrors: {},
       isRefreshingRepositories: false,
       refreshRepositories: async (repositories) => {
@@ -164,7 +188,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
       error: null,
       checkForUpdates: (repositories) => {
         if (previewRequest) return previewRequest;
-        if (get().checkingRepository) return Promise.resolve();
+        if (get().checkingRepository || get().migratingRepository) return Promise.resolve();
         if (!repositories?.length) {
           releaseSnapshots(get().preview?.repositories ?? []);
           useTaskQueueStore.getState().clearCheckHistory();

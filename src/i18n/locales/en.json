@@ -1429,6 +1429,26 @@
         "outside_scope": "Outside scope"
       },
       "libraryChanged": "The library has changed. Counts above describe the original check; check again to refresh."
+    },
+    "address": {
+      "title": "Change repository address",
+      "hint": "Validate the new repository and update all sources while preserving local paths, tags, collections and installations. A fresh check follows; content changes require confirming a whole-repository sync.",
+      "current": "Current repository",
+      "newAddress": "New repository address",
+      "save": "Validate and migrate",
+      "saving": "Validating and migrating…",
+      "success": "Repository address changed. Review the new source check results.",
+      "errors": {
+        "addressBusy": "Finish active checks, syncs or interrupted sync recovery before migrating.",
+        "addressInvalid": "Enter a valid GitHub owner/repo or repository URL.",
+        "addressValidation": "The new repository could not be fully read. Check its address, network and access permissions. The old source is unchanged.",
+        "addressUnchanged": "The new address matches the current address.",
+        "addressMissing": "The original repository no longer exists. Refresh and retry.",
+        "addressConflict": "The target repository or local directory is already in use. Migration cannot merge repositories.",
+        "addressLayout": "Local skills do not share one repository directory. Migration is unavailable.",
+        "addressDatabase": "Saving failed. The migration was not committed.",
+        "unknown": "The change failed. Refresh and retry."
+      }
     }
   },
   "g": {

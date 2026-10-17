@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::path_utils::source_grouped_skill_dir;
 use super::repository_docs;
 use chrono::Utc;
 use flate2::read::GzDecoder;
@@ -11,7 +13,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::{
     db::{self, DbPool, Skill},
-    path_utils::{paths_resolve_to_same_entry, source_grouped_skill_dir},
+    path_utils::paths_resolve_to_same_entry,
     AppState,
 };
 
@@ -479,13 +481,7 @@ pub(crate) async fn import_prepared_snapshot(
             }
             DuplicateResolution::Overwrite => {
                 let source_repo = format!("{}/{}", repo.owner, repo.repo);
-                let target_dir = source_grouped_skill_dir(
-                    &resource_root,
-                    Some(&repo.owner),
-                    Some(&source_repo),
-                    None,
-                    &candidate.skill_directory_name,
-                );
+                let target_dir = super::repository_address::directory(pool, &resource_root, &repo.owner, &source_repo).await?.join(&candidate.skill_directory_name);
                 let (final_skill_id, target_directory_name) = if let Some(id) = selection.renamed_skill_id.as_deref() {
                     resolve_update_target(pool, id, &source_repo, &resource_root, &repo.owner).await?
                 } else {
@@ -585,13 +581,7 @@ pub(crate) async fn import_prepared_snapshot(
     for (index, op) in staging_ops.iter().enumerate() {
         if let Some(operation) = operation { operation.check()?; }
         let source_repo = format!("{}/{}", repo.owner, repo.repo);
-        let target_dir = source_grouped_skill_dir(
-            &resource_root,
-            Some(&repo.owner),
-            Some(&source_repo),
-            None,
-            &op.target_directory_name,
-        );
+        let target_dir = super::repository_address::directory(pool, &resource_root, &repo.owner, &source_repo).await?.join(&op.target_directory_name);
         let staged_dir = files_transaction.root.join(format!("new-{index}"));
         write_snapshot_source_to_target(
             snapshot,
@@ -615,6 +605,7 @@ pub(crate) async fn import_prepared_snapshot(
     if let Some(operation) = operation { operation.check()?; }
     // Once installation starts, finish the atomic file/database commit before stopping.
     let mut imported_skills = Vec::new();
+    let repository_dir = super::repository_address::directory(pool, &resource_root, &repo.owner, &format!("{}/{}", repo.owner, repo.repo)).await?;
     let mut database_transaction = pool.begin().await.map_err(|e| e.to_string())?;
     for (op, target_dir, staged_dir, frontmatter) in prepared {
         emit_github_import_progress(app, GitHubImportProgressPayload {
@@ -670,9 +661,6 @@ pub(crate) async fn import_prepared_snapshot(
     }
 
     if !imported_skills.is_empty() {
-        let repository_dir = source_grouped_skill_dir(&resource_root, Some(&repo.owner),
-            Some(&format!("{}/{}", repo.owner, repo.repo)), None, "placeholder")
-            .parent().ok_or("Repository directory is missing")?.to_path_buf();
         stage_repository_readme(snapshot, &repository_dir, &mut files_transaction)?;
     }
 
@@ -850,7 +838,7 @@ async fn resolve_update_target(pool: &DbPool, id: &str, repository: &str, resour
     let canonical = existing.canonical_path.as_deref().ok_or("Update target path not found")?;
     let target = Path::new(canonical);
     let name = target.file_name().and_then(|s|s.to_str()).ok_or("Invalid update target")?;
-    let expected = source_grouped_skill_dir(resource_root, Some(owner), Some(repository), None, name);
+    let expected = super::repository_address::directory(pool, resource_root, owner, repository).await?.join(name);
     if !paths_resolve_to_same_entry(target, &expected) {
         return Err("Update target moved; import it again after resolving the conflict".into());
     }
@@ -913,7 +901,7 @@ async fn build_preview_skills(
     for candidate in candidates {
         // An ID collision elsewhere is resolved by namespacing during import.
         // Only files at the actual destination would be overwritten.
-        let target = source_grouped_skill_dir(&resource_root, Some(&repo.owner), Some(&repository), None, &candidate.skill_directory_name);
+        let target = super::repository_address::directory(pool, &resource_root, &repo.owner, &repository).await?.join(&candidate.skill_directory_name);
         let existing = existing_skills.iter().find(|skill| skill.canonical_path.as_deref()
             .is_some_and(|path| paths_resolve_to_same_entry(Path::new(path), &target)));
         let conflict = target.join("SKILL.md").is_file().then(|| GitHubSkillConflict {
@@ -4175,7 +4163,7 @@ pub(crate) fn mirror_skill_files(snapshot: &GitHubRepoSnapshot, source: &str) ->
 pub(crate) async fn mirror_documents(pool: &DbPool, repo: &GitHubRepoRef, snapshot: &GitHubRepoSnapshot) -> Result<(), String> {
     let root = skill_resource_library_root(pool).await?;
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
-    let target = source_grouped_skill_dir(&root, Some(&repo.owner), Some(&format!("{}/{}",repo.owner,repo.repo)), None, "placeholder");
+    let target = super::repository_address::directory(pool, &root, &repo.owner, &format!("{}/{}",repo.owner,repo.repo)).await?.join("placeholder");
     if repository_docs::files(target.parent().ok_or("Invalid repository directory")?)? == snapshot_readmes(snapshot) {return Ok(());}
     let mut transaction = ImportDirectoryTransaction::new(&root)?;
     std::fs::create_dir_all(target.parent().ok_or("Invalid repository directory")?).map_err(|e| e.to_string())?;

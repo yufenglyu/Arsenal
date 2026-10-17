@@ -1429,6 +1429,26 @@
         "outside_scope": "本次范围外"
       },
       "libraryChanged": "资源库已变化；以上数量仍是检查时的记录，可重新检查。"
+    },
+    "address": {
+      "title": "修改仓库地址",
+      "hint": "验证新仓库后统一修改来源，保留本地目录、标签、合集和安装关系。保存后重新检查；确认整仓同步才会覆盖或删除内容。",
+      "current": "当前仓库",
+      "newAddress": "新仓库地址",
+      "save": "验证并迁移",
+      "saving": "正在验证并迁移…",
+      "success": "仓库地址已修改，请查看新来源的检查结果。",
+      "errors": {
+        "addressBusy": "存在检查、同步或待恢复的同步，请完成后再修改地址。",
+        "addressInvalid": "请输入有效的 GitHub owner/repo 或仓库地址。",
+        "addressValidation": "无法完整读取新仓库，请检查地址、网络和访问权限；原来源未修改。",
+        "addressUnchanged": "新地址与当前地址相同。",
+        "addressMissing": "原仓库已不存在，请刷新后重试。",
+        "addressConflict": "目标仓库或本地目录已被使用，不能合并迁移。",
+        "addressLayout": "本地技能不在同一个仓库目录内，无法迁移。",
+        "addressDatabase": "保存仓库地址失败，迁移未提交。",
+        "unknown": "修改失败，请刷新后重试。"
+      }
     }
   },
   "g": {
