@@ -20,7 +20,7 @@ use crate::{
         symlink_target_path,
     },
     commands::skills::SkillWithLinks,
-    db::{self, Agent, Collection, DbPool, ScanDirectory, Skill, SkillMetadata, SkillSource},
+    db::{self, Agent, Collection, AppStore, ScanDirectory, Skill, SkillMetadata, SkillSource},
     path_utils::{path_to_string, remove_symlink_path},
     AppState,
 };
@@ -901,7 +901,7 @@ fn sanitize_webdav_error(error: reqwest::Error) -> String {
 }
 
 async fn export_app_backup_data_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     options: BackupOptions,
 ) -> Result<AppBackup, String> {
     let central_root = central_root(pool).await?;
@@ -1047,7 +1047,7 @@ async fn export_app_backup_data_impl(
 }
 
 pub async fn export_app_backup_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     options: BackupOptions,
 ) -> Result<String, String> {
     let backup = export_app_backup_data_impl(pool, options).await?;
@@ -1055,7 +1055,7 @@ pub async fn export_app_backup_impl(
 }
 
 pub async fn export_app_backup_archive_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     options: BackupOptions,
 ) -> Result<Vec<u8>, String> {
     let mut backup = export_app_backup_data_impl(pool, options).await?;
@@ -1108,13 +1108,13 @@ pub async fn export_app_backup_archive_impl(
 }
 
 #[cfg(test)]
-async fn import_app_backup_impl(pool: &DbPool, json: &str) -> Result<(), String> {
+async fn import_app_backup_impl(pool: &AppStore, json: &str) -> Result<(), String> {
     let backup: AppBackup = serde_json::from_str(json).map_err(|e| e.to_string())?;
     import_app_backup_data_impl(pool, backup).await
 }
 
 #[cfg(test)]
-async fn import_app_backup_bytes_impl(pool: &DbPool, backup: &[u8]) -> Result<(), String> {
+async fn import_app_backup_bytes_impl(pool: &AppStore, backup: &[u8]) -> Result<(), String> {
     import_app_backup_data_impl(pool, read_app_backup_bytes(backup)?).await
 }
 
@@ -1183,7 +1183,7 @@ fn read_app_backup_archive(archive: &[u8]) -> Result<AppBackup, String> {
     Ok(backup)
 }
 
-async fn import_app_backup_data_impl(pool: &DbPool, backup: AppBackup) -> Result<(), String> {
+async fn import_app_backup_data_impl(pool: &AppStore, backup: AppBackup) -> Result<(), String> {
     if backup.schema_version != BACKUP_SCHEMA_VERSION {
         return Err(format!(
             "Unsupported backup schema version {}",
@@ -1416,7 +1416,7 @@ fn restore_central_skills_into_resource_library(
 }
 
 async fn upsert_restored_resource_skill(
-    pool: &DbPool,
+    pool: &AppStore,
     skill: &SkillBackup,
     target_dir: &Path,
 ) -> Result<(), String> {
@@ -1440,7 +1440,7 @@ async fn upsert_restored_resource_skill(
 }
 
 async fn append_skill_backups(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_backups: &mut Vec<SkillBackup>,
     skills: Vec<Skill>,
     root: &Path,
@@ -1551,7 +1551,7 @@ fn restore_central_skill_as_symlink(central_dir: &Path, resource_dir: &Path) -> 
     create_symlink(&relative_target, central_dir)
 }
 
-async fn central_root(pool: &DbPool) -> Result<PathBuf, String> {
+async fn central_root(pool: &AppStore) -> Result<PathBuf, String> {
     let central = db::get_agent_by_id(pool, "central")
         .await?
         .ok_or_else(|| "Central agent not found in database".to_string())?;
@@ -1905,7 +1905,7 @@ fn write_files(root: &Path, files: &[SkillFileBackup]) -> Result<(), String> {
 }
 
 async fn prepare_copy_installation_replay(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
     central_root: &Path,
@@ -1966,7 +1966,7 @@ async fn prepare_copy_installation_replay(
 }
 
 async fn update_existing_custom_agent_backup(
-    pool: &DbPool,
+    pool: &AppStore,
     agent: &AgentBackup,
 ) -> Result<(), String> {
     db::backup::restore_custom_agent(
@@ -1979,7 +1979,7 @@ async fn update_existing_custom_agent_backup(
     .await
 }
 
-async fn upsert_collection_backup(pool: &DbPool, collection: &Collection) -> Result<(), String> {
+async fn upsert_collection_backup(pool: &AppStore, collection: &Collection) -> Result<(), String> {
     db::backup::restore_collection(pool, collection).await
 }
 
@@ -2144,10 +2144,10 @@ mod tests {
         );
     }
 
-    async fn setup_test_db() -> (DbPool, tempfile::TempDir) {
+    async fn setup_test_db() -> (AppStore, tempfile::TempDir) {
         let dir = tempdir().expect("tempdir");
         let db_path = dir.path().join("db.sqlite");
-        let pool = db::create_pool(&db_path.to_string_lossy())
+        let pool = db::open_test_store(&db_path.to_string_lossy())
             .await
             .expect("pool");
         db::init_database(&pool).await.expect("init");
@@ -2265,7 +2265,7 @@ mod tests {
         assert_eq!(notebooks::list(&restored).await.unwrap().len(), 1);
     }
 
-    async fn configure_agent_root(pool: &DbPool, agent_id: &str, root: &Path) {
+    async fn configure_agent_root(pool: &AppStore, agent_id: &str, root: &Path) {
         std::fs::create_dir_all(root).expect("agent root");
         pool.write(|data| {
             data.table_mut("agents").get_mut(agent_id).unwrap()["global_skills_dir"] =

@@ -5,8 +5,8 @@ mod tests {
     use tempfile::tempdir;
 
     /// Create an in-memory SQLite pool and initialize the schema.
-    async fn setup_test_db() -> DbPool {
-        let pool = DbPool::connect(":memory:")
+    async fn setup_test_db() -> AppStore {
+        let pool = AppStore::connect(":memory:")
             .await
             .expect("Failed to create in-memory SQLite pool");
         init_database(&pool)
@@ -46,7 +46,7 @@ mod tests {
         };
         upsert_skill_source_sync(&pool, &baseline).await.unwrap();
         let time = "2026-10-08T08:00:00Z";
-        record_skill_check_times(&pool, &[baseline.skill_id.clone()], time)
+        record_skill_check_times(&pool, std::slice::from_ref(&baseline.skill_id), time)
             .await
             .unwrap();
         let result = get_skill_source_sync(&pool, &baseline.skill_id)
@@ -78,7 +78,7 @@ mod tests {
         assert!(catalog.contains("~/.claude/skills"));
         assert!(catalog.contains("\"enabled\": true"));
 
-        let pool = create_pool(&path_to_string(&dir.path().join("db.sqlite")))
+        let pool = open_test_store(&path_to_string(&dir.path().join("db.sqlite")))
             .await
             .unwrap();
         let agent_count = pool.read(|d| Ok(d.table("agents").len())).unwrap();
@@ -1171,7 +1171,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_migration_adds_created_at_to_skill_installations() {
-        let pool = DbPool::memory().unwrap();
+        let pool = AppStore::memory().unwrap();
         pool.write(|d|{d.table_mut("skill_installations").insert(key2("legacy-skill","claude-code"),serde_json::json!({"skill_id":"legacy-skill","agent_id":"claude-code","installed_path":"/tmp/legacy","link_type":"symlink","symlink_target":null}));Ok(())}).await.unwrap();
         init_database(&pool).await.unwrap();
         let row = pool
@@ -1183,7 +1183,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_managed_installation_migration_requires_matching_symlink_target() {
-        let pool = DbPool::memory().unwrap();
+        let pool = AppStore::memory().unwrap();
         for (id, canonical, kind, target) in [
             (
                 "proven-symlink",
@@ -1230,5 +1230,24 @@ mod tests {
             get_skill_installations(&pool, "stable").await.unwrap()[0].created_at,
             i.created_at
         );
+    }
+}
+
+#[cfg(test)]
+mod scan_batch_tests {
+    use crate::db::*;
+    #[tokio::test]
+    async fn failed_scan_batch_is_atomic_and_keeps_managed_installation() {
+        let pool=AppStore::memory().unwrap();
+        let skill=Skill{id:"scan".into(),name:"Scan".into(),description:None,file_path:"/resource/SKILL.md".into(),canonical_path:Some("/resource".into()),is_central:true,source:None,content:None,scanned_at:"first".into()};
+        let install=SkillInstallation{skill_id:skill.id.clone(),agent_id:"cursor".into(),installed_path:"/managed".into(),link_type:"symlink".into(),symlink_target:Some("/resource".into()),created_at:"first".into()};
+        upsert_skill(&pool,&skill).await.unwrap();upsert_skill_installation(&pool,&install).await.unwrap();
+        let mut scanned=skill.clone();scanned.name="Changed".into();scanned.is_central=false;scanned.scanned_at="next".into();
+        let mut scanned_install=install.clone();scanned_install.installed_path="/other".into();
+        pool.fail_next_commit();assert!(commit_scan_batch(&pool,&[scanned.clone()],&[scanned_install.clone()],&[]).await.is_err());
+        assert_eq!(get_skill_by_id(&pool,"scan").await.unwrap().unwrap().scanned_at,"first");
+        commit_scan_batch(&pool,&[scanned],&[scanned_install],&[]).await.unwrap();
+        let saved=get_skill_by_id(&pool,"scan").await.unwrap().unwrap();assert_eq!(saved.name,"Scan");assert_eq!(saved.scanned_at,"next");
+        assert_eq!(get_skill_installations(&pool,"scan").await.unwrap()[0].installed_path,"/managed");
     }
 }

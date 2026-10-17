@@ -1,9 +1,9 @@
 //! Repository notebook persistence. Short overview notes remain in folder_notes.
 pub use crate::db::notebooks::{list, put, schema};
-use crate::{db::DbPool, AppState};
+use crate::{db::AppStore, AppState};
 
 // Local integer IDs may differ after restore; stable UUIDs and source keys survive.
-pub async fn restore(pool: &DbPool, rows: &[Repository]) -> Result<(), String> {
+pub async fn restore(pool: &AppStore, rows: &[Repository]) -> Result<(), String> {
     let _guard = super::notebook::WRITE.lock().await;
     crate::db::notebooks::restore(pool, rows).await
 }
@@ -49,15 +49,15 @@ impl Repository {
     }
 }
 #[cfg(test)]
-pub async fn create_pool(path: &std::path::Path) -> Result<DbPool, String> {
-    let pool = DbPool::connect(&path.to_string_lossy())
+pub async fn open_test_store(path: &std::path::Path) -> Result<AppStore, String> {
+    let pool = AppStore::connect(&path.to_string_lossy())
         .await
         .map_err(|_| "noteDatabase")?;
     crate::db::init_database(&pool).await?;
     Ok(pool)
 }
 
-pub async fn get(pool: &DbPool, id: i64) -> Result<Repository, String> {
+pub async fn get(pool: &AppStore, id: i64) -> Result<Repository, String> {
     list(pool)
         .await?
         .into_iter()
@@ -97,7 +97,7 @@ pub struct Category {
     pub parent_id: Option<String>,
     pub repository_ids: Vec<i64>,
 }
-pub async fn categories(pool: &DbPool) -> Result<Vec<Category>, String> {
+pub async fn categories(pool: &AppStore) -> Result<Vec<Category>, String> {
     let rows = list(pool).await?;
     let collections = crate::db::get_all_collections(pool).await?;
     let mut result = Vec::new();
@@ -137,7 +137,7 @@ pub async fn ensure_repository_notebook(
 }
 
 async fn ensure_repository_notebook_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     directory: String,
     skill_id: String,
 ) -> Result<Repository, String> {
@@ -249,7 +249,7 @@ pub async fn save_internal_notebook(
 }
 
 async fn save_internal_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     id: i64,
     body: String,
     expected_body: String,
@@ -312,7 +312,7 @@ mod tests {
     #[tokio::test]
     async fn internal_writes_reject_stale_drafts_and_linked_notes() {
         let dir = tempfile::tempdir().unwrap();
-        let pool = create_pool(&dir.path().join("db.sqlite")).await.unwrap();
+        let pool = open_test_store(&dir.path().join("db.sqlite")).await.unwrap();
         let mut row = Repository::new(1, "fixture/project".into());
         row.notebook = "original".into();
         put(&pool, &row).await.unwrap();
@@ -345,7 +345,7 @@ mod tests {
     #[tokio::test]
     async fn local_repository_identity_is_shared_by_members_and_survives_root_remapping() {
         let dir = tempfile::tempdir().unwrap();
-        let pool = create_pool(&dir.path().join("db.sqlite")).await.unwrap();
+        let pool = open_test_store(&dir.path().join("db.sqlite")).await.unwrap();
         let root = dir.path().join("library");
         let skill_dir = root.join("fixture/project/one");
         std::fs::create_dir_all(&skill_dir).unwrap();

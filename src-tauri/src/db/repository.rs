@@ -1,6 +1,6 @@
 //! Repository address persistence. Filesystem changes are coordinated by the caller.
 use crate::commands::notebook_repository::Repository;
-use crate::db::DbPool;
+use crate::db::AppStore;
 use std::path::PathBuf;
 
 pub struct AddressCommit<'a> {
@@ -12,7 +12,7 @@ pub struct AddressCommit<'a> {
     pub notebooks: Vec<Repository>,
 }
 
-pub async fn commit_address(pool: &DbPool, change: AddressCommit<'_>) -> Result<(), String> {
+pub async fn commit_address(pool: &AppStore, change: AddressCommit<'_>) -> Result<(), String> {
     let AddressCommit {
         old,
         new,

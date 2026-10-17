@@ -11,7 +11,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 use std::{collections::HashSet, path::Path};
 use uuid::Uuid;
-pub type DbPool = crate::storage::store::Store;
+pub type AppStore = crate::storage::store::Store;
 pub use crate::db_config::{
     config_path, initialize as initialize_config, load as load_config, update as update_config,
 };
@@ -47,11 +47,12 @@ fn field<'a>(v: &'a Value, k: &str) -> &'a str {
 fn managed(v: &Value) -> bool {
     v["is_managed"].as_bool().unwrap_or(false)
 }
-pub async fn create_pool(db_path: &str) -> Result<DbPool, String> {
-    DbPool::connect(db_path).await
+#[cfg(test)]
+pub async fn open_test_store(db_path: &str) -> Result<AppStore, String> {
+    AppStore::connect(db_path).await
 }
 
-pub async fn init_schema(pool: &DbPool) -> Result<(), String> {
+pub async fn init_schema(pool: &AppStore) -> Result<(), String> {
     initialize_config(pool)?;
     pool.write(|d| {
         let skills = d.table("skills").clone();
@@ -74,7 +75,7 @@ pub async fn init_schema(pool: &DbPool) -> Result<(), String> {
     .await
 }
 
-pub async fn init_database(pool: &DbPool) -> Result<(), String> {
+pub async fn init_database(pool: &AppStore) -> Result<(), String> {
     init_schema(pool).await?;
     let next = pool.read(|d| {
         Ok(["skill_installations", "agent_skill_observations"]
@@ -100,13 +101,13 @@ pub async fn init_database(pool: &DbPool) -> Result<(), String> {
 
 pub async fn prepare_config_dir(config_dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(config_dir).map_err(|e| e.to_string())?;
-    let pool = DbPool::open(config_dir)?;
+    let pool = AppStore::open(config_dir)?;
     initialize_config(&pool)?;
     crate::platform_icons::seed(config_dir)?;
     init_schema(&pool).await
 }
 
-async fn seed_builtin_agents(pool: &DbPool) -> Result<(), String> {
+async fn seed_builtin_agents(pool: &AppStore) -> Result<(), String> {
     let definitions = crate::platforms::load_platform_definitions()?;
     let agents = crate::platforms::agents_from_definitions(&definitions);
     let sync_existing = crate::platforms::platform_dir().is_some();
@@ -114,7 +115,7 @@ async fn seed_builtin_agents(pool: &DbPool) -> Result<(), String> {
 }
 
 async fn seed_builtin_agents_from(
-    pool: &DbPool,
+    pool: &AppStore,
     agents: &[Agent],
     sync_existing: bool,
 ) -> Result<(), String> {
@@ -136,7 +137,7 @@ async fn seed_builtin_agents_from(
     .await
 }
 
-async fn seed_builtin_scan_directories(pool: &DbPool) -> Result<(), String> {
+async fn seed_builtin_scan_directories(pool: &AppStore) -> Result<(), String> {
     let agents = get_all_agents(pool).await?;
     crate::db::update_config(pool, |config| {
         let paths: HashSet<_> = agents
@@ -168,7 +169,7 @@ async fn seed_builtin_scan_directories(pool: &DbPool) -> Result<(), String> {
     })
 }
 
-pub async fn upsert_skill(pool: &DbPool, skill: &Skill) -> Result<(), String> {
+pub async fn upsert_skill(pool: &AppStore, skill: &Skill) -> Result<(), String> {
     pool.write(|d| upsert_skill_in(d, skill)).await
 }
 
@@ -189,7 +190,7 @@ pub fn upsert_skill_in(d: &mut Data, skill: &Skill) -> Result<(), String> {
 }
 
 pub async fn repair_legacy_centralized_resource_skill(
-    pool: &DbPool,
+    pool: &AppStore,
     skill: &Skill,
     legacy_central_path: &str,
 ) -> Result<(), String> {
@@ -209,7 +210,7 @@ pub async fn repair_legacy_centralized_resource_skill(
     .await
 }
 
-pub async fn get_skills_by_agent(pool: &DbPool, agent_id: &str) -> Result<Vec<Skill>, String> {
+pub async fn get_skills_by_agent(pool: &AppStore, agent_id: &str) -> Result<Vec<Skill>, String> {
     pool.read(|d| {
         d.table("skill_installations")
             .values()
@@ -222,7 +223,7 @@ pub async fn get_skills_by_agent(pool: &DbPool, agent_id: &str) -> Result<Vec<Sk
 }
 
 pub async fn get_skills_for_agent(
-    pool: &DbPool,
+    pool: &AppStore,
     agent_id: &str,
 ) -> Result<Vec<SkillForAgent>, String> {
     pool.read(|d| {
@@ -233,27 +234,37 @@ pub async fn get_skills_for_agent(
             .filter(|r| field(r, "agent_id") == agent_id && managed(r))
         {
             let id = field(i, "skill_id");
-            if let Some(s) = d.table("skills").get(id) {
-                let mut v = s.clone();
-                v["row_id"] = json!(id);
-                v["installation_source"] = json!("independent");
-                v["dir_path"] = i["installed_path"].clone();
-                for k in ["link_type", "symlink_target", "created_at"] {
-                    v[k] = i[k].clone();
-                }
-                for k in ["source_kind", "source_root", "conflict_group"] {
-                    v[k] = Value::Null;
-                }
-                v["is_read_only"] = json!(false);
-                v["conflict_count"] = json!(0);
-                for k in ["source_url", "source_author", "source_repo", "source_path"] {
-                    v[k] = d
-                        .table("skill_sources")
-                        .get(id)
-                        .map(|r| r[k].clone())
-                        .unwrap_or(Value::Null);
-                }
-                out.push(serde_json::from_value(v).map_err(|e| e.to_string())?);
+            if let Some(raw) = d.table("skills").get(id) {
+                let skill: Skill = serde::Deserialize::deserialize(raw)
+                    .map_err(|e: serde_json::Error| e.to_string())?;
+                let install: SkillInstallation = serde::Deserialize::deserialize(i)
+                    .map_err(|e: serde_json::Error| e.to_string())?;
+                let source = d.table("skill_sources").get(id);
+                let source_field =
+                    |key: &str| source.and_then(|s| s[key].as_str()).map(str::to_owned);
+                out.push(SkillForAgent {
+                    installation_source: "independent".into(),
+                    row_id: skill.id.clone(),
+                    id: skill.id,
+                    name: skill.name,
+                    description: skill.description,
+                    file_path: skill.file_path,
+                    dir_path: install.installed_path,
+                    link_type: install.link_type,
+                    symlink_target: install.symlink_target,
+                    is_central: skill.is_central,
+                    source: skill.source,
+                    source_kind: None,
+                    source_root: None,
+                    is_read_only: false,
+                    conflict_group: None,
+                    conflict_count: 0,
+                    source_url: source_field("source_url"),
+                    source_author: source_field("source_author"),
+                    source_repo: source_field("source_repo"),
+                    source_path: source_field("source_path"),
+                    created_at: Some(install.created_at),
+                });
             }
         }
         Ok(out)
@@ -261,7 +272,7 @@ pub async fn get_skills_for_agent(
 }
 
 pub async fn upsert_agent_skill_observation(
-    pool: &DbPool,
+    pool: &AppStore,
     observation: &AgentSkillObservation,
 ) -> Result<(), String> {
     pool.write(|d| {
@@ -276,7 +287,7 @@ pub async fn upsert_agent_skill_observation(
 }
 
 pub async fn get_agent_skill_observations(
-    pool: &DbPool,
+    pool: &AppStore,
     agent_id: &str,
 ) -> Result<Vec<AgentSkillObservation>, String> {
     pool.read(|d| {
@@ -289,7 +300,7 @@ pub async fn get_agent_skill_observations(
     })
 }
 
-pub async fn get_central_skills(pool: &DbPool) -> Result<Vec<Skill>, String> {
+pub async fn get_central_skills(pool: &AppStore) -> Result<Vec<Skill>, String> {
     pool.read(|d| {
         Ok(rows::<Skill>(d, "skills")?
             .into_iter()
@@ -302,7 +313,7 @@ pub fn default_skill_resource_library_dir() -> std::path::PathBuf {
     app_data_dir().join("library")
 }
 
-pub async fn get_skill_resource_library_dir(pool: &DbPool) -> Result<std::path::PathBuf, String> {
+pub async fn get_skill_resource_library_dir(pool: &AppStore) -> Result<std::path::PathBuf, String> {
     Ok(get_setting(pool, SKILL_RESOURCE_LIBRARY_DIR_SETTING_KEY)
         .await?
         .map(|path| expand_home_path(&path))
@@ -310,7 +321,7 @@ pub async fn get_skill_resource_library_dir(pool: &DbPool) -> Result<std::path::
 }
 
 pub async fn set_skill_resource_library_dir(
-    pool: &DbPool,
+    pool: &AppStore,
     path: &str,
 ) -> Result<std::path::PathBuf, String> {
     let expanded = expand_home_path(path.trim());
@@ -328,7 +339,7 @@ pub async fn set_skill_resource_library_dir(
     Ok(expanded)
 }
 
-pub async fn get_resource_library_skills(pool: &DbPool) -> Result<Vec<Skill>, String> {
+pub async fn get_resource_library_skills(pool: &AppStore) -> Result<Vec<Skill>, String> {
     pool.read(|d| {
         let mut v: Vec<_> = rows::<Skill>(d, "skills")?
             .into_iter()
@@ -339,11 +350,11 @@ pub async fn get_resource_library_skills(pool: &DbPool) -> Result<Vec<Skill>, St
     })
 }
 
-pub async fn get_skill_by_id(pool: &DbPool, skill_id: &str) -> Result<Option<Skill>, String> {
+pub async fn get_skill_by_id(pool: &AppStore, skill_id: &str) -> Result<Option<Skill>, String> {
     pool.read(|d| one::<Skill>(d, "skills", skill_id))
 }
 
-pub async fn upsert_skill_source(pool: &DbPool, source: &SkillSource) -> Result<(), String> {
+pub async fn upsert_skill_source(pool: &AppStore, source: &SkillSource) -> Result<(), String> {
     pool.write(|d| upsert_skill_source_in(d, source)).await
 }
 
@@ -358,23 +369,23 @@ pub fn upsert_skill_source_in(d: &mut Data, source: &SkillSource) -> Result<(), 
 }
 
 pub async fn get_skill_source(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
 ) -> Result<Option<SkillSource>, String> {
     pool.read(|d| one::<SkillSource>(d, "skill_sources", skill_id))
 }
 
-pub async fn get_all_skill_sources(pool: &DbPool) -> Result<Vec<SkillSource>, String> {
+pub async fn get_all_skill_sources(pool: &AppStore) -> Result<Vec<SkillSource>, String> {
     pool.read(|d| rows(d, "skill_sources"))
 }
 
-pub async fn upsert_skill_source_sync(pool: &DbPool, sync: &SkillSourceSync) -> Result<(), String> {
+pub async fn upsert_skill_source_sync(pool: &AppStore, sync: &SkillSourceSync) -> Result<(), String> {
     pool.write(|d| put(d, "skill_source_syncs", sync.skill_id.clone(), sync))
         .await
 }
 
 pub async fn record_skill_check_times(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_ids: &[String],
     checked_at: &str,
 ) -> Result<(), String> {
@@ -382,25 +393,25 @@ pub async fn record_skill_check_times(
 }
 
 pub async fn get_skill_source_sync(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
 ) -> Result<Option<SkillSourceSync>, String> {
     pool.read(|d| one::<SkillSourceSync>(d, "skill_source_syncs", skill_id))
 }
 
-pub async fn get_all_skill_source_syncs(pool: &DbPool) -> Result<Vec<SkillSourceSync>, String> {
+pub async fn get_all_skill_source_syncs(pool: &AppStore) -> Result<Vec<SkillSourceSync>, String> {
     pool.read(|d| rows(d, "skill_source_syncs"))
 }
 
 pub async fn get_skill_metadata(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
 ) -> Result<Option<SkillMetadata>, String> {
     pool.read(|d| one::<SkillMetadata>(d, "skill_metadata", skill_id))
 }
 
 pub async fn upsert_skill_metadata(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     notes: Option<&str>,
     tags: &[String],
@@ -422,7 +433,7 @@ pub fn parse_skill_metadata_tags(metadata: Option<&SkillMetadata>) -> Vec<String
         .unwrap_or_default()
 }
 
-pub async fn delete_skill(pool: &DbPool, skill_id: &str) -> Result<(), String> {
+pub async fn delete_skill(pool: &AppStore, skill_id: &str) -> Result<(), String> {
     pool.write(|d| {
         for t in [
             "skill_installations",
@@ -440,7 +451,7 @@ pub async fn delete_skill(pool: &DbPool, skill_id: &str) -> Result<(), String> {
 }
 
 pub async fn delete_central_skill_records(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     _skill_name: &str,
 ) -> Result<(), String> {
@@ -463,7 +474,7 @@ pub async fn delete_central_skill_records(
 }
 
 pub async fn delete_skill_owned_records(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     _skill_name: &str,
 ) -> Result<(), String> {
@@ -486,7 +497,7 @@ pub async fn delete_skill_owned_records(
 }
 
 pub async fn upsert_skill_installation(
-    pool: &DbPool,
+    pool: &AppStore,
     installation: &SkillInstallation,
 ) -> Result<(), String> {
     pool.write(|d| {
@@ -505,28 +516,53 @@ pub async fn upsert_skill_installation(
 }
 
 pub async fn upsert_scanned_skill_installation(
-    pool: &DbPool,
+    pool: &AppStore,
     installation: &SkillInstallation,
 ) -> Result<(), String> {
+    pool.write(|d| upsert_scanned_installation_in(d, installation))
+        .await
+}
+fn upsert_scanned_installation_in(
+    d: &mut Data,
+    installation: &SkillInstallation,
+) -> Result<(), String> {
+    let key = key2(&installation.skill_id, &installation.agent_id);
+    let old = d.table("skill_installations").get(&key);
+    if old.is_some_and(managed) {
+        return Ok(());
+    }
+    let mut value = serde_json::to_value(installation).map_err(|e| e.to_string())?;
+    value["is_managed"] = json!(false);
+    if let Some(old) = old {
+        value["created_at"] = old["created_at"].clone();
+    }
+    d.table_mut("skill_installations").insert(key, value);
+    Ok(())
+}
+/// Persist a completed scan scope together, keeping all user-owned fields intact.
+pub async fn commit_scan_batch(
+    pool: &AppStore,
+    skills: &[Skill],
+    installations: &[SkillInstallation],
+    observations: &[AgentSkillObservation],
+) -> Result<(), String> {
     pool.write(|d| {
-        let key = key2(&installation.skill_id, &installation.agent_id);
-        let old = d.table("skill_installations").get(&key).cloned();
-        if old.as_ref().is_some_and(managed) {
-            return Ok(());
+        for s in skills {
+            upsert_skill_in(d, s)?;
         }
-        let mut v = serde_json::to_value(installation).map_err(|e| e.to_string())?;
-        v["is_managed"] = json!(false);
-        if let Some(old) = old {
-            v["created_at"] = old["created_at"].clone();
+        for i in installations {
+            upsert_scanned_installation_in(d, i)?;
         }
-        d.table_mut("skill_installations").insert(key, v);
+        for o in observations {
+            put(d, "agent_skill_observations", o.row_id.clone(), o)?;
+        }
         Ok(())
     })
     .await
 }
 
 pub async fn delete_skill_installation(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
 ) -> Result<(), String> {
@@ -539,7 +575,7 @@ pub async fn delete_skill_installation(
 }
 
 pub async fn delete_skill_installations_by_agent(
-    pool: &DbPool,
+    pool: &AppStore,
     agent_id: &str,
 ) -> Result<(), String> {
     pool.write(|d| {
@@ -551,7 +587,7 @@ pub async fn delete_skill_installations_by_agent(
 }
 
 pub async fn delete_stale_skill_installations(
-    pool: &DbPool,
+    pool: &AppStore,
     agent_id: &str,
     found_skill_ids: &[String],
 ) -> Result<(), String> {
@@ -559,7 +595,7 @@ pub async fn delete_stale_skill_installations(
 }
 
 pub async fn delete_stale_agent_skill_observations(
-    pool: &DbPool,
+    pool: &AppStore,
     agent_id: &str,
     found_row_ids: &[String],
 ) -> Result<(), String> {
@@ -572,7 +608,7 @@ pub async fn delete_stale_agent_skill_observations(
 }
 
 pub async fn delete_skills_not_in_scope(
-    pool: &DbPool,
+    pool: &AppStore,
     found_skill_ids: &[String],
 ) -> Result<(), String> {
     pool.write(|d| {
@@ -593,7 +629,7 @@ pub async fn delete_skills_not_in_scope(
 }
 
 pub async fn get_skill_installations(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
 ) -> Result<Vec<SkillInstallation>, String> {
     pool.read(|d| {
@@ -607,7 +643,7 @@ pub async fn get_skill_installations(
 }
 
 pub(crate) async fn get_skill_installations_for_legacy_repair(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
 ) -> Result<Vec<SkillInstallation>, String> {
     pool.read(|d| {
@@ -621,7 +657,7 @@ pub(crate) async fn get_skill_installations_for_legacy_repair(
 }
 
 pub async fn count_managed_skill_installations(
-    pool: &DbPool,
+    pool: &AppStore,
     agent_id: &str,
 ) -> Result<i64, String> {
     pool.read(|d| {
@@ -632,7 +668,7 @@ pub async fn count_managed_skill_installations(
     })
 }
 
-pub async fn get_managed_skill_ids(pool: &DbPool) -> Result<Vec<String>, String> {
+pub async fn get_managed_skill_ids(pool: &AppStore) -> Result<Vec<String>, String> {
     pool.read(|d| {
         Ok(d.table("skill_installations")
             .values()
@@ -645,7 +681,7 @@ pub async fn get_managed_skill_ids(pool: &DbPool) -> Result<Vec<String>, String>
 }
 
 pub async fn get_read_only_observed_agent_ids_for_skill(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
 ) -> Result<Vec<String>, String> {
     pool.read(|d| {
@@ -663,7 +699,7 @@ pub async fn get_read_only_observed_agent_ids_for_skill(
     })
 }
 
-pub async fn get_all_agents(pool: &DbPool) -> Result<Vec<Agent>, String> {
+pub async fn get_all_agents(pool: &AppStore) -> Result<Vec<Agent>, String> {
     pool.read(|d| {
         let mut v = rows::<Agent>(d, "agents")?;
         v.sort_by(|a, b| {
@@ -675,12 +711,12 @@ pub async fn get_all_agents(pool: &DbPool) -> Result<Vec<Agent>, String> {
     })
 }
 
-pub async fn get_agent_by_id(pool: &DbPool, agent_id: &str) -> Result<Option<Agent>, String> {
+pub async fn get_agent_by_id(pool: &AppStore, agent_id: &str) -> Result<Option<Agent>, String> {
     pool.read(|d| one::<Agent>(d, "agents", agent_id))
 }
 
 pub async fn update_agent_detected(
-    pool: &DbPool,
+    pool: &AppStore,
     agent_id: &str,
     is_detected: bool,
 ) -> Result<(), String> {
@@ -693,7 +729,7 @@ pub async fn update_agent_detected(
     .await
 }
 
-pub async fn insert_custom_agent(pool: &DbPool, agent: &Agent) -> Result<(), String> {
+pub async fn insert_custom_agent(pool: &AppStore, agent: &Agent) -> Result<(), String> {
     pool.write(|d| {
         if d.table("agents").contains_key(&agent.id) {
             return Err("Agent already exists".into());
@@ -708,7 +744,7 @@ pub async fn insert_custom_agent(pool: &DbPool, agent: &Agent) -> Result<(), Str
     Ok(())
 }
 
-pub async fn delete_custom_agent(pool: &DbPool, agent_id: &str) -> Result<(), String> {
+pub async fn delete_custom_agent(pool: &AppStore, agent_id: &str) -> Result<(), String> {
     let agent = get_agent_by_id(pool, agent_id)
         .await?
         .ok_or_else(|| format!("Agent '{}' not found", agent_id))?;
@@ -722,7 +758,7 @@ pub async fn delete_custom_agent(pool: &DbPool, agent_id: &str) -> Result<(), St
 }
 
 pub async fn update_custom_agent(
-    pool: &DbPool,
+    pool: &AppStore,
     agent_id: &str,
     next_agent_id: &str,
     display_name: &str,
@@ -774,7 +810,7 @@ pub async fn update_custom_agent(
 }
 
 pub async fn set_agent_enabled(
-    pool: &DbPool,
+    pool: &AppStore,
     agent_id: &str,
     enabled: bool,
 ) -> Result<Agent, String> {
@@ -795,7 +831,7 @@ pub async fn set_agent_enabled(
 }
 
 pub async fn update_central_agent_skills_dir(
-    pool: &DbPool,
+    pool: &AppStore,
     global_skills_dir: &str,
 ) -> Result<Agent, String> {
     let updated = pool
@@ -811,7 +847,7 @@ pub async fn update_central_agent_skills_dir(
 }
 
 pub async fn create_collection(
-    pool: &DbPool,
+    pool: &AppStore,
     name: &str,
     description: Option<&str>,
 ) -> Result<Collection, String> {
@@ -828,7 +864,7 @@ pub async fn create_collection(
     Ok(row)
 }
 
-pub async fn get_all_collections(pool: &DbPool) -> Result<Vec<Collection>, String> {
+pub async fn get_all_collections(pool: &AppStore) -> Result<Vec<Collection>, String> {
     pool.read(|d| {
         let mut v = rows::<Collection>(d, "collections")?;
         v.sort_by(|a, b| a.created_at.cmp(&b.created_at));
@@ -837,14 +873,14 @@ pub async fn get_all_collections(pool: &DbPool) -> Result<Vec<Collection>, Strin
 }
 
 pub async fn get_collection_by_id(
-    pool: &DbPool,
+    pool: &AppStore,
     collection_id: &str,
 ) -> Result<Option<Collection>, String> {
     pool.read(|d| one::<Collection>(d, "collections", collection_id))
 }
 
 pub async fn update_collection(
-    pool: &DbPool,
+    pool: &AppStore,
     collection_id: &str,
     name: &str,
     description: Option<&str>,
@@ -860,7 +896,7 @@ pub async fn update_collection(
     .await
 }
 
-pub async fn delete_collection(pool: &DbPool, collection_id: &str) -> Result<(), String> {
+pub async fn delete_collection(pool: &AppStore, collection_id: &str) -> Result<(), String> {
     pool.write(|d| {
         d.table_mut("collection_skills")
             .retain(|_, r| field(r, "collection_id") != collection_id);
@@ -871,7 +907,7 @@ pub async fn delete_collection(pool: &DbPool, collection_id: &str) -> Result<(),
 }
 
 pub async fn add_skill_to_collection(
-    pool: &DbPool,
+    pool: &AppStore,
     collection_id: &str,
     skill_id: &str,
 ) -> Result<(), String> {
@@ -879,7 +915,7 @@ pub async fn add_skill_to_collection(
 }
 
 pub async fn remove_skill_from_collection(
-    pool: &DbPool,
+    pool: &AppStore,
     collection_id: &str,
     skill_id: &str,
 ) -> Result<(), String> {
@@ -892,7 +928,7 @@ pub async fn remove_skill_from_collection(
 }
 
 pub async fn get_collection_skills(
-    pool: &DbPool,
+    pool: &AppStore,
     collection_id: &str,
 ) -> Result<Vec<Skill>, String> {
     pool.read(|d| {
@@ -912,7 +948,7 @@ pub async fn get_collection_skills(
 }
 
 pub async fn get_skill_collections(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
 ) -> Result<Vec<Collection>, String> {
     pool.read(|d| {
@@ -931,7 +967,7 @@ pub async fn get_skill_collections(
     })
 }
 
-pub async fn get_scan_directories(pool: &DbPool) -> Result<Vec<ScanDirectory>, String> {
+pub async fn get_scan_directories(pool: &AppStore) -> Result<Vec<ScanDirectory>, String> {
     let mut dirs = crate::db::load_config(pool)?.scan_directories;
     dirs.sort_by(|a, b| {
         b.is_builtin
@@ -942,7 +978,7 @@ pub async fn get_scan_directories(pool: &DbPool) -> Result<Vec<ScanDirectory>, S
 }
 
 pub async fn get_scan_directory_by_id(
-    pool: &DbPool,
+    pool: &AppStore,
     id: i64,
 ) -> Result<Option<ScanDirectory>, String> {
     Ok(get_scan_directories(pool)
@@ -965,7 +1001,7 @@ fn next_scan_directory_id(config: &mut crate::config_store::AppConfig) -> i64 {
 }
 
 pub async fn add_scan_directory(
-    pool: &DbPool,
+    pool: &AppStore,
     path: &str,
     label: Option<&str>,
 ) -> Result<ScanDirectory, String> {
@@ -987,7 +1023,7 @@ pub async fn add_scan_directory(
 }
 
 pub async fn update_scan_directory(
-    pool: &DbPool,
+    pool: &AppStore,
     path: &str,
     new_path: &str,
     label: Option<&str>,
@@ -1017,7 +1053,7 @@ pub async fn update_scan_directory(
     })
 }
 
-pub async fn remove_scan_directory(pool: &DbPool, path: &str) -> Result<(), String> {
+pub async fn remove_scan_directory(pool: &AppStore, path: &str) -> Result<(), String> {
     let dir = get_scan_directories(pool)
         .await?
         .into_iter()
@@ -1034,7 +1070,7 @@ pub async fn remove_scan_directory(pool: &DbPool, path: &str) -> Result<(), Stri
 }
 
 pub async fn toggle_scan_directory(
-    pool: &DbPool,
+    pool: &AppStore,
     path: &str,
     is_active: bool,
 ) -> Result<(), String> {
@@ -1050,7 +1086,7 @@ pub async fn toggle_scan_directory(
 }
 
 pub async fn upsert_builtin_scan_directory(
-    pool: &DbPool,
+    pool: &AppStore,
     path: &str,
     label: &str,
 ) -> Result<(), String> {
@@ -1078,18 +1114,18 @@ pub async fn upsert_builtin_scan_directory(
     })
 }
 
-pub async fn get_setting(pool: &DbPool, key: &str) -> Result<Option<String>, String> {
+pub async fn get_setting(pool: &AppStore, key: &str) -> Result<Option<String>, String> {
     Ok(crate::db::load_config(pool)?.settings.get(key).cloned())
 }
 
-pub async fn set_setting(pool: &DbPool, key: &str, value: &str) -> Result<(), String> {
+pub async fn set_setting(pool: &AppStore, key: &str, value: &str) -> Result<(), String> {
     crate::db::update_config(pool, |config| {
         config.settings.insert(key.into(), value.into());
         Ok(())
     })
 }
 
-pub async fn save_github_stars(pool: &DbPool, repository: &str, stars: i64) -> Result<(), String> {
+pub async fn save_github_stars(pool: &AppStore, repository: &str, stars: i64) -> Result<(), String> {
     pool.write(|d| save_github_stars_in(d, repository, stars))
         .await
 }
@@ -1105,15 +1141,22 @@ pub fn save_github_stars_in(d: &mut Data, repository: &str, stars: i64) -> Resul
     if stars < 0 {
         return Err("Stars must be nonnegative".into());
     }
+    let key = repository.to_ascii_lowercase();
+    let spelling = d
+        .table("github_repository_stats")
+        .get(&key)
+        .and_then(|r| r["repository"].as_str())
+        .unwrap_or(repository)
+        .to_owned();
     put(
         d,
         "github_repository_stats",
-        repository.to_ascii_lowercase(),
-        &json!({"repository":repository,"stars":stars,"checked_at":Utc::now().to_rfc3339()}),
+        key,
+        &json!({"repository":spelling,"stars":stars,"checked_at":Utc::now().to_rfc3339()}),
     )
 }
 
-pub async fn get_github_stars(pool: &DbPool, repository: &str) -> Result<Option<i64>, String> {
+pub async fn get_github_stars(pool: &AppStore, repository: &str) -> Result<Option<i64>, String> {
     pool.read(|d| {
         Ok(d.table("github_repository_stats")
             .get(&repository.to_ascii_lowercase())
@@ -1122,7 +1165,7 @@ pub async fn get_github_stars(pool: &DbPool, repository: &str) -> Result<Option<
 }
 
 pub async fn collection_member_ids(
-    pool: &DbPool,
+    pool: &AppStore,
     collection_id: &str,
 ) -> Result<Vec<String>, String> {
     pool.read(|d| {
@@ -1134,7 +1177,7 @@ pub async fn collection_member_ids(
     })
 }
 
-pub async fn managed_central_paths(pool: &DbPool) -> Result<Vec<(String, String)>, String> {
+pub async fn managed_central_paths(pool: &AppStore) -> Result<Vec<(String, String)>, String> {
     pool.read(|d| {
         Ok(d.table("skill_installations")
             .values()
@@ -1149,7 +1192,7 @@ pub async fn managed_central_paths(pool: &DbPool) -> Result<Vec<(String, String)
     })
 }
 
-pub async fn has_pending_address_moves(pool: &DbPool) -> Result<bool, String> {
+pub async fn has_pending_address_moves(pool: &AppStore) -> Result<bool, String> {
     pool.read(|d| Ok(!d.table("repository_address_moves").is_empty()))
 }
 #[cfg(test)]

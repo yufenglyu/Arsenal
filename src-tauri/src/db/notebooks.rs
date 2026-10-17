@@ -1,7 +1,7 @@
 //! Native JSON repository notebooks, preserving stable identities.
 use crate::commands::notebook_repository::{validate, Repository};
-use crate::db::{rows, DbPool};
-pub async fn schema(_pool: &DbPool) -> Result<(), String> {
+use crate::db::{rows, AppStore};
+pub async fn schema(_pool: &AppStore) -> Result<(), String> {
     Ok(())
 }
 fn list_data(d: &crate::storage::store::Data) -> Result<Vec<Repository>, String> {
@@ -9,10 +9,10 @@ fn list_data(d: &crate::storage::store::Data) -> Result<Vec<Repository>, String>
     rows.sort_by_key(|r| r.id);
     Ok(rows)
 }
-pub async fn list(pool: &DbPool) -> Result<Vec<Repository>, String> {
+pub async fn list(pool: &AppStore) -> Result<Vec<Repository>, String> {
     pool.read(list_data)
 }
-pub async fn put(pool: &DbPool, row: &Repository) -> Result<(), String> {
+pub async fn put(pool: &AppStore, row: &Repository) -> Result<(), String> {
     pool.write(|d| {
         let mut all = list_data(d)?;
         all.retain(|r| r.id != row.id);
@@ -28,7 +28,7 @@ pub async fn put(pool: &DbPool, row: &Repository) -> Result<(), String> {
     })
     .await
 }
-pub async fn restore(pool: &DbPool, incoming: &[Repository]) -> Result<(), String> {
+pub async fn restore(pool: &AppStore, incoming: &[Repository]) -> Result<(), String> {
     validate(incoming)?;
     pool.write(|d| {
         let mut all = list_data(d)?;
@@ -65,7 +65,7 @@ fn allocate(d: &mut crate::storage::store::Data) -> Result<i64, String> {
     d.table_mut("store_counters").insert("repository_notebooks".into(), serde_json::json!({"next_id":next}));
     Ok(id)
 }
-pub async fn next_id(pool: &DbPool) -> Result<i64, String> {
+pub async fn next_id(pool: &AppStore) -> Result<i64, String> {
     pool.write(allocate).await
 }
 
@@ -74,7 +74,7 @@ mod tests {
     use super::*;
     #[tokio::test]
     async fn deleted_highest_notebook_id_is_not_reused() {
-        let pool = DbPool::memory().unwrap();
+        let pool = AppStore::memory().unwrap();
         put(&pool, &Repository::new(42, "fixture/repo".into())).await.unwrap();
         pool.write(|d| { d.table_mut("repository_notebooks").clear(); Ok(()) }).await.unwrap();
         let (a,b) = tokio::join!(next_id(&pool),next_id(&pool));
@@ -86,7 +86,7 @@ mod tests {
     }
     #[tokio::test]
     async fn exhausted_counter_fails_without_wrapping() {
-        let pool = DbPool::memory().unwrap();
+        let pool = AppStore::memory().unwrap();
         pool.write(|d| { d.table_mut("store_counters").insert("repository_notebooks".into(),serde_json::json!({"next_id":i64::MAX})); Ok(()) }).await.unwrap();
         assert!(next_id(&pool).await.is_err());
     }

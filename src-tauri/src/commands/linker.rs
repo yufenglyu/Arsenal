@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use super::agents::is_agent_detected;
-use crate::db::{self, DbPool, ScanDirectory, SkillInstallation};
+use crate::db::{self, AppStore, ScanDirectory, SkillInstallation};
 use crate::path_utils::{
     path_to_string, prune_empty_parent_dirs, remove_path_if_no_skill_markdown, remove_symlink_path,
 };
@@ -96,7 +96,7 @@ pub(crate) async fn project_target_for_scan_directory(
 }
 
 async fn install_target_for_agent_id(
-    pool: &DbPool,
+    pool: &AppStore,
     agent_id: &str,
 ) -> Result<InstallTarget, String> {
     if let Some(scan_directory_id) = parse_project_agent_id(agent_id) {
@@ -126,7 +126,7 @@ async fn install_target_for_agent_id(
 }
 
 pub(crate) async fn agent_skills_dir_shares_central(
-    pool: &DbPool,
+    pool: &AppStore,
     agent_id: &str,
 ) -> Result<bool, String> {
     let target = install_target_for_agent_id(pool, agent_id).await?;
@@ -359,7 +359,7 @@ fn resource_dir_for_central_entry(
 }
 
 pub async fn add_resource_skill_to_central_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
 ) -> Result<AddResourceSkillToCentralResult, String> {
     let mut skill = db::get_skill_by_id(pool, skill_id)
@@ -436,7 +436,7 @@ pub async fn add_resource_skill_to_central_impl(
 }
 
 pub async fn remove_resource_skill_from_central_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
 ) -> Result<RemoveResourceSkillFromCentralResult, String> {
     let mut skill = db::get_skill_by_id(pool, skill_id)
@@ -510,7 +510,7 @@ pub async fn remove_resource_skill_from_central_impl(
 }
 
 async fn sync_central_skill_to_platforms(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     central_root: &Path,
 ) -> Result<(), String> {
@@ -560,7 +560,7 @@ async fn sync_central_skill_to_platforms(
 /// Drop Central Skills rows whose directory/link is already gone, and uninstall
 /// leftover platform/project copies. This heals the case where a parent folder
 /// was deleted without matching the nested symlink skills in the database.
-pub(crate) async fn reconcile_orphaned_central_skills(pool: &DbPool) -> Result<(), String> {
+pub(crate) async fn reconcile_orphaned_central_skills(pool: &AppStore) -> Result<(), String> {
     let Some(central) = db::get_agent_by_id(pool, "central").await? else {
         return Ok(());
     };
@@ -613,7 +613,7 @@ pub(crate) async fn reconcile_orphaned_central_skills(pool: &DbPool) -> Result<(
 }
 
 pub(crate) async fn sync_all_central_skills_to_detected_platforms(
-    pool: &DbPool,
+    pool: &AppStore,
 ) -> Result<(), String> {
     let central_root = db::get_agent_by_id(pool, "central")
         .await?
@@ -639,7 +639,7 @@ pub(crate) async fn sync_all_central_skills_to_detected_platforms(
 }
 
 async fn install_source_dir_for_skill(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     central_root: &Path,
 ) -> Result<PathBuf, String> {
@@ -763,7 +763,7 @@ pub(crate) fn validate_platform_install_target(
 }
 
 async fn existing_install_path_for_agent(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
 ) -> Result<Option<String>, String> {
@@ -773,7 +773,7 @@ async fn existing_install_path_for_agent(
 }
 
 async fn existing_installation_for_agent(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
 ) -> Result<Option<SkillInstallation>, String> {
@@ -784,7 +784,7 @@ async fn existing_installation_for_agent(
 }
 
 async fn repair_legacy_platform_link_in_central(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
     central_root: &Path,
@@ -846,7 +846,7 @@ async fn repair_legacy_platform_link_in_central(
 }
 
 async fn universal_available_install_result(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
     canonical_dir: &Path,
@@ -878,7 +878,7 @@ async fn universal_available_install_result(
 /// - A real (non-symlink) directory already exists at the target path.
 /// - `agent_id` is "central" (would create a self-referencing symlink).
 async fn install_skill_to_agent_from_source_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
     source_override: Option<&Path>,
@@ -986,14 +986,14 @@ async fn install_skill_to_agent_from_source_impl(
 }
 
 pub async fn install_skill_to_agent_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
 ) -> Result<InstallResult, String> {
     install_skill_to_agent_from_source_impl(pool, skill_id, agent_id, None, true).await
 }
 
-async fn resource_source_dir_for_skill(pool: &DbPool, skill_id: &str) -> Result<PathBuf, String> {
+async fn resource_source_dir_for_skill(pool: &AppStore, skill_id: &str) -> Result<PathBuf, String> {
     let skill = db::get_skill_by_id(pool, skill_id)
         .await?
         .ok_or_else(|| format!("Skill '{}' not found in database", skill_id))?;
@@ -1068,7 +1068,7 @@ fn find_resource_skill_dir_by_id(resource_root: &Path, skill_id: &str) -> Option
 }
 
 pub async fn install_resource_skill_to_agent_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
     method: &str,
@@ -1129,7 +1129,7 @@ pub async fn install_resource_skill_to_agent_impl(
 }
 
 pub async fn install_skill_to_agent_auto_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
 ) -> Result<InstallResult, String> {
@@ -1143,7 +1143,7 @@ pub async fn install_skill_to_agent_auto_impl(
 }
 
 async fn install_central_skill_to_agent_for_sync(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
 ) -> Result<InstallResult, String> {
@@ -1173,7 +1173,7 @@ fn should_fallback_to_copy(_error: &str) -> bool {
 /// `agent.global_skills_dir/<skill_id>`. Existing symlinks at the target are
 /// replaced; existing real directories cause an error.
 async fn install_skill_to_agent_copy_from_source_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
     source_override: Option<&Path>,
@@ -1277,7 +1277,7 @@ async fn install_skill_to_agent_copy_from_source_impl(
 }
 
 pub async fn install_skill_to_agent_copy_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
 ) -> Result<InstallResult, String> {
@@ -1293,7 +1293,7 @@ pub async fn install_skill_to_agent_copy_impl(
 /// For copied skills: removes the copied directory (tracked in the DB as link_type='copy').
 /// Refuses to delete real directories not tracked as copies in the DB.
 pub async fn uninstall_skill_from_agent_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
 ) -> Result<(), String> {
@@ -1363,7 +1363,7 @@ pub async fn uninstall_skill_from_agent_impl(
 /// Remove leftover mirrored folders under each platform/project skills root
 /// after a Central Skills directory group has been deleted.
 pub(crate) async fn prune_mirrored_relative_path_from_install_targets(
-    pool: &DbPool,
+    pool: &AppStore,
     relative_path: &str,
 ) -> Result<(), String> {
     let relative = Path::new(relative_path);
@@ -1537,7 +1537,7 @@ pub async fn batch_install_resource_skill_to_agents(
 mod tests {
     use super::*;
     use crate::db;
-    use crate::db::DbPool as SqlitePool;
+    use crate::db::AppStore as AppStore;
     use std::fs;
     use tempfile::TempDir;
 
@@ -1555,8 +1555,8 @@ mod tests {
     /// Create an in-memory SQLite pool with the full schema initialised and
     /// the central/claude-code agent directories redirected to `central_dir`
     /// and `agent_dir` respectively.
-    async fn setup_db(central_dir: &Path, agent_dir: &Path) -> DbPool {
-        let pool = SqlitePool::connect(":memory:").await.unwrap();
+    async fn setup_db(central_dir: &Path, agent_dir: &Path) -> AppStore {
+        let pool = AppStore::connect(":memory:").await.unwrap();
         db::init_database(&pool).await.unwrap();
 
         pool.write(|d| {
@@ -1597,7 +1597,7 @@ mod tests {
         skill_dir
     }
 
-    async fn create_resource_skill(pool: &DbPool, resource_dir: &Path, skill_id: &str) -> PathBuf {
+    async fn create_resource_skill(pool: &AppStore, resource_dir: &Path, skill_id: &str) -> PathBuf {
         let skill_dir = create_central_skill(resource_dir, skill_id);
         let skill = db::Skill {
             id: skill_id.to_string(),
@@ -1614,7 +1614,7 @@ mod tests {
         skill_dir
     }
 
-    async fn create_noncentral_skill(pool: &DbPool, source_root: &Path, skill_id: &str) -> PathBuf {
+    async fn create_noncentral_skill(pool: &AppStore, source_root: &Path, skill_id: &str) -> PathBuf {
         let skill_dir = create_central_skill(source_root, skill_id);
         db::upsert_skill(
             pool,
@@ -2151,7 +2151,7 @@ mod tests {
         assert_eq!(skill.canonical_path, None);
     }
 
-    async fn point_agent_at_central(pool: &DbPool, agent_id: &str, central_dir: &Path) {
+    async fn point_agent_at_central(pool: &AppStore, agent_id: &str, central_dir: &Path) {
         pool.write(|d| {
             d.table_mut("agents").get_mut(agent_id).unwrap()["global_skills_dir"] =
                 central_dir.to_string_lossy().to_string().into();
@@ -3061,7 +3061,7 @@ mod tests {
     /// Helper that mirrors `batch_install_to_agents` but works with a raw pool
     /// (no Tauri State).
     async fn batch_install_impl(
-        pool: &DbPool,
+        pool: &AppStore,
         skill_id: &str,
         agent_ids: &[String],
     ) -> BatchInstallResult {
@@ -3851,7 +3851,7 @@ pub(crate) struct InstallationRelocation {
 }
 
 async fn validate_relocation_path(
-    pool: &DbPool,
+    pool: &AppStore,
     record: &SkillInstallation,
 ) -> Result<PathBuf, String> {
     let target = install_target_for_agent_id(pool, &record.agent_id).await?;
@@ -3878,7 +3878,7 @@ async fn validate_relocation_path(
 
 /// Capture exact link entries before moving a source. Copy installations are untouched.
 pub(crate) async fn prepare_installation_relocation_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     old: &Path,
     new: &Path,
@@ -3919,7 +3919,7 @@ pub(crate) async fn prepare_installation_relocation_impl(
 
 /// Idempotent journal replay repairs recorded links at their original installation locations.
 pub(crate) async fn apply_installation_relocation_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     plan: &InstallationRelocation,
 ) -> Result<(), String> {
     let root = db::get_skill_resource_library_dir(pool).await?;
@@ -3971,7 +3971,7 @@ pub(crate) async fn apply_installation_relocation_impl(
 
 /// Strict mirror refreshes only recorded targets; copy edits intentionally follow the source.
 pub(crate) async fn refresh_resource_installations_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
 ) -> Result<(), String> {
     let source = resource_source_dir_for_skill(pool, skill_id).await?;
@@ -4032,7 +4032,7 @@ pub(crate) async fn refresh_resource_installations_impl(
 /// Before mirroring, restore the primary resource identity and record the hosted link.
 /// Standalone central directories and links outside the resource library are untouched.
 pub(crate) async fn normalize_resource_backed_central_records_impl(
-    pool: &DbPool,
+    pool: &AppStore,
 ) -> Result<(), String> {
     let root = resolved_path(&db::get_skill_resource_library_dir(pool).await?);
     let Some(central) = db::get_agent_by_id(pool, "central").await? else {

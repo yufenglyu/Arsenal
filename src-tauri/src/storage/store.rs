@@ -125,8 +125,9 @@ impl Store {
         let path = temp.path().to_owned();
         Self::open_inner(&path, Some(temp))
     }
+    #[cfg(test)]
     pub async fn connect(path: &str) -> Result<Self, String> {
-        if path == ":memory:" || path == "sqlite::memory:" {
+        if path == ":memory:" {
             Self::memory()
         } else {
             let path = Path::new(path);
@@ -140,6 +141,7 @@ impl Store {
     pub fn directory(&self) -> &Path {
         &self.0.directory
     }
+    #[cfg(test)]
     pub async fn close(&self) {}
     #[cfg(test)]
     pub fn fail_table_write(&self, table: &str) {

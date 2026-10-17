@@ -1,10 +1,10 @@
 //! Import metadata commits; file staging remains owned by the import workflow.
-use super::{DbPool, Skill, SkillSource};
+use super::{AppStore, Skill, SkillSource};
 
 pub struct ImportCommit(crate::storage::store::Transaction);
 
 impl ImportCommit {
-    pub async fn begin(pool: &DbPool) -> Result<Self, String> {
+    pub async fn begin(pool: &AppStore) -> Result<Self, String> {
         pool.begin().await.map(Self).map_err(|e| e.to_string())
     }
 
@@ -33,11 +33,11 @@ impl ImportCommit {
     }
 }
 
-pub async fn has_receipt(pool: &DbPool, id: &str) -> Result<bool, String> {
+pub async fn has_receipt(pool: &AppStore, id: &str) -> Result<bool, String> {
     pool.read(|data| Ok(data.table("import_transaction_receipts").contains_key(id)))
 }
 
-pub async fn installed_paths(pool: &DbPool) -> Result<Vec<String>, String> {
+pub async fn installed_paths(pool: &AppStore) -> Result<Vec<String>, String> {
     pool.read(|data| {
         Ok(data
             .table("skill_installations")
@@ -47,7 +47,7 @@ pub async fn installed_paths(pool: &DbPool) -> Result<Vec<String>, String> {
     })
 }
 
-pub async fn canonical_paths(pool: &DbPool) -> Result<Vec<(String, String)>, String> {
+pub async fn canonical_paths(pool: &AppStore) -> Result<Vec<(String, String)>, String> {
     pool.read(|data| {
         Ok(data
             .table("skills")
@@ -68,7 +68,7 @@ mod durability_tests {
     #[tokio::test]
     async fn import_receipt_and_metadata_publish_together_across_reopen() {
         let root = tempfile::tempdir().unwrap();
-        let store = DbPool::open(root.path()).unwrap();
+        let store = AppStore::open(root.path()).unwrap();
         let skill = Skill { id:"synthetic".into(), name:"Synthetic".into(), description:None,
             file_path:"/synthetic/SKILL.md".into(), canonical_path:Some("/synthetic".into()),
             is_central:false, source:Some("github".into()), content:None, scanned_at:"2026-01-01".into() };
@@ -80,13 +80,13 @@ mod durability_tests {
         store.fail_table_write("skill_sources");
         assert!(tx.commit().await.is_err());
         drop(store);
-        let store = DbPool::open(root.path()).unwrap();
+        let store = AppStore::open(root.path()).unwrap();
         assert!(!has_receipt(&store,"receipt").await.unwrap());
         assert!(crate::db::get_skill_by_id(&store,"synthetic").await.unwrap().is_none());
         let mut tx = ImportCommit::begin(&store).await.unwrap();
         tx.skill(&skill).await.unwrap(); tx.source(&source).await.unwrap(); tx.receipt("receipt").await.unwrap();
         tx.commit().await.unwrap(); drop(store);
-        let store = DbPool::open(root.path()).unwrap();
+        let store = AppStore::open(root.path()).unwrap();
         assert!(has_receipt(&store,"receipt").await.unwrap());
         assert_eq!(crate::db::get_skill_by_id(&store,"synthetic").await.unwrap().unwrap().name,"Synthetic");
         assert_eq!(store.read(|d|Ok(d.table("skill_sources")["synthetic"]["source_repo"].clone())).unwrap(),"repo");

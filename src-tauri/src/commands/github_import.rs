@@ -12,7 +12,7 @@ use std::path::{Component, Path, PathBuf};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::{
-    db::{self, DbPool, Skill},
+    db::{self, AppStore, Skill},
     path_utils::paths_resolve_to_same_entry,
     AppState,
 };
@@ -310,7 +310,7 @@ pub async fn fetch_github_skill_markdown(
 }
 
 async fn preview_github_repo_import_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     repo_url: &str,
 ) -> Result<GitHubRepoPreview, String> {
     let auth = github_direct_auth_from_settings(pool).await?;
@@ -334,7 +334,7 @@ async fn preview_github_repo_import_impl(
 }
 
 pub(crate) async fn import_github_repo_snapshot_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     input: GitHubSnapshotImportRequest,
     app: Option<&AppHandle>,
 ) -> Result<GitHubRepoImportResult, String> {
@@ -383,7 +383,7 @@ pub(crate) async fn import_github_repo_snapshot_impl(
 }
 
 pub(crate) async fn import_github_repo_skills_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     repo_url: &str,
     selections: Vec<GitHubSkillImportSelection>,
     app: Option<&AppHandle>,
@@ -392,7 +392,7 @@ pub(crate) async fn import_github_repo_skills_impl(
 }
 
 async fn import_github_repo_skills_cancellable(
-    pool: &DbPool,
+    pool: &AppStore,
     repo_url: &str,
     selections: Vec<GitHubSkillImportSelection>,
     app: Option<&AppHandle>,
@@ -434,7 +434,7 @@ async fn import_github_repo_skills_cancellable(
 }
 
 pub(crate) async fn import_prepared_snapshot(
-    pool: &DbPool,
+    pool: &AppStore,
     repo: GitHubRepoRef,
     snapshot: &GitHubRepoSnapshot,
     selections: Vec<GitHubSkillImportSelection>,
@@ -891,11 +891,11 @@ impl Drop for ImportDirectoryTransaction {
     }
 }
 
-async fn skill_resource_library_root(pool: &DbPool) -> Result<PathBuf, String> {
+async fn skill_resource_library_root(pool: &AppStore) -> Result<PathBuf, String> {
     db::get_skill_resource_library_dir(pool).await
 }
 
-async fn current_managed_skill_ids(pool: &DbPool) -> Result<HashSet<String>, String> {
+async fn current_managed_skill_ids(pool: &AppStore) -> Result<HashSet<String>, String> {
     Ok(db::imports::canonical_paths(pool)
         .await?
         .into_iter()
@@ -906,7 +906,7 @@ async fn current_managed_skill_ids(pool: &DbPool) -> Result<HashSet<String>, Str
 
 // Explicit update targets retain their original identity and directory after renamed imports.
 async fn resolve_update_target(
-    pool: &DbPool,
+    pool: &AppStore,
     id: &str,
     repository: &str,
     resource_root: &Path,
@@ -945,7 +945,7 @@ async fn resolve_update_target(
 }
 
 async fn resolve_import_skill_id(
-    pool: &DbPool,
+    pool: &AppStore,
     candidate: &RemoteSkillCandidate,
     occupied_ids: &mut HashSet<String>,
     target_dir: &Path,
@@ -998,7 +998,7 @@ fn canonical_skill_path_exists(path: &str) -> bool {
 }
 
 async fn build_preview_skills(
-    pool: &DbPool,
+    pool: &AppStore,
     repo: &GitHubRepoRef,
     candidates: &[RemoteSkillCandidate],
 ) -> Result<Vec<GitHubSkillPreview>, String> {
@@ -1048,7 +1048,7 @@ async fn build_preview_skills(
 }
 
 pub(crate) async fn cache_repository_stars(
-    pool: &DbPool,
+    pool: &AppStore,
     repo: &GitHubRepoRef,
 ) -> Result<(), String> {
     if let Some(stars) = repo.stars {
@@ -1082,7 +1082,7 @@ pub async fn refresh_repository(
     refresh_repository_impl(&state.db, &repository).await
 }
 
-async fn refresh_repository_impl(pool: &DbPool, repository: &str) -> Result<i64, String> {
+async fn refresh_repository_impl(pool: &AppStore, repository: &str) -> Result<i64, String> {
     let auth = github_direct_auth_from_settings(pool).await?;
     let mut repo = resolve_repo_ref(repository, auth.as_deref()).await?;
     let stars = repo.stars.ok_or("Repository star count is unavailable")?;
@@ -1140,7 +1140,7 @@ async fn refresh_repository_impl(pool: &DbPool, repository: &str) -> Result<i64,
 }
 
 async fn apply_repository_metadata(
-    pool: &DbPool,
+    pool: &AppStore,
     repository: &str,
     repo: &GitHubRepoRef,
     snapshot: &GitHubRepoSnapshot,
@@ -1332,7 +1332,7 @@ pub(crate) async fn fetch_repo_head_ref(
 }
 
 pub(crate) async fn github_direct_auth_from_settings(
-    pool: &DbPool,
+    pool: &AppStore,
 ) -> Result<Option<String>, String> {
     Ok(db::get_setting(pool, GITHUB_PAT_SETTING_KEY)
         .await?
@@ -3505,10 +3505,10 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::tempdir;
 
-    async fn setup_test_db() -> DbPool {
+    async fn setup_test_db() -> AppStore {
         let dir = tempdir().expect("tempdir");
         let db_path = dir.path().join("github-import.sqlite");
-        let pool = db::create_pool(db_path.to_str().unwrap())
+        let pool = db::open_test_store(db_path.to_str().unwrap())
             .await
             .expect("create db");
         db::init_database(&pool).await.expect("init db");
@@ -5070,7 +5070,7 @@ pub(crate) fn mirror_skill_files(
         .collect()
 }
 pub(crate) async fn mirror_documents(
-    pool: &DbPool,
+    pool: &AppStore,
     repo: &GitHubRepoRef,
     snapshot: &GitHubRepoSnapshot,
 ) -> Result<(), String> {
@@ -5102,7 +5102,7 @@ pub(crate) async fn mirror_documents(
 }
 
 /// Recover interrupted swaps before scanning, so a temporary missing SKILL.md cannot erase identity.
-pub(crate) async fn recover_import_transactions(pool: &DbPool) -> Result<(), String> {
+pub(crate) async fn recover_import_transactions(pool: &AppStore) -> Result<(), String> {
     let library = db::get_skill_resource_library_dir(pool).await?;
     let Some(parent) = library.parent().filter(|p| p.exists()) else {
         return Ok(());

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::db::{self, Agent, DbPool};
+use crate::db::{self, Agent, AppStore};
 use crate::path_utils::{expand_home_path, path_to_string, paths_resolve_to_same_entry};
 use crate::AppState;
 
@@ -92,7 +92,7 @@ fn agent_to_with_status(agent: Agent, central_root: Option<&str>) -> AgentWithSt
 }
 
 async fn refresh_agent_status(
-    pool: &DbPool,
+    pool: &AppStore,
     agent: Agent,
     central_root: Option<&str>,
 ) -> Result<AgentWithStatus, String> {
@@ -111,7 +111,7 @@ async fn refresh_agent_status(
 // ─── Core Logic ───────────────────────────────────────────────────────────────
 
 /// Return all agents from the DB with live detection status.
-pub async fn get_agents_impl(pool: &DbPool) -> Result<Vec<AgentWithStatus>, String> {
+pub async fn get_agents_impl(pool: &AppStore) -> Result<Vec<AgentWithStatus>, String> {
     let agents = db::get_all_agents(pool).await?;
     let central_root = agents
         .iter()
@@ -126,7 +126,7 @@ pub async fn get_agents_impl(pool: &DbPool) -> Result<Vec<AgentWithStatus>, Stri
 
 /// Scan the filesystem to update each agent's `is_detected` flag, then return
 /// all agents with their refreshed status.
-pub async fn detect_agents_impl(pool: &DbPool) -> Result<Vec<AgentWithStatus>, String> {
+pub async fn detect_agents_impl(pool: &AppStore) -> Result<Vec<AgentWithStatus>, String> {
     let agents = db::get_all_agents(pool).await?;
     let mut result = Vec::with_capacity(agents.len());
     let central_root = agents
@@ -159,7 +159,7 @@ fn slugify_platform_id(value: &str) -> String {
 
 /// Insert a new user-defined agent and return its representation.
 pub async fn add_custom_agent_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     config: CustomAgentConfig,
 ) -> Result<AgentWithStatus, String> {
     // Derive an ID from the provided value or the display_name.
@@ -213,7 +213,7 @@ pub async fn add_custom_agent_impl(
 
 /// Update an existing agent and return its updated representation.
 pub async fn update_custom_agent_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     agent_id: &str,
     config: UpdateCustomAgentConfig,
 ) -> Result<AgentWithStatus, String> {
@@ -249,7 +249,7 @@ pub async fn update_custom_agent_impl(
 }
 
 /// Remove an agent by ID.
-pub async fn remove_custom_agent_impl(pool: &DbPool, agent_id: &str) -> Result<(), String> {
+pub async fn remove_custom_agent_impl(pool: &AppStore, agent_id: &str) -> Result<(), String> {
     db::delete_custom_agent(pool, agent_id).await
 }
 
@@ -315,12 +315,12 @@ pub async fn set_agent_enabled(
 mod tests {
     use super::*;
     use crate::db;
-    use crate::db::DbPool as SqlitePool;
+    use crate::db::AppStore as AppStore;
     use std::fs;
     use tempfile::TempDir;
 
-    async fn setup_test_db() -> DbPool {
-        let pool = SqlitePool::connect(":memory:").await.unwrap();
+    async fn setup_test_db() -> AppStore {
+        let pool = AppStore::connect(":memory:").await.unwrap();
         db::init_database(&pool).await.unwrap();
         pool
     }
@@ -762,7 +762,7 @@ mod tests {
 
     // ── update_custom_agent_impl ──────────────────────────────────────────────
 
-    async fn add_test_custom_agent(pool: &DbPool, id: &str) {
+    async fn add_test_custom_agent(pool: &AppStore, id: &str) {
         let config = CustomAgentConfig {
             id: Some(id.to_string()),
             display_name: format!("Agent {}", id),

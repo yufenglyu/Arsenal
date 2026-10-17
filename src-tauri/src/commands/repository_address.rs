@@ -1,7 +1,7 @@
 //! Journaled source and directory migration preserves stable skill identities.
 use super::{github_import as github, linker, notebook, notebook_repository, repository_mirror};
 use crate::{
-    db::{self, DbPool},
+    db::{self, AppStore},
     path_utils::source_grouped_skill_dir,
     AppState,
 };
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use tauri::State;
 
 pub(crate) async fn directory(
-    pool: &DbPool,
+    pool: &AppStore,
     root: &Path,
     owner: &str,
     repository: &str,
@@ -78,7 +78,7 @@ pub async fn change_repository_address(
 }
 
 // Caller holds MIRROR_LOCK, including while validating the new remote snapshot.
-pub(crate) async fn migrate(pool: &DbPool, old: &str, new: &str) -> Result<(), String> {
+pub(crate) async fn migrate(pool: &AppStore, old: &str, new: &str) -> Result<(), String> {
     if old.eq_ignore_ascii_case(new) {
         return Err("addressUnchanged".into());
     }
@@ -278,7 +278,7 @@ struct MoveJournal {
 
 /// Roll back an uncommitted rename, or finish links after a committed database move.
 /// Must run before any scanner interprets temporarily missing directories.
-pub(crate) async fn recover(pool: &DbPool) -> Result<Vec<(String, String)>, String> {
+pub(crate) async fn recover(pool: &AppStore) -> Result<Vec<(String, String)>, String> {
     let root = db::get_skill_resource_library_dir(pool).await?;
     let rows = pool.read(|d| {
         Ok(d.table("repository_address_moves")
@@ -331,7 +331,7 @@ pub(crate) async fn recover(pool: &DbPool) -> Result<Vec<(String, String)>, Stri
     Ok(completed)
 }
 
-fn directory_conflicts(pool: &DbPool, relative: &str, repository: &str) -> Result<usize, String> {
+fn directory_conflicts(pool: &AppStore, relative: &str, repository: &str) -> Result<usize, String> {
     pool.read(|d| {
         Ok(d.table("repository_local_directories")
             .values()
@@ -346,7 +346,7 @@ fn directory_conflicts(pool: &DbPool, relative: &str, repository: &str) -> Resul
             .count())
     })
 }
-fn repository_count(pool: &DbPool, repository: &str, directories: bool) -> Result<usize, String> {
+fn repository_count(pool: &AppStore, repository: &str, directories: bool) -> Result<usize, String> {
     pool.read(|d| {
         Ok([
             ("skill_sources", "source_repo"),

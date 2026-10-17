@@ -11,7 +11,7 @@ pub mod storage;
 #[cfg(test)]
 mod storage_baseline;
 
-use db::DbPool;
+use db::AppStore;
 use std::fs;
 use std::path::Path;
 use tauri::Manager;
@@ -19,7 +19,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 /// Application state shared across Tauri commands.
 pub struct AppState {
-    pub db: DbPool,
+    pub db: AppStore,
 }
 
 fn check_storage_migration(new_dir: &Path, legacy_dir: &Path) -> Result<(), String> {

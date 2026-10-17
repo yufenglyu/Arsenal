@@ -272,7 +272,7 @@ fn remote_deleted_source_update_item(
 }
 
 async fn apply_source_update_content(
-    pool: &db::DbPool,
+    pool: &db::AppStore,
     skill: &db::Skill,
     source: &mut db::SkillSource,
     used_url: String,
@@ -528,7 +528,7 @@ pub async fn sync_source_backed_resource_skills(
 }
 
 pub(crate) async fn github_repo_source_groups(
-    pool: &db::DbPool,
+    pool: &db::AppStore,
     is_central: bool,
 ) -> Result<HashMap<String, Vec<(db::SkillSource, db::Skill)>>, String> {
     let sources = db::get_all_skill_sources(pool).await?;
@@ -677,7 +677,7 @@ fn normalized_repository_filter(repositories: Option<Vec<String>>) -> Option<Has
 
 #[cfg(test)]
 async fn preview_github_repo_group(
-    pool: &db::DbPool,
+    pool: &db::AppStore,
     repo: &str,
     group: &[(db::SkillSource, db::Skill)],
     auth: Option<&str>,
@@ -687,7 +687,7 @@ async fn preview_github_repo_group(
 
 #[cfg(test)]
 async fn preview_github_repo_group_scoped(
-    pool: &db::DbPool,
+    pool: &db::AppStore,
     repo: &str,
     group: &[(db::SkillSource, db::Skill)],
     auth: Option<&str>,
@@ -896,7 +896,7 @@ pub async fn preview_source_backed_resource_repository_updates(
 }
 
 async fn update_source_backed_skills_impl(
-    pool: &db::DbPool,
+    pool: &db::AppStore,
     is_central: bool,
     app: Option<&AppHandle>,
     include_added: bool,
@@ -1157,7 +1157,7 @@ struct GitHubSyncStatusRecord<'a> {
 }
 
 async fn record_github_sync_status(
-    pool: &db::DbPool,
+    pool: &db::AppStore,
     record: GitHubSyncStatusRecord<'_>,
 ) -> Result<(), String> {
     let now = Utc::now().to_rfc3339();
@@ -1197,7 +1197,7 @@ struct GitHubRepoGroupUpdate {
 }
 
 async fn update_github_repo_source_group(
-    pool: &db::DbPool,
+    pool: &db::AppStore,
     repo: &str,
     group: &[(db::SkillSource, db::Skill)],
     auth: Option<&str>,
@@ -1359,7 +1359,7 @@ pub async fn update_source_backed_resource_skill(
 }
 
 async fn update_source_backed_skill_impl(
-    pool: &db::DbPool,
+    pool: &db::AppStore,
     skill_id: &str,
     is_central: bool,
 ) -> Result<String, String> {
@@ -1677,12 +1677,12 @@ fn parse_generated_tags(response: &str) -> Result<Vec<String>, String> {
 }
 
 async fn request_skill_ai(
-    pool: &crate::db::DbPool,
+    pool: &crate::db::AppStore,
     content: &str,
     instruction: &str,
 ) -> Result<String, String> {
     // Read dynamic provider settings
-    async fn get_setting(pool: &crate::db::DbPool, key: &str) -> Option<String> {
+    async fn get_setting(pool: &crate::db::AppStore, key: &str) -> Option<String> {
         db::get_setting(pool, key)
             .await
             .ok()
@@ -1778,7 +1778,7 @@ fn explanation_has_content(explanation: &str) -> bool {
 }
 
 async fn delete_cached_skill_explanation(
-    pool: &crate::db::DbPool,
+    pool: &crate::db::AppStore,
     skill_id: &str,
     lang: &str,
 ) -> Result<(), String> {
@@ -1786,7 +1786,7 @@ async fn delete_cached_skill_explanation(
 }
 
 async fn load_cached_skill_explanation(
-    pool: &crate::db::DbPool,
+    pool: &crate::db::AppStore,
     skill_id: &str,
     lang: &str,
 ) -> Result<Option<String>, String> {
@@ -1808,7 +1808,7 @@ async fn load_cached_skill_explanation(
 }
 
 async fn cache_skill_explanation(
-    pool: &crate::db::DbPool,
+    pool: &crate::db::AppStore,
     skill_id: &str,
     lang: &str,
     model: &str,
@@ -1842,7 +1842,7 @@ fn empty_explanation_error_info(lang: &str, saw_thinking_delta: bool) -> Explana
 }
 
 /// Helper: read a setting from the DB, filtering out empty values.
-async fn get_ai_setting(pool: &crate::db::DbPool, key: &str) -> Option<String> {
+async fn get_ai_setting(pool: &crate::db::AppStore, key: &str) -> Option<String> {
     db::get_setting(pool, key)
         .await
         .ok()
@@ -1944,7 +1944,7 @@ async fn send_stream_request(
 
 /// Core streaming logic shared by `explain_skill_stream` and `refresh_skill_explanation`.
 async fn do_explain_skill_stream(
-    pool: &crate::db::DbPool,
+    pool: &crate::db::AppStore,
     app: &AppHandle,
     skill_id: &str,
     content: &str,
@@ -2291,11 +2291,11 @@ mod tests {
     use crate::db;
     use tempfile::{tempdir, TempDir};
 
-    async fn setup_test_db() -> (crate::db::DbPool, TempDir) {
+    async fn setup_test_db() -> (crate::db::AppStore, TempDir) {
         let dir = tempdir().expect("create tempdir");
         let db_path = dir.path().join("remote-sources.sqlite");
         let db_path = db_path.to_string_lossy().into_owned();
-        let pool = db::create_pool(&db_path).await.expect("create pool");
+        let pool = db::open_test_store(&db_path).await.expect("create pool");
         db::init_database(&pool).await.expect("init db");
         (pool, dir)
     }
@@ -2774,7 +2774,7 @@ pub async fn apply_repository_update_item(
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)] // Mirrors the IPC boundary for preview revalidation.
 async fn apply_repository_update_item_impl(
-    pool: &db::DbPool,
+    pool: &db::AppStore,
     repository: String,
     skill_id: String,
     version: String,
@@ -2871,7 +2871,7 @@ mod repository_file_tests {
     use super::*;
     #[tokio::test]
     async fn repository_matching_recognizes_root_skill_moved_into_skills_directory() {
-        let pool = crate::db::DbPool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::AppStore::connect(":memory:").await.unwrap();
         db::init_schema(&pool).await.unwrap();
         let id = "mvanhorn-last30days-skill-last30days";
         crate::storage::fixtures::insert(&pool,"skills",serde_json::json!({"id":id,"name":"last30days","file_path":"/fixture/SKILL.md","scanned_at":"2026-10-10"})).await.unwrap();
@@ -2923,7 +2923,7 @@ mod repository_file_tests {
         );
         let rows: serde_json::Value =
             serde_json::from_slice(&std::fs::read(root.join("fixture.json")).unwrap()).unwrap();
-        let pool = crate::db::DbPool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::AppStore::connect(":memory:").await.unwrap();
         db::init_schema(&pool).await.unwrap();
         db::set_skill_resource_library_dir(&pool, &root.join("library").to_string_lossy())
             .await

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copy the packaged default .skillshub tree into the installing user's home.
-# Existing platform files and db.sqlite are left untouched.
+# Existing user data is left untouched; the app initializes JSON under its lock.
 set -eu
 
 case "${1:-}" in
@@ -95,9 +95,6 @@ copy_missing() {
     cp -R "$src/platform/." "$dest/platform/"
   fi
 
-  if [ ! -f "$dest/db.sqlite" ] && [ -f "$src/db.sqlite" ]; then
-    cp "$src/db.sqlite" "$dest/db.sqlite"
-  fi
 
   if [ -f "$src/library/.keep" ] && [ ! -f "$dest/library/.keep" ]; then
     cp "$src/library/.keep" "$dest/library/.keep"

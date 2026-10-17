@@ -42,7 +42,7 @@ mod tests {
     use super::*;
     #[tokio::test]
     async fn rename_requires_merge_confirmation_and_preserves_notes() {
-        let pool = crate::db::DbPool::memory().unwrap();
+        let pool = crate::db::AppStore::memory().unwrap();
         for (id, tags) in [
             ("one", vec!["Old", "Keep"]),
             ("two", vec!["Old", "New"]),
@@ -74,7 +74,7 @@ mod tests {
 
     #[tokio::test]
     async fn tag_changes_preserve_notes_and_unselected_skills() {
-        let pool = crate::db::DbPool::memory().unwrap();
+        let pool = crate::db::AppStore::memory().unwrap();
         for id in ["a", "b", "c"] {
             pool.write(|d| {
                 d.table_mut("skills")
@@ -99,7 +99,7 @@ mod tests {
     }
     #[tokio::test]
     async fn folder_notes_roundtrip_and_replace_without_absolute_paths() {
-        let pool = crate::db::DbPool::memory().unwrap();
+        let pool = crate::db::AppStore::memory().unwrap();
         let mut note = FolderNote {
             id: "stable".into(),
             notes: "memo".into(),

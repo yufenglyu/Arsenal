@@ -766,7 +766,7 @@
     "configSaveFailed": "配置保存失败，请检查 config.json 是否可写。",
     "configLoadFailed": "配置读取失败，请检查 config.json 是否有效。",
     "configDirTitle": "配置文件路径",
-    "configDirDesc": "config.json 统一保存应用设置、软件平台和项目目录，db.sqlite 保存技能及安装等业务数据，平台图标位于 platform/icons/。它们位于这个 .skillshub 文件夹中；将其放到应用程序同级目录可作为便携版使用。",
+    "configDirDesc": "config.json 统一保存应用设置、软件平台和项目目录，store/ 中的 JSON 文件保存技能及安装等业务数据，平台图标位于 platform/icons/。它们位于这个 .skillshub 文件夹中；将其放到应用程序同级目录可作为便携版使用。",
     "configDirLabel": "配置文件路径",
     "configDirHint": "保存后需重启应用。若新路径还没有配置文件，会先复制当前配置过去。填写 exe 所在目录时会自动使用其中的 .skillshub 文件夹。",
     "configDirSaved": "配置文件路径已保存，请重启应用后生效",

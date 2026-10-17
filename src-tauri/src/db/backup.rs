@@ -1,4 +1,4 @@
-use super::{Collection, DbPool};
+use super::{Collection, AppStore};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -29,14 +29,14 @@ pub struct SkillInstallationMethodRow {
     pub link_type: String,
 }
 
-pub fn memberships(pool: &DbPool) -> Result<Vec<CollectionSkillBackup>, String> {
+pub fn memberships(pool: &AppStore) -> Result<Vec<CollectionSkillBackup>, String> {
     pool.read(|data| {
         let mut rows = super::rows::<CollectionSkillBackup>(data, "collection_skills")?;
         rows.sort_by(|a, b| (&a.collection_id, &a.added_at).cmp(&(&b.collection_id, &b.added_at)));
         Ok(rows)
     })
 }
-pub fn installations(pool: &DbPool) -> Result<Vec<SkillInstallationMethodRow>, String> {
+pub fn installations(pool: &AppStore) -> Result<Vec<SkillInstallationMethodRow>, String> {
     pool.read(|data| {
         let mut rows: Vec<SkillInstallationMethodRow> = data
             .table("skill_installations")
@@ -48,7 +48,7 @@ pub fn installations(pool: &DbPool) -> Result<Vec<SkillInstallationMethodRow>, S
         Ok(rows)
     })
 }
-pub fn stats(pool: &DbPool) -> Result<Vec<RepositoryStatsBackup>, String> {
+pub fn stats(pool: &AppStore) -> Result<Vec<RepositoryStatsBackup>, String> {
     pool.read(|data| {
         let mut rows = super::rows::<RepositoryStatsBackup>(data, "github_repository_stats")?;
         rows.sort_by(|a, b| {
@@ -59,7 +59,7 @@ pub fn stats(pool: &DbPool) -> Result<Vec<RepositoryStatsBackup>, String> {
         Ok(rows)
     })
 }
-pub fn directories(pool: &DbPool) -> Result<Vec<RepositoryDirectoryBackup>, String> {
+pub fn directories(pool: &AppStore) -> Result<Vec<RepositoryDirectoryBackup>, String> {
     pool.read(|data| {
         let mut rows =
             super::rows::<RepositoryDirectoryBackup>(data, "repository_local_directories")?;
@@ -72,7 +72,7 @@ pub fn directories(pool: &DbPool) -> Result<Vec<RepositoryDirectoryBackup>, Stri
     })
 }
 pub fn matching_directories(
-    pool: &DbPool,
+    pool: &AppStore,
     repo: &str,
     dir: &str,
 ) -> Result<Vec<(String, String)>, String> {
@@ -85,7 +85,7 @@ pub fn matching_directories(
         .collect())
 }
 pub async fn restore_directories(
-    pool: &DbPool,
+    pool: &AppStore,
     rows: &[RepositoryDirectoryBackup],
 ) -> Result<(), String> {
     pool.write(|data| {
@@ -120,7 +120,7 @@ pub async fn restore_directories(
     .await
 }
 pub async fn restore_memberships(
-    pool: &DbPool,
+    pool: &AppStore,
     rows: &[CollectionSkillBackup],
 ) -> Result<(), String> {
     pool.write(|data| {
@@ -155,7 +155,7 @@ fn timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
                 .map(|v| v.and_utc())
         })
 }
-pub async fn restore_stats(pool: &DbPool, rows: &[RepositoryStatsBackup]) -> Result<(), String> {
+pub async fn restore_stats(pool: &AppStore, rows: &[RepositoryStatsBackup]) -> Result<(), String> {
     pool.write(|data| {
         for row in rows {
             if row.stars < 0 {
@@ -181,7 +181,7 @@ pub async fn restore_stats(pool: &DbPool, rows: &[RepositoryStatsBackup]) -> Res
     })
     .await
 }
-pub async fn clear_source(pool: &DbPool, id: &str) -> Result<(), String> {
+pub async fn clear_source(pool: &AppStore, id: &str) -> Result<(), String> {
     pool.write(|data| {
         data.table_mut("skill_source_syncs").remove(id);
         data.table_mut("skill_sources").remove(id);
@@ -190,7 +190,7 @@ pub async fn clear_source(pool: &DbPool, id: &str) -> Result<(), String> {
     .await
 }
 pub async fn restore_custom_agent(
-    pool: &DbPool,
+    pool: &AppStore,
     id: &str,
     name: &str,
     detected: bool,
@@ -208,7 +208,7 @@ pub async fn restore_custom_agent(
     })
     .await
 }
-pub async fn restore_collection(pool: &DbPool, collection: &Collection) -> Result<(), String> {
+pub async fn restore_collection(pool: &AppStore, collection: &Collection) -> Result<(), String> {
     pool.write(|data| {
         let created = data
             .table("collections")
@@ -227,7 +227,7 @@ pub async fn restore_collection(pool: &DbPool, collection: &Collection) -> Resul
 }
 
 pub fn collection_details(
-    pool: &DbPool,
+    pool: &AppStore,
     id: &str,
 ) -> Result<Vec<(super::Skill, Option<super::SkillSource>)>, String> {
     pool.read(|data| {
@@ -259,7 +259,7 @@ mod equivalence_tests {
     use super::*;
     #[tokio::test]
     async fn stats_keep_original_spelling_and_ascii_nocase_order() {
-        let pool = DbPool::memory().unwrap();
+        let pool = AppStore::memory().unwrap();
         super::super::save_github_stars(&pool, "a/repo", 1)
             .await
             .unwrap();
@@ -276,7 +276,7 @@ mod equivalence_tests {
     }
     #[tokio::test]
     async fn restore_accepts_sqlite_date_forms_without_overwriting_newer_stats() {
-        let pool = DbPool::memory().unwrap();
+        let pool = AppStore::memory().unwrap();
         for (stamp, stars) in [
             ("2026-01-01", 1),
             ("2026-01-02 00:00:00.500", 2),

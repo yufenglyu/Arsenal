@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::commands::linker;
-use crate::db::{self, AgentSkillObservation, DbPool, Skill, SkillInstallation};
+use crate::db::{self, AgentSkillObservation, AppStore, Skill, SkillInstallation};
 use crate::path_utils;
 use crate::AppState;
 
@@ -468,7 +468,7 @@ fn paths_resolve_to_same_entry(left: &Path, right: &Path) -> bool {
 
 /// Core scanning logic, separated from the Tauri command layer so it can be
 /// unit-tested without a running Tauri runtime.
-pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
+pub async fn scan_all_skills_impl(pool: &AppStore) -> Result<ScanResult, String> {
     let agents = db::get_all_agents(pool).await?;
     let custom_dirs = db::get_scan_directories(pool).await?;
 
@@ -522,6 +522,9 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
 
         let _ = db::update_agent_detected(pool, &agent.id, true).await;
         let mut scanned = Vec::new();
+        let mut pending_skills = Vec::new();
+        let mut pending_installations = Vec::new();
+        let mut pending_observations = Vec::new();
         let mut found_install_ids = Vec::new();
         let mut found_observation_row_ids = Vec::new();
 
@@ -554,8 +557,8 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
                         is_read_only: source_kind.is_read_only(),
                         scanned_at: now.clone(),
                     };
-                    db::upsert_agent_skill_observation(pool, &observation).await?;
-                    found_observation_row_ids.push(observation.row_id);
+                    found_observation_row_ids.push(observation.row_id.clone());
+                    pending_observations.push(observation);
                 }
 
                 let should_persist_manageable_state = root
@@ -580,7 +583,7 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
                         content: None,
                         scanned_at: now.clone(),
                     };
-                    db::upsert_skill(pool, &db_skill).await?;
+                    pending_skills.push(db_skill);
 
                     // Bug fix: store the skill *directory* path, not the SKILL.md file path.
                     let installation = SkillInstallation {
@@ -591,12 +594,20 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
                         symlink_target: skill.symlink_target.clone(),
                         created_at: now.clone(),
                     };
-                    db::upsert_scanned_skill_installation(pool, &installation).await?;
+                    pending_installations.push(installation);
                 }
             }
 
             scanned.extend(root_scanned);
         }
+
+        db::commit_scan_batch(
+            pool,
+            &pending_skills,
+            &pending_installations,
+            &pending_observations,
+        )
+        .await?;
 
         // Reconcile unmanaged rows against the scan and managed rows against
         // their recorded installation paths.
@@ -641,6 +652,8 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
         };
         project_targets_scanned += 1;
 
+        let mut pending_skills = Vec::new();
+        let mut pending_installations = Vec::new();
         let mut found_install_ids = Vec::new();
         let scanned = scan_skill_root(&target.skills_dir, false, ScanDirectoryOptions::nested());
         for skill in &scanned {
@@ -658,7 +671,7 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
                 content: None,
                 scanned_at: now.clone(),
             };
-            db::upsert_skill(pool, &db_skill).await?;
+            pending_skills.push(db_skill);
 
             let installation = SkillInstallation {
                 skill_id: skill.id.clone(),
@@ -668,9 +681,10 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
                 symlink_target: skill.symlink_target.clone(),
                 created_at: now,
             };
-            db::upsert_scanned_skill_installation(pool, &installation).await?;
+            pending_installations.push(installation);
         }
 
+        db::commit_scan_batch(pool, &pending_skills, &pending_installations, &[]).await?;
         db::delete_stale_skill_installations(pool, &target.id, &found_install_ids).await?;
         let scanned_count = scanned.len();
         total_skills += scanned_count;
@@ -1206,15 +1220,15 @@ mod tests {
 
     // ── scan_all_skills_impl ──────────────────────────────────────────────────
 
-    async fn setup_test_db() -> DbPool {
+    async fn setup_test_db() -> AppStore {
         use crate::db;
-        use crate::db::DbPool as SqlitePool;
-        let pool = SqlitePool::connect(":memory:").await.expect("in-memory DB");
+        use crate::db::AppStore as AppStore;
+        let pool = AppStore::connect(":memory:").await.expect("in-memory DB");
         db::init_database(&pool).await.expect("init");
         pool
     }
 
-    async fn isolate_scan_test(pool: &DbPool) {
+    async fn isolate_scan_test(pool: &AppStore) {
         pool.write(|d| {
             d.table_mut("agents").clear();
             Ok(())
@@ -1230,11 +1244,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_scan_all_skills_impl_empty_dirs() {
-        use crate::db::DbPool as SqlitePool;
+        use crate::db::AppStore as AppStore;
 
         // Build a pool with tables but no seeded agents so the test is
         // isolated from whatever the user has installed on their machine.
-        let pool = SqlitePool::connect(":memory:").await.expect("in-memory DB");
+        let pool = AppStore::connect(":memory:").await.expect("in-memory DB");
         db::init_database(&pool).await.expect("init");
         // Remove all seeded agents so the test is isolated from whatever the
         // user has installed on their machine.

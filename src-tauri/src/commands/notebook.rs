@@ -157,7 +157,7 @@ fn with_note_identity(text: &str, id: &str) -> Result<String, String> {
     ))
 }
 
-fn vault(pool: &crate::db::DbPool) -> Result<PathBuf, String> {
+fn vault(pool: &crate::db::AppStore) -> Result<PathBuf, String> {
     let config = crate::db::load_config(pool)?.settings;
     let root = config
         .get("obsidian_vault_path")
@@ -386,7 +386,7 @@ pub fn validate_template(template: &str) -> Result<(), String> {
     render_template(template, &serde_json::json!({"noteId":"00000000-0000-4000-8000-000000000002", "obsidianUri":"obsidian://skillshub-note?id=00000000-0000-4000-8000-000000000002", "repositoryUid":"fixture-id", "skillshubUri":"skillshub://repository/fixture-id?tab=notebook", "fullName":"example/project", "url":"https://github.com/example/project", "description":"Example: a quoted \"value\"\nSecond line", "stars":42, "tags":["example"], "categories":["Tools/Example"]})).map(|_| ())
 }
 
-fn configured_template(pool: &crate::db::DbPool) -> Result<String, String> {
+fn configured_template(pool: &crate::db::AppStore) -> Result<String, String> {
     Ok(crate::db::load_config(pool)?.settings
         .get("obsidian_property_template")
         .filter(|s| !s.trim().is_empty())
@@ -1165,7 +1165,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
         let state = AppState {
-            db: db::create_pool(&root.join("test.sqlite")).await.unwrap(),
+            db: db::open_test_store(&root.join("test.sqlite")).await.unwrap(),
         };
         let mut repository = db::Repository::new(1, "example/project".into());
         let binding = binding_for_note(
@@ -1253,7 +1253,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
         let state = AppState {
-            db: db::create_pool(&root.join("test.sqlite")).await.unwrap(),
+            db: db::open_test_store(&root.join("test.sqlite")).await.unwrap(),
         };
         let mut repo = db::Repository::new(101, "fixture/identity".into());
         repo.obsidian = Some(binding_for_path(&root, "old.md").unwrap());

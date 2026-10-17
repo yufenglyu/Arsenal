@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, time::SystemTime};
 use tauri::State;
 
-use crate::db::{self, Collection, DbPool, Skill};
+use crate::db::{self, Collection, AppStore, Skill};
 use crate::AppState;
 
 use super::linker::{
@@ -61,7 +61,7 @@ pub struct CollectionExport {
 
 /// Create a new collection and return it.
 pub async fn create_collection_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     name: &str,
     description: Option<&str>,
 ) -> Result<Collection, String> {
@@ -72,13 +72,13 @@ pub async fn create_collection_impl(
 }
 
 /// Return all collections.
-pub async fn get_collections_impl(pool: &DbPool) -> Result<Vec<Collection>, String> {
+pub async fn get_collections_impl(pool: &AppStore) -> Result<Vec<Collection>, String> {
     db::get_all_collections(pool).await
 }
 
 /// Return a collection with its member skills.
 pub async fn get_collection_detail_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     collection_id: &str,
 ) -> Result<CollectionDetail, String> {
     let collection = db::get_collection_by_id(pool, collection_id)
@@ -98,7 +98,7 @@ pub async fn get_collection_detail_impl(
 }
 
 async fn get_collection_skills_with_metadata(
-    pool: &DbPool,
+    pool: &AppStore,
     collection_id: &str,
 ) -> Result<Vec<CollectionSkill>, String> {
     db::backup::collection_details(pool, collection_id)?
@@ -171,7 +171,7 @@ fn system_time_to_rfc3339(time: SystemTime) -> String {
 
 /// Add a skill to a collection (idempotent).
 pub async fn add_skill_to_collection_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     collection_id: &str,
     skill_id: &str,
 ) -> Result<(), String> {
@@ -185,7 +185,7 @@ pub async fn add_skill_to_collection_impl(
 
 /// Remove a skill from a collection.
 pub async fn remove_skill_from_collection_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     collection_id: &str,
     skill_id: &str,
 ) -> Result<(), String> {
@@ -198,7 +198,7 @@ pub async fn remove_skill_from_collection_impl(
 }
 
 /// Delete a collection and all its skill memberships.
-pub async fn delete_collection_impl(pool: &DbPool, collection_id: &str) -> Result<(), String> {
+pub async fn delete_collection_impl(pool: &AppStore, collection_id: &str) -> Result<(), String> {
     // Verify the collection exists before trying to delete it.
     db::get_collection_by_id(pool, collection_id)
         .await?
@@ -209,7 +209,7 @@ pub async fn delete_collection_impl(pool: &DbPool, collection_id: &str) -> Resul
 
 /// Update a collection's name and optional description.
 pub async fn update_collection_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     collection_id: &str,
     name: &str,
     description: Option<&str>,
@@ -235,7 +235,7 @@ pub async fn update_collection_impl(
 /// Each (skill, agent) pair is attempted independently. Failures are collected
 /// in the `failed` list rather than aborting the whole batch.
 pub async fn batch_install_collection_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     collection_id: &str,
     agent_ids: &[String],
 ) -> Result<BatchInstallResult, String> {
@@ -280,7 +280,7 @@ pub async fn batch_install_collection_impl(
 }
 
 /// Export a collection to a JSON string matching the spec in docs/desktop-design.md.
-pub async fn export_collection_impl(pool: &DbPool, collection_id: &str) -> Result<String, String> {
+pub async fn export_collection_impl(pool: &AppStore, collection_id: &str) -> Result<String, String> {
     let collection = db::get_collection_by_id(pool, collection_id)
         .await?
         .ok_or_else(|| format!("Collection '{}' not found", collection_id))?;
@@ -307,7 +307,7 @@ pub async fn export_collection_impl(pool: &DbPool, collection_id: &str) -> Resul
 /// silently skipped (they may not yet be scanned on this machine).
 ///
 /// Returns the newly created collection.
-pub async fn import_collection_impl(pool: &DbPool, json: &str) -> Result<Collection, String> {
+pub async fn import_collection_impl(pool: &AppStore, json: &str) -> Result<Collection, String> {
     let export: CollectionExport =
         serde_json::from_str(json).map_err(|e| format!("Invalid collection JSON: {}", e))?;
 
@@ -431,15 +431,15 @@ pub async fn import_collection(
 mod tests {
     use super::*;
     use crate::db::{self, Skill};
-    use crate::storage::store::Store as SqlitePool;
+    use crate::storage::store::Store as AppStore;
     use chrono::Utc;
     use std::fs;
     use tempfile::TempDir;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    async fn setup_test_db() -> SqlitePool {
-        let pool = SqlitePool::connect(":memory:").await.unwrap();
+    async fn setup_test_db() -> AppStore {
+        let pool = AppStore::connect(":memory:").await.unwrap();
         db::init_database(&pool).await.unwrap();
         pool
     }
@@ -947,7 +947,7 @@ mod tests {
         let pool = setup_test_db().await;
 
         // Override central and claude-code agent dirs.
-        (&pool)
+        pool
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
                     if id.as_str() == "central" {
@@ -958,7 +958,7 @@ mod tests {
             })
             .await
             .unwrap();
-        (&pool)
+        pool
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
                     if id.as_str() == "claude-code" {
@@ -1033,7 +1033,7 @@ mod tests {
 
         let pool = setup_test_db().await;
 
-        (&pool)
+        pool
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
                     if id.as_str() == "central" {
@@ -1044,7 +1044,7 @@ mod tests {
             })
             .await
             .unwrap();
-        (&pool)
+        pool
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
                     if id.as_str() == "claude-code" {
@@ -1138,7 +1138,7 @@ mod tests {
         fs::create_dir_all(&resource_dir).unwrap();
 
         let pool = setup_test_db().await;
-        (&pool)
+        pool
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
                     if id.as_str() == "central" {
@@ -1149,7 +1149,7 @@ mod tests {
             })
             .await
             .unwrap();
-        (&pool)
+        pool
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
                     if id.as_str() != "central" {
@@ -1160,7 +1160,7 @@ mod tests {
             })
             .await
             .unwrap();
-        (&pool)
+        pool
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
                     if id.as_str() == "cursor" {
@@ -1255,7 +1255,7 @@ mod tests {
         fs::create_dir_all(&resource_dir).unwrap();
 
         let pool = setup_test_db().await;
-        (&pool)
+        pool
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
                     if id.as_str() == "central" {
@@ -1266,7 +1266,7 @@ mod tests {
             })
             .await
             .unwrap();
-        (&pool)
+        pool
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
                     if id.as_str() != "central" {

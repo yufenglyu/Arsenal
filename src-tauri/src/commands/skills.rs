@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 use tauri::State;
 
-use crate::db::{self, Collection, DbPool, SkillForAgent};
+use crate::db::{self, Collection, AppStore, SkillForAgent};
 use crate::path_utils::{remove_symlink_path, resolve_path_for_file_manager};
 use crate::AppState;
 
@@ -287,7 +287,7 @@ fn skill_filesystem_timestamps(skill: &db::Skill) -> (String, String) {
 }
 
 async fn skill_updated_at_after_check(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     filesystem_time: String,
 ) -> Result<String, String> {
@@ -833,7 +833,7 @@ fn normalize_resource_bundle_relative_path(relative_path: &str) -> Result<PathBu
         .map_err(|_| "Invalid Resource Library bundle path".to_string())
 }
 
-async fn central_root_path(pool: &DbPool) -> Result<PathBuf, String> {
+async fn central_root_path(pool: &AppStore) -> Result<PathBuf, String> {
     let central = db::get_agent_by_id(pool, "central")
         .await?
         .ok_or_else(|| "Central agent not found in database".to_string())?;
@@ -843,7 +843,7 @@ async fn central_root_path(pool: &DbPool) -> Result<PathBuf, String> {
         .map_err(|e| format!("Failed to resolve Central Skills root: {}", e))
 }
 
-async fn resource_root_path(pool: &DbPool) -> Result<PathBuf, String> {
+async fn resource_root_path(pool: &AppStore) -> Result<PathBuf, String> {
     let root = db::get_skill_resource_library_dir(pool).await?;
     std::fs::create_dir_all(&root)
         .map_err(|e| format!("Failed to create Skill Resource Library root: {}", e))?;
@@ -1119,7 +1119,7 @@ fn resource_target_for_central_skill(
 }
 
 async fn central_skills_in_bundle(
-    pool: &DbPool,
+    pool: &AppStore,
     target: &CentralBundleTarget,
 ) -> Result<Vec<db::Skill>, String> {
     let mut skills = db::get_central_skills(pool)
@@ -1141,7 +1141,7 @@ async fn central_skills_in_bundle(
 }
 
 async fn resource_skills_in_bundle(
-    pool: &DbPool,
+    pool: &AppStore,
     target: &ResourceBundleTarget,
 ) -> Result<Vec<db::Skill>, String> {
     let mut skills = db::get_resource_library_skills(pool)
@@ -1207,7 +1207,7 @@ fn path_resolves_to(path: &Path, target: &Path) -> bool {
 }
 
 async fn is_shared_central_installation(
-    pool: &DbPool,
+    pool: &AppStore,
     installation: &db::SkillInstallation,
     central_root: &Path,
     central_skill_dir: &Path,
@@ -1344,7 +1344,7 @@ fn installation_details(installations: Vec<db::SkillInstallation>) -> Vec<SkillI
 }
 
 async fn shared_agent_ids_for_skill(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     is_central: bool,
 ) -> Result<Vec<String>, String> {
@@ -1376,7 +1376,7 @@ async fn shared_agent_ids_for_skill(
 }
 
 async fn read_only_agent_ids_for_skill(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     is_central: bool,
 ) -> Result<Vec<String>, String> {
@@ -1391,7 +1391,7 @@ async fn read_only_agent_ids_for_skill(
 }
 
 async fn get_observation_detail(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: &str,
     row_id: Option<&str>,
@@ -1493,7 +1493,7 @@ async fn get_observation_detail(
 }
 
 async fn get_skill_detail_with_row_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     agent_id: Option<&str>,
     row_id: Option<&str>,
@@ -1583,7 +1583,7 @@ async fn get_skill_detail_with_row_impl(
 /// (`dir_path`, `link_type`, `symlink_target`) so the frontend `SkillCard`
 /// can display the correct source indicator.
 pub async fn get_skills_by_agent_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     agent_id: &str,
 ) -> Result<Vec<SkillForAgent>, String> {
     let installed = db::get_skills_for_agent(pool, agent_id).await?;
@@ -1669,7 +1669,7 @@ pub async fn get_skills_by_agent(
     get_skills_by_agent_impl(&state.db, &agent_id).await
 }
 
-async fn skill_with_links(pool: &DbPool, skill: db::Skill) -> Result<SkillWithLinks, String> {
+async fn skill_with_links(pool: &AppStore, skill: db::Skill) -> Result<SkillWithLinks, String> {
     let installations = db::get_skill_installations(pool, &skill.id).await?;
     let linked_agents: Vec<String> = installations.into_iter().map(|i| i.agent_id).collect();
     let read_only_agents = read_only_agent_ids_for_skill(pool, &skill.id, skill.is_central).await?;
@@ -1724,7 +1724,7 @@ fn scan_count_for_bundle(target: &CentralBundleTarget) -> usize {
 }
 
 async fn central_skill_bundle_from_target(
-    pool: &DbPool,
+    pool: &AppStore,
     target: &CentralBundleTarget,
     skills: &[db::Skill],
     scanned_skill_count: usize,
@@ -1759,7 +1759,7 @@ async fn central_skill_bundle_from_target(
 }
 
 async fn central_bundle_preview_for_target(
-    pool: &DbPool,
+    pool: &AppStore,
     target: CentralBundleTarget,
 ) -> Result<CentralSkillBundleDeletePreview, String> {
     let skills = central_skills_in_bundle(pool, &target).await?;
@@ -1794,7 +1794,7 @@ async fn central_bundle_preview_for_target(
 }
 
 async fn resource_skill_bundle_from_target(
-    pool: &DbPool,
+    pool: &AppStore,
     target: &ResourceBundleTarget,
     skills: &[db::Skill],
     scanned_skill_count: usize,
@@ -1825,7 +1825,7 @@ async fn resource_skill_bundle_from_target(
 }
 
 async fn resource_bundle_preview_for_target(
-    pool: &DbPool,
+    pool: &AppStore,
     target: ResourceBundleTarget,
 ) -> Result<CentralSkillBundleDeletePreview, String> {
     let skills = resource_skills_in_bundle(pool, &target).await?;
@@ -1870,7 +1870,7 @@ pub async fn get_central_skills(state: State<'_, AppState>) -> Result<Vec<SkillW
     get_central_skills_impl(&state.db).await
 }
 
-pub(crate) async fn get_central_skills_impl(pool: &DbPool) -> Result<Vec<SkillWithLinks>, String> {
+pub(crate) async fn get_central_skills_impl(pool: &AppStore) -> Result<Vec<SkillWithLinks>, String> {
     let _ = super::linker::reconcile_orphaned_central_skills(pool).await;
     let mut skills = db::get_central_skills(pool).await?;
     // A relocated resource remains the primary DB record; expose its managed
@@ -1914,7 +1914,7 @@ pub async fn get_resource_library_skills(
 }
 
 pub async fn get_resource_library_skills_impl(
-    pool: &DbPool,
+    pool: &AppStore,
 ) -> Result<Vec<SkillWithLinks>, String> {
     let resource_root = db::get_skill_resource_library_dir(pool).await?;
     let scanned = sync_resource_library_skills(pool, &resource_root).await?;
@@ -2143,7 +2143,7 @@ fn manual_skill_markdown(input: &CreateManualResourceSkillRequest) -> Result<Str
 }
 
 pub async fn create_manual_resource_skill_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     input: CreateManualResourceSkillRequest,
 ) -> Result<SkillWithLinks, String> {
     let skill_id = validate_manual_skill_id(&input.skill_id)?;
@@ -2333,7 +2333,7 @@ fn discover_local_skill_candidates(
 }
 
 async fn add_resource_skills_from_local_dir_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     input: AddLocalResourceSkillsRequest,
     target_base_segments: &[String],
     preserve_collection_folder: bool,
@@ -2524,7 +2524,7 @@ pub async fn preview_local_resource_skills(
 }
 
 pub async fn add_local_resource_skills_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     input: AddLocalResourceSkillsRequest,
 ) -> Result<AddLocalResourceSkillsResult, String> {
     add_resource_skills_from_local_dir_impl(
@@ -2540,7 +2540,7 @@ pub async fn add_local_resource_skills_impl(
 }
 
 pub async fn add_repo_resource_skills_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     input: AddLocalResourceSkillsRequest,
     owner: &str,
     repo: &str,
@@ -2568,7 +2568,7 @@ pub async fn add_local_resource_skills(
 }
 
 async fn sync_resource_library_skills(
-    pool: &DbPool,
+    pool: &AppStore,
     resource_root: &Path,
 ) -> Result<Vec<super::scanner::ScannedSkill>, String> {
     if db::has_pending_address_moves(pool).await? {
@@ -2680,7 +2680,7 @@ async fn sync_resource_library_skills(
 }
 
 async fn resource_record_from_snapshot(
-    pool: &DbPool,
+    pool: &AppStore,
     scanned_skill_id: &str,
     scanned_dir_path: &str,
     records: &HashMap<PathBuf, db::Skill>,
@@ -2705,7 +2705,7 @@ async fn resource_record_from_snapshot(
 }
 
 async fn resolve_resource_scanned_skill_id(
-    pool: &DbPool,
+    pool: &AppStore,
     resource_root: &Path,
     scanned_dir: &Path,
     scanned_skill_id: &str,
@@ -2756,7 +2756,7 @@ async fn resolve_resource_scanned_skill_id(
 }
 
 async fn repair_legacy_resource_skill_centralization(
-    pool: &DbPool,
+    pool: &AppStore,
     existing: Option<&db::Skill>,
     resource_skill: &db::Skill,
     central_root: Option<&Path>,
@@ -2861,7 +2861,7 @@ pub async fn update_skill_metadata(
 }
 
 pub async fn update_resource_skill_source_metadata_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     metadata: UpdateSkillSourceMetadataRequest,
 ) -> Result<SkillSourceMetadataResponse, String> {
@@ -2915,7 +2915,7 @@ pub async fn update_resource_skill_source_metadata(
 }
 
 pub async fn get_central_skill_bundles_impl(
-    pool: &DbPool,
+    pool: &AppStore,
 ) -> Result<Vec<CentralSkillBundle>, String> {
     let central_root = central_root_path(pool).await?;
     let entries = std::fs::read_dir(&central_root).map_err(|e| {
@@ -2966,7 +2966,7 @@ pub async fn get_central_skill_bundles(
 }
 
 pub async fn get_central_skill_bundle_detail_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     relative_path: &str,
 ) -> Result<CentralSkillBundleDetail, String> {
     let central_root = central_root_path(pool).await?;
@@ -3003,7 +3003,7 @@ pub async fn get_central_skill_bundle_detail(
 }
 
 pub async fn preview_delete_central_skill_bundle_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     relative_path: &str,
 ) -> Result<CentralSkillBundleDeletePreview, String> {
     let central_root = central_root_path(pool).await?;
@@ -3020,7 +3020,7 @@ pub async fn preview_delete_central_skill_bundle(
 }
 
 pub async fn delete_central_skill_bundle_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     relative_path: &str,
     options: DeleteCentralSkillBundleOptions,
 ) -> Result<DeleteCentralSkillBundleResult, String> {
@@ -3122,7 +3122,7 @@ pub async fn delete_central_skill_bundle(
 }
 
 pub async fn preview_delete_resource_skill_bundle_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     relative_path: &str,
 ) -> Result<CentralSkillBundleDeletePreview, String> {
     let resource_root = resource_root_path(pool).await?;
@@ -3140,7 +3140,7 @@ pub async fn preview_delete_resource_skill_bundle(
 }
 
 pub async fn delete_resource_skill_bundle_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     relative_path: &str,
     options: DeleteCentralSkillBundleOptions,
 ) -> Result<DeleteCentralSkillBundleResult, String> {
@@ -3206,7 +3206,7 @@ pub async fn delete_resource_skill_bundle(
 }
 
 pub async fn delete_central_skill_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     options: DeleteCentralSkillOptions,
 ) -> Result<DeleteCentralSkillResult, String> {
@@ -3281,7 +3281,7 @@ pub async fn delete_central_skill(
 }
 
 pub async fn delete_resource_skill_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     skill_id: &str,
     options: DeleteResourceSkillOptions,
 ) -> Result<DeleteResourceSkillResult, String> {
@@ -3423,7 +3423,7 @@ pub(crate) fn read_repository_readme_impl(directory: &Path) -> Result<Option<Str
 }
 
 pub(crate) async fn repository_document_directory(
-    pool: &DbPool,
+    pool: &AppStore,
     directory: String,
     skill_id: Option<String>,
 ) -> Result<PathBuf, String> {
@@ -3528,7 +3528,7 @@ mod tests {
     use super::*;
     use crate::commands::linker::create_symlink;
     use crate::db::{self, AgentSkillObservation, Skill, SkillInstallation};
-    use crate::storage::store::Store as SqlitePool;
+    use crate::storage::store::Store as AppStore;
     use chrono::Utc;
     use std::{fs, path::Path};
     use tempfile::TempDir;
@@ -3568,8 +3568,8 @@ mod tests {
         assert!(fs::read_to_string(path).unwrap().ends_with("Unchanged"));
     }
 
-    async fn setup_test_db() -> SqlitePool {
-        let pool = SqlitePool::connect(":memory:").await.unwrap();
+    async fn setup_test_db() -> AppStore {
+        let pool = AppStore::connect(":memory:").await.unwrap();
         db::init_database(&pool).await.unwrap();
         pool
     }
@@ -3651,7 +3651,7 @@ mod tests {
         }
     }
 
-    async fn set_agent_dir(pool: &SqlitePool, agent_id: &str, dir: &Path) {
+    async fn set_agent_dir(pool: &AppStore, agent_id: &str, dir: &Path) {
         (pool)
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
@@ -3666,7 +3666,7 @@ mod tests {
             .unwrap();
     }
 
-    async fn create_central_skill(pool: &SqlitePool, central_dir: &Path, skill_id: &str) -> Skill {
+    async fn create_central_skill(pool: &AppStore, central_dir: &Path, skill_id: &str) -> Skill {
         let skill_dir = central_dir.join(skill_id);
         fs::create_dir_all(&skill_dir).unwrap();
         let skill_md_path = skill_dir.join("SKILL.md");
@@ -3692,7 +3692,7 @@ mod tests {
     }
 
     async fn create_nested_central_skill(
-        pool: &SqlitePool,
+        pool: &AppStore,
         bundle_dir: &Path,
         skill_id: &str,
     ) -> Skill {
@@ -3721,7 +3721,7 @@ mod tests {
     }
 
     async fn create_nested_resource_skill(
-        pool: &SqlitePool,
+        pool: &AppStore,
         bundle_dir: &Path,
         skill_id: &str,
     ) -> Skill {
@@ -5347,7 +5347,7 @@ mod tests {
         let pool = setup_test_db().await;
         set_agent_dir(&pool, "central", &central_dir).await;
         set_agent_dir(&pool, "claude-code", &claude_dir).await;
-        (&pool)
+        pool
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
                     if id.as_str() != "central" && id.as_str() != "claude-code" {
@@ -6118,7 +6118,7 @@ mod tests {
 
     // ── Testable core implementations (without Tauri State) ───────────────────
 
-    async fn get_central_skills_impl(pool: &SqlitePool) -> Result<Vec<SkillWithLinks>, String> {
+    async fn get_central_skills_impl(pool: &AppStore) -> Result<Vec<SkillWithLinks>, String> {
         let skills = db::get_central_skills(pool).await?;
         let mut result = Vec::with_capacity(skills.len());
         for skill in skills {
@@ -6157,13 +6157,13 @@ mod tests {
     }
 
     async fn get_skill_detail_impl(
-        pool: &SqlitePool,
+        pool: &AppStore,
         skill_id: &str,
     ) -> Result<SkillDetail, String> {
         super::get_skill_detail_with_row_impl(pool, skill_id, None, None).await
     }
 
-    async fn read_skill_content_impl(pool: &SqlitePool, skill_id: &str) -> Result<String, String> {
+    async fn read_skill_content_impl(pool: &AppStore, skill_id: &str) -> Result<String, String> {
         let skill = db::get_skill_by_id(pool, skill_id)
             .await?
             .ok_or_else(|| format!("Skill '{}' not found", skill_id))?;
@@ -6245,7 +6245,7 @@ mod tests {
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(skill_dir.join("SKILL.md"), "# Shared Skill\n").unwrap();
 
-        (&pool)
+        pool
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
                     if ["central", "antigravity"].contains(&id.as_str()) {
@@ -6313,7 +6313,7 @@ mod tests {
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(skill_dir.join("SKILL.md"), "# Canvas Design\n").unwrap();
 
-        (&pool)
+        pool
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
                     if ["central", "antigravity"].contains(&id.as_str()) {
@@ -6363,7 +6363,7 @@ mod tests {
         fs::write(resource_dir.join("SKILL.md"), "# Canvas Design\n").unwrap();
         create_symlink(&resource_dir, &central_link).unwrap();
 
-        (&pool)
+        pool
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
                     if id.as_str() == "central" {
@@ -6476,7 +6476,7 @@ mod tests {
         fs::write(resource_dir.join("SKILL.md"), "# Shared Skill\n").unwrap();
         create_symlink(&resource_dir, &skill_dir).unwrap();
 
-        (&pool)
+        pool
             .write(|data| {
                 for (id, row) in data.table_mut("agents") {
                     if ["central", "antigravity"].contains(&id.as_str()) {

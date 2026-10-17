@@ -167,7 +167,7 @@ mod tests {
     async fn configuration_survives_reopen_and_is_absent_from_database() {
         let dir = tempfile::tempdir().unwrap();
         let database = dir.path().join("db.sqlite");
-        let pool = db::create_pool(database.to_str().unwrap()).await.unwrap();
+        let pool = db::open_test_store(database.to_str().unwrap()).await.unwrap();
         db::init_database(&pool).await.unwrap();
         db::set_setting(&pool, "language", "en").await.unwrap();
         let project = db::add_scan_directory(&pool, "/example/project", Some("Example"))
@@ -178,7 +178,7 @@ mod tests {
             .unwrap();
         pool.close().await;
         drop(pool);
-        let pool = db::create_pool(database.to_str().unwrap()).await.unwrap();
+        let pool = db::open_test_store(database.to_str().unwrap()).await.unwrap();
         db::init_database(&pool).await.unwrap();
         assert_eq!(
             db::get_setting(&pool, "language").await.unwrap().as_deref(),
@@ -202,7 +202,7 @@ mod tests {
     #[tokio::test]
     async fn legacy_database_configuration_is_not_imported() {
         let dir = tempfile::tempdir().unwrap();
-        let pool = db::create_pool(dir.path().join("db.sqlite").to_str().unwrap())
+        let pool = db::open_test_store(dir.path().join("db.sqlite").to_str().unwrap())
             .await
             .unwrap();
         pool.write(|data| {
@@ -221,7 +221,7 @@ mod tests {
     #[tokio::test]
     async fn malformed_file_is_not_overwritten() {
         let dir = tempfile::tempdir().unwrap();
-        let pool = db::create_pool(dir.path().join("db.sqlite").to_str().unwrap())
+        let pool = db::open_test_store(dir.path().join("db.sqlite").to_str().unwrap())
             .await
             .unwrap();
         let path = config_path(&pool).unwrap();
@@ -234,7 +234,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn parallel_writes_preserve_all_settings_and_unknown_fields() {
         let dir = tempfile::tempdir().unwrap();
-        let pool = db::create_pool(dir.path().join("db.sqlite").to_str().unwrap())
+        let pool = db::open_test_store(dir.path().join("db.sqlite").to_str().unwrap())
             .await
             .unwrap();
         fs::write(config_path(&pool).unwrap(), r#"{"future_option":true}"#).unwrap();
@@ -258,7 +258,7 @@ mod tests {
     #[tokio::test]
     async fn rejected_change_preserves_file_and_removed_project_ids_are_not_reused() {
         let dir = tempfile::tempdir().unwrap();
-        let pool = db::create_pool(dir.path().join("db.sqlite").to_str().unwrap())
+        let pool = db::open_test_store(dir.path().join("db.sqlite").to_str().unwrap())
             .await
             .unwrap();
         db::init_database(&pool).await.unwrap();

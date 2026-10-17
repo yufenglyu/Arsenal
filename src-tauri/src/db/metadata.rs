@@ -1,15 +1,15 @@
 //! Atomic metadata operations on the JSON store.
-use crate::db::{self, DbPool, SkillMetadata};
+use crate::db::{self, AppStore, SkillMetadata};
 use crate::storage::models::{FolderNote, MetadataRow};
-pub async fn folder_notes(pool: &DbPool) -> Result<Vec<FolderNote>, String> {
+pub async fn folder_notes(pool: &AppStore) -> Result<Vec<FolderNote>, String> {
     pool.read(|d| db::rows(d, "folder_notes"))
 }
-pub async fn save_note(pool: &DbPool, note: &FolderNote) -> Result<(), String> {
+pub async fn save_note(pool: &AppStore, note: &FolderNote) -> Result<(), String> {
     pool.write(|d| db::put(d, "folder_notes", note.id.clone(), note))
         .await
 }
 pub async fn change_tag(
-    pool: &DbPool,
+    pool: &AppStore,
     tag: &str,
     skill_ids: Option<Vec<String>>,
     remove: bool,
@@ -60,7 +60,7 @@ pub async fn change_tag(
     .await
 }
 pub async fn rename_tag(
-    pool: &DbPool,
+    pool: &AppStore,
     old: &str,
     new: &str,
     merge: bool,
@@ -119,7 +119,7 @@ pub async fn rename_tag(
     })
     .await
 }
-pub async fn count_tag(pool: &DbPool, tag: &str) -> Result<usize, String> {
+pub async fn count_tag(pool: &AppStore, tag: &str) -> Result<usize, String> {
     pool.read(|d| {
         Ok(db::rows::<SkillMetadata>(d, "skill_metadata")?
             .iter()

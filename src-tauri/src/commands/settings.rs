@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::db::{self, Agent, DbPool, ScanDirectory};
+use crate::db::{self, Agent, AppStore, ScanDirectory};
 use crate::path_utils::{
     app_data_dir, copy_app_data_dir, expand_home_path, normalize_app_data_dir, path_to_string,
     write_app_data_dir_override,
@@ -33,14 +33,14 @@ struct GitHubReleaseResponse {
 // ─── Core Implementations (testable without Tauri State) ──────────────────────
 
 /// Return all scan directories, built-in first then custom ordered by added_at.
-pub async fn get_scan_directories_impl(pool: &DbPool) -> Result<Vec<ScanDirectory>, String> {
+pub async fn get_scan_directories_impl(pool: &AppStore) -> Result<Vec<ScanDirectory>, String> {
     db::get_scan_directories(pool).await
 }
 
 /// Add a new custom (non-builtin) scan directory.
 /// Returns the newly created record.
 pub async fn add_scan_directory_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     path: &str,
     label: Option<&str>,
 ) -> Result<ScanDirectory, String> {
@@ -53,7 +53,7 @@ pub async fn add_scan_directory_impl(
 }
 
 pub async fn update_scan_directory_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     path: &str,
     new_path: &str,
     label: Option<&str>,
@@ -69,13 +69,13 @@ pub async fn update_scan_directory_impl(
 
 /// Remove a custom (non-builtin) scan directory by path.
 /// Returns an error if the directory is built-in or not found.
-pub async fn remove_scan_directory_impl(pool: &DbPool, path: &str) -> Result<(), String> {
+pub async fn remove_scan_directory_impl(pool: &AppStore, path: &str) -> Result<(), String> {
     db::remove_scan_directory(pool, path).await
 }
 
 /// Toggle the `is_active` flag on a scan directory by path.
 pub async fn set_scan_directory_active_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     path: &str,
     is_active: bool,
 ) -> Result<(), String> {
@@ -83,12 +83,12 @@ pub async fn set_scan_directory_active_impl(
 }
 
 /// Get a settings value by key. Returns `None` if the key is not set.
-pub async fn get_setting_impl(pool: &DbPool, key: &str) -> Result<Option<String>, String> {
+pub async fn get_setting_impl(pool: &AppStore, key: &str) -> Result<Option<String>, String> {
     db::get_setting(pool, key).await
 }
 
 /// Set (upsert) a settings value.
-pub async fn set_setting_impl(pool: &DbPool, key: &str, value: &str) -> Result<(), String> {
+pub async fn set_setting_impl(pool: &AppStore, key: &str, value: &str) -> Result<(), String> {
     if key.trim().is_empty() {
         return Err("Settings key cannot be empty".to_string());
     }
@@ -98,7 +98,7 @@ pub async fn set_setting_impl(pool: &DbPool, key: &str, value: &str) -> Result<(
     db::set_setting(pool, key, value).await
 }
 
-pub async fn update_central_skills_dir_impl(pool: &DbPool, path: &str) -> Result<Agent, String> {
+pub async fn update_central_skills_dir_impl(pool: &AppStore, path: &str) -> Result<Agent, String> {
     let path = path.trim();
     if path.is_empty() {
         return Err("Central Skills path cannot be empty".to_string());
@@ -119,14 +119,14 @@ pub async fn update_central_skills_dir_impl(pool: &DbPool, path: &str) -> Result
     Ok(updated)
 }
 
-pub async fn get_skill_resource_library_dir_impl(pool: &DbPool) -> Result<String, String> {
+pub async fn get_skill_resource_library_dir_impl(pool: &AppStore) -> Result<String, String> {
     Ok(path_to_string(
         &db::get_skill_resource_library_dir(pool).await?,
     ))
 }
 
 pub async fn update_skill_resource_library_dir_impl(
-    pool: &DbPool,
+    pool: &AppStore,
     path: &str,
 ) -> Result<String, String> {
     let path = path.trim();
@@ -148,12 +148,12 @@ pub fn get_platform_dir_impl() -> String {
         .unwrap_or_default()
 }
 
-pub async fn update_app_data_dir_impl(pool: &DbPool, path: &str) -> Result<String, String> {
+pub async fn update_app_data_dir_impl(pool: &AppStore, path: &str) -> Result<String, String> {
     update_app_data_dir_with_publish(pool, path, write_app_data_dir_override).await
 }
 
 async fn update_app_data_dir_with_publish(
-    pool: &DbPool,
+    pool: &AppStore,
     path: &str,
     publish: impl FnOnce(&std::path::Path) -> Result<(), String>,
 ) -> Result<String, String> {
@@ -177,7 +177,7 @@ async fn update_app_data_dir_with_publish(
     Ok(path_to_string(&next))
 }
 
-pub async fn check_app_update_impl(pool: &DbPool) -> Result<AppUpdateInfo, String> {
+pub async fn check_app_update_impl(pool: &AppStore) -> Result<AppUpdateInfo, String> {
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     let client = reqwest::Client::new();
     let mut request = client
@@ -263,7 +263,7 @@ fn version_parts(version: &str) -> Vec<u64> {
 }
 
 async fn demote_skills_outside_new_central_root(
-    pool: &DbPool,
+    pool: &AppStore,
     old_root: &str,
     new_root: &str,
 ) -> Result<(), String> {
@@ -414,11 +414,11 @@ pub async fn check_app_update(state: State<'_, AppState>) -> Result<AppUpdateInf
 mod tests {
     use super::*;
     use crate::db;
-    use crate::storage::store::Store as SqlitePool;
+    use crate::storage::store::Store as AppStore;
     use std::path::Path;
 
-    async fn setup_test_db() -> DbPool {
-        let pool = SqlitePool::connect(":memory:").await.unwrap();
+    async fn setup_test_db() -> AppStore {
+        let pool = AppStore::connect(":memory:").await.unwrap();
         db::init_database(&pool).await.unwrap();
         pool
     }

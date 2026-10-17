@@ -7,7 +7,7 @@ use super::{
     repository_docs, skills,
 };
 use crate::{
-    db::{self, DbPool},
+    db::{self, AppStore},
     AppState,
 };
 use serde::{Deserialize, Serialize};
@@ -138,7 +138,7 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<Vec<github::RemoteSkillCandi
     }
     Ok(candidates)
 }
-async fn preview(pool: &DbPool, snapshot: &Snapshot) -> Result<RepositorySyncPreview, String> {
+async fn preview(pool: &AppStore, snapshot: &Snapshot) -> Result<RepositorySyncPreview, String> {
     let candidates = validate_snapshot(snapshot)?;
     let mut report = empty_report(&format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo));
     report.remote_ref = Some(snapshot.repo.branch.clone());
@@ -215,7 +215,7 @@ async fn preview(pool: &DbPool, snapshot: &Snapshot) -> Result<RepositorySyncPre
     );
     Ok(report)
 }
-async fn persist_snapshot(pool: &DbPool, snapshot: &Snapshot) -> Result<String, String> {
+async fn persist_snapshot(pool: &AppStore, snapshot: &Snapshot) -> Result<String, String> {
     let payload = serde_json::to_string(snapshot).map_err(|e| e.to_string())?;
     let used = pool.read(|d| {
         Ok(d.table("repository_mirror_snapshots")
@@ -236,7 +236,7 @@ async fn persist_snapshot(pool: &DbPool, snapshot: &Snapshot) -> Result<String, 
     Ok(id)
 }
 pub async fn check(
-    pool: &DbPool,
+    pool: &AppStore,
     repositories: Option<Vec<String>>,
 ) -> Result<RepositorySyncPreviewReport, String> {
     let _guard = MIRROR_LOCK.lock().await;
@@ -393,7 +393,7 @@ pub async fn apply_repository_snapshot(
 ) -> Result<(), MirrorError> {
     apply(&state.db, &snapshot_id).await.map_err(Into::into)
 }
-pub(crate) async fn apply(pool: &DbPool, id: &str) -> Result<(), String> {
+pub(crate) async fn apply(pool: &AppStore, id: &str) -> Result<(), String> {
     let _guard = MIRROR_LOCK.lock().await;
     super::repository_address::recover(pool).await?;
     resume_interrupted(pool).await?;
@@ -419,7 +419,7 @@ pub(crate) async fn apply(pool: &DbPool, id: &str) -> Result<(), String> {
     }
     result
 }
-async fn apply_contents(pool: &DbPool, id: &str, snapshot: &Snapshot) -> Result<(), String> {
+async fn apply_contents(pool: &AppStore, id: &str, snapshot: &Snapshot) -> Result<(), String> {
     linker::normalize_resource_backed_central_records_impl(pool).await?;
     let candidates = validate_snapshot(snapshot)?;
     let repository = format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo);
@@ -621,7 +621,7 @@ pub(crate) fn ensure_owned_path(root: &Path, target: &Path) -> Result<(), String
     Ok(())
 }
 
-pub(crate) async fn resume_interrupted(pool: &DbPool) -> Result<(), String> {
+pub(crate) async fn resume_interrupted(pool: &AppStore) -> Result<(), String> {
     let mut rows = pool.read(|d| {
         Ok(d.table("repository_mirror_snapshots")
             .values()
@@ -649,9 +649,9 @@ pub(crate) async fn resume_interrupted(pool: &DbPool) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    async fn fixture() -> (tempfile::TempDir, DbPool, Snapshot) {
+    async fn fixture() -> (tempfile::TempDir, AppStore, Snapshot) {
         let dir = tempfile::tempdir().unwrap();
-        let pool = crate::db::DbPool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::AppStore::connect(":memory:").await.unwrap();
         db::init_database(&pool).await.unwrap();
         crate::storage::fixtures::disable_except(&pool, &["central", "claude-code"]).await;
         db::set_skill_resource_library_dir(&pool, &dir.path().join("library").to_string_lossy())
@@ -708,7 +708,7 @@ mod tests {
             },
         )
     }
-    async fn capture(pool: &DbPool, mut snapshot: Snapshot) -> Snapshot {
+    async fn capture(pool: &AppStore, mut snapshot: Snapshot) -> Snapshot {
         linker::normalize_resource_backed_central_records_impl(pool)
             .await
             .unwrap();
@@ -1401,7 +1401,7 @@ mod tests {
 }
 
 async fn save_recovery(
-    pool: &DbPool,
+    pool: &AppStore,
     id: &str,
     group: &[(db::SkillSource, db::Skill)],
 ) -> Result<(), String> {
@@ -1475,7 +1475,7 @@ pub async fn release_repository_snapshots(
     Ok(())
 }
 
-async fn set_snapshot_state(pool: &DbPool, id: &str, state: &str) -> Result<(), String> {
+async fn set_snapshot_state(pool: &AppStore, id: &str, state: &str) -> Result<(), String> {
     pool.write(|d| {
         if let Some(row) = d.table_mut("repository_mirror_snapshots").get_mut(id) {
             row["state"] = state.into();

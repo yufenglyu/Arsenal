@@ -15,10 +15,7 @@ if not exist "%DEST%\platform\" (
   xcopy /E /I /Y /Q "%SRC%\platform\*" "%DEST%\platform\" >nul
 )
 
-if not exist "%DEST%\db.sqlite" if exist "%SRC%\db.sqlite" (
-  copy /Y "%SRC%\db.sqlite" "%DEST%\db.sqlite" >nul
-)
-
+rem JSON storage is initialized by the application under its exclusive lock.
 if exist "%SRC%\library\.keep" if not exist "%DEST%\library\.keep" (
   copy /Y "%SRC%\library\.keep" "%DEST%\library\.keep" >nul
 )
