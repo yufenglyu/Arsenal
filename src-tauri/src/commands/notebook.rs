@@ -1,4 +1,4 @@
-use crate::{config_store, AppState};
+use crate::AppState;
 use super::notebook_repository as db;
 pub(super) static WRITE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 use base64::Engine;
@@ -158,7 +158,7 @@ fn with_note_identity(text: &str, id: &str) -> Result<String, String> {
 }
 
 fn vault(pool: &crate::db::DbPool) -> Result<PathBuf, String> {
-    let config = config_store::load(pool)?.settings;
+    let config = crate::db::load_config(pool)?.settings;
     let root = config
         .get("obsidian_vault_path")
         .filter(|p| !p.trim().is_empty())
@@ -387,7 +387,7 @@ pub fn validate_template(template: &str) -> Result<(), String> {
 }
 
 fn configured_template(pool: &crate::db::DbPool) -> Result<String, String> {
-    Ok(crate::config_store::load(pool)?.settings
+    Ok(crate::db::load_config(pool)?.settings
         .get("obsidian_property_template")
         .filter(|s| !s.trim().is_empty())
         .cloned()

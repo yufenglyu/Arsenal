@@ -1,5 +1,5 @@
 //! Repository notebook persistence. Short overview notes remain in folder_notes.
-use crate::{config_store, db::DbPool, AppState};
+use crate::{db::DbPool, AppState};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::collections::{BTreeMap, HashSet};
@@ -182,14 +182,14 @@ async fn save_internal_impl(pool: &DbPool, id: i64, body: String, expected_body:
 
 #[tauri::command]
 pub fn get_notebook_settings(state: State<'_, AppState>) -> Result<BTreeMap<String, String>, String> {
-    Ok(config_store::load(&state.db)?.settings.into_iter().filter(|(key, _)| key.starts_with("obsidian_")).collect())
+    Ok(crate::db::load_config(&state.db)?.settings.into_iter().filter(|(key, _)| key.starts_with("obsidian_")).collect())
 }
 #[tauri::command]
 pub fn save_notebook_settings(state: State<'_, AppState>, vault_path: String, folder: String, template: String) -> Result<(), String> {
     let folder = super::notebook::normalize_note_folder(&folder)?;
     super::notebook::validate_template(&template)?;
     if !vault_path.trim().is_empty() && !std::path::Path::new(&vault_path).join(".obsidian").is_dir() { return Err("obsidianSetup".into()); }
-    config_store::update(&state.db, |config| {
+    crate::db::update_config(&state.db, |config| {
         config.settings.insert("obsidian_vault_path".into(), vault_path);
         config.settings.insert("obsidian_note_folder".into(), folder);
         config.settings.insert("obsidian_property_template".into(), template);

@@ -74,6 +74,10 @@
 
 全量平台返回的记录数随档位增长，包含映射成本；不能与单条查询等价比较。测试过程中没有改变生产存储实现。
 
-### 后续阶段
+## P1：解除耦合（进行中）
 
-P1–P7 尚未完成。按阶段补充具体提交、测试、问题和未验证项；不得提前勾选。
+第一步：将 10 个领域 DTO 提取到 storage/models.rs，去掉模型上的 SQLx derive，SQLite 行解码留在 db.rs。保留原 db 路径重导出，避免 IPC 模型变化。config_store 的生产实现不再导入数据库类型；新增 ConfigStore 显式目录入口，旧连接池路径推导隔离到 db_config.rs 过渡适配层。
+
+验证：`cargo test --lib --quiet` 为 545 passed、0 failed、6 ignored（其中 1 项为新增 opt-in 基准）；`cargo clippy --lib -- -D warnings` 通过。新增无数据库配置读写/重开/目录隔离测试。未修改生产存储格式。
+
+P1 尚未完成：命令模块中的直接 SQL、完整持久记录及事务接口仍需逐域收拢；现有调用通过过渡适配层仍使用 SQLite。P2–P7 尚未实施。

@@ -1,6 +1,8 @@
 pub mod commands;
 pub mod config_store;
 pub mod db;
+mod db_config;
+pub mod storage;
 mod protocol;
 pub mod path_utils;
 pub mod platforms;

@@ -1,4 +1,4 @@
-//! Application preferences live beside db.sqlite, never in its business tables.
+//! File-backed application preferences with explicit paths and no database dependency.
 use std::{
     collections::BTreeMap,
     fs,
@@ -9,9 +9,29 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::db::{DbPool, ScanDirectory};
+use crate::storage::models::ScanDirectory;
 
 static CONFIG_LOCK: Mutex<()> = Mutex::new(());
+
+/// An explicit configuration location, usable before opening any storage engine.
+#[derive(Clone, Debug)]
+pub struct ConfigStore {
+    path: PathBuf,
+}
+
+impl ConfigStore {
+    pub fn new(directory: &Path) -> Self {
+        Self { path: directory.join("config.json") }
+    }
+
+    pub fn path(&self) -> &Path { &self.path }
+
+    pub fn load(&self) -> Result<AppConfig, String> { load_path(&self.path) }
+
+    pub fn update<T>(&self, change: impl FnOnce(&mut AppConfig) -> Result<T, String>) -> Result<T, String> {
+        update_path(&self.path, change)
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct AppConfig {
@@ -44,40 +64,6 @@ impl Default for AppConfig {
     }
 }
 
-pub fn config_path(pool: &DbPool) -> Result<PathBuf, String> {
-    let options = pool.connect_options();
-    let filename = options.get_filename();
-    if filename == Path::new(":memory:")
-        || filename
-            .to_string_lossy()
-            .starts_with("file:sqlx-in-memory")
-    {
-        #[cfg(test)]
-        {
-            use std::sync::{Arc, OnceLock, Weak};
-            type TestEntry = (Weak<sqlx::sqlite::SqliteConnectOptions>, tempfile::TempDir);
-            static DIRS: OnceLock<Mutex<Vec<TestEntry>>> = OnceLock::new();
-            let mut dirs = DIRS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap();
-            dirs.retain(|(options, _)| options.strong_count() > 0);
-            if let Some((_, dir)) = dirs
-                .iter()
-                .find(|(stored, _)| stored.ptr_eq(&Arc::downgrade(&options)))
-            {
-                return Ok(dir.path().join("config.json"));
-            }
-            let dir = tempfile::tempdir().map_err(|_| "Cannot create test config directory")?;
-            let path = dir.path().join("config.json");
-            dirs.push((Arc::downgrade(&options), dir));
-            return Ok(path);
-        }
-        #[cfg(not(test))]
-        return Err("Application config requires a file-backed database".into());
-    }
-    Ok(filename
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join("config.json"))
-}
 
 fn read(path: &Path) -> Result<AppConfig, String> {
     match fs::read(path) {
@@ -112,9 +98,6 @@ fn write(path: &Path, config: &AppConfig) -> Result<(), String> {
     Ok(())
 }
 
-pub fn load(pool: &DbPool) -> Result<AppConfig, String> {
-    load_path(&config_path(pool)?)
-}
 
 pub fn load_path(path: &Path) -> Result<AppConfig, String> {
     let _guard = CONFIG_LOCK
@@ -123,12 +106,6 @@ pub fn load_path(path: &Path) -> Result<AppConfig, String> {
     read(path)
 }
 
-pub fn update<T>(
-    pool: &DbPool,
-    change: impl FnOnce(&mut AppConfig) -> Result<T, String>,
-) -> Result<T, String> {
-    update_path(&config_path(pool)?, change)
-}
 
 pub fn update_path<T>(
     path: &Path,
@@ -143,15 +120,26 @@ pub fn update_path<T>(
     Ok(result)
 }
 
-/// Start with the clean file format; legacy database configuration is not imported.
-pub fn initialize(pool: &DbPool) -> Result<(), String> {
-    update(pool, |_| Ok(()))
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db;
+    use crate::db_config::{config_path, load, update};
+
+    #[test]
+    fn explicit_location_round_trips_without_a_database() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let config = ConfigStore::new(first.path());
+        config.update(|data| {
+            data.settings.insert("language".into(), "en".into());
+            Ok(())
+        }).unwrap();
+        assert_eq!(ConfigStore::new(first.path()).load().unwrap().settings["language"], "en");
+        assert!(ConfigStore::new(second.path()).load().unwrap().settings.is_empty());
+        assert!(!first.path().join("db.sqlite").exists());
+    }
 
     #[tokio::test]
     async fn configuration_survives_reopen_and_is_absent_from_database() {

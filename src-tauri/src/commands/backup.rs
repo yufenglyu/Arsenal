@@ -962,7 +962,7 @@ async fn export_app_backup_data_impl(
             .fetch_all(pool)
             .await
             .map_err(|e| e.to_string())?,
-            crate::config_store::load(pool)?.settings.into_iter()
+            crate::db::load_config(pool)?.settings.into_iter()
                 .map(|(key, value)| SettingBackup { key, value })
                 .filter(|setting| is_exportable_setting_key(&setting.key))
                 .collect(),

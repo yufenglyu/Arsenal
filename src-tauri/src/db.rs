@@ -1,8 +1,7 @@
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
-    FromRow, Row, SqlitePool,
+    Row, SqlitePool,
 };
 use std::{collections::HashSet, path::Path, str::FromStr};
 use uuid::Uuid;
@@ -11,116 +10,53 @@ use crate::path_utils::{app_data_dir, expand_home_path, path_to_string};
 
 pub type DbPool = SqlitePool;
 
+pub use crate::storage::models::*;
+pub use crate::db_config::{config_path, initialize as initialize_config, load as load_config, update as update_config};
+
+// SQL decoding belongs to this transitional adapter, not the domain models.
+macro_rules! sqlite_row {
+    ($model:ident { $($field:ident),* }) => {
+        impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for $model {
+            fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
+                Ok(Self { $($field: row.try_get(stringify!($field))?),* })
+            }
+        }
+    };
+}
+sqlite_row!(Skill { id, name, description, file_path, canonical_path, is_central, source, content, scanned_at });
+sqlite_row!(SkillSource { skill_id, source_type, source_url, source_author, source_repo, source_path, updated_at });
+sqlite_row!(SkillSourceSync { skill_id, sync_scope, remote_ref, skill_fingerprint, last_checked_at, last_sync_at, sync_status, sync_error, remote_deleted, updated_at });
+sqlite_row!(SkillMetadata { skill_id, notes, tags, updated_at });
+sqlite_row!(SkillInstallation { skill_id, agent_id, installed_path, link_type, symlink_target, created_at });
+sqlite_row!(AgentSkillObservation { row_id, agent_id, skill_id, name, description, file_path, dir_path, source_kind, source_root, link_type, symlink_target, is_read_only, scanned_at });
+sqlite_row!(Agent { id, display_name, category, global_skills_dir, project_skills_dir, is_detected, is_builtin, is_enabled });
+sqlite_row!(Collection { id, name, description, created_at, updated_at });
+sqlite_row!(ScanDirectory { id, path, label, is_active, is_builtin, added_at });
+sqlite_row!(SkillForAgent { installation_source, id, row_id, name, description, file_path, dir_path, link_type, symlink_target, is_central, source, source_kind, source_root, is_read_only, conflict_group, conflict_count, source_url, source_author, source_repo, source_path, created_at });
+
 pub const SKILL_RESOURCE_LIBRARY_DIR_SETTING_KEY: &str = "skill_resource_library_dir";
 
 // ─── Data Types ──────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct Skill {
-    pub id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub file_path: String,
-    pub canonical_path: Option<String>,
-    pub is_central: bool,
-    pub source: Option<String>,
-    pub content: Option<String>,
-    pub scanned_at: String,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct SkillSource {
-    pub skill_id: String,
-    pub source_type: String,
-    pub source_url: Option<String>,
-    pub source_author: Option<String>,
-    pub source_repo: Option<String>,
-    pub source_path: Option<String>,
-    pub updated_at: String,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct SkillSourceSync {
-    pub skill_id: String,
-    pub sync_scope: String,
-    pub remote_ref: Option<String>,
-    pub skill_fingerprint: Option<String>,
-    pub last_checked_at: Option<String>,
-    pub last_sync_at: Option<String>,
-    pub sync_status: String,
-    pub sync_error: Option<String>,
-    pub remote_deleted: bool,
-    pub updated_at: String,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct SkillMetadata {
-    pub skill_id: String,
-    pub notes: Option<String>,
-    pub tags: String,
-    pub updated_at: String,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct SkillInstallation {
-    pub skill_id: String,
-    pub agent_id: String,
-    pub installed_path: String,
-    pub link_type: String,
-    pub symlink_target: Option<String>,
-    /// ISO 8601 timestamp of when the skill was first installed.
-    pub created_at: String,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct AgentSkillObservation {
-    pub row_id: String,
-    pub agent_id: String,
-    pub skill_id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub file_path: String,
-    pub dir_path: String,
-    pub source_kind: String,
-    pub source_root: String,
-    pub link_type: String,
-    pub symlink_target: Option<String>,
-    pub is_read_only: bool,
-    pub scanned_at: String,
-}
+
+
+
+
+
+
 
 pub use crate::platforms::{agent_supports_universal_agents_skills, builtin_agents};
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct Agent {
-    pub id: String,
-    pub display_name: String,
-    pub category: String,
-    pub global_skills_dir: String,
-    pub project_skills_dir: Option<String>,
-    pub is_detected: bool,
-    pub is_builtin: bool,
-    pub is_enabled: bool,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct Collection {
-    pub id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct ScanDirectory {
-    pub id: i64,
-    pub path: String,
-    pub label: Option<String>,
-    pub is_active: bool,
-    pub is_builtin: bool,
-    pub added_at: String,
-}
+
+
+
 
 // ─── Pool Creation ────────────────────────────────────────────────────────────
 
@@ -388,7 +324,7 @@ pub async fn init_schema(pool: &DbPool) -> Result<(), String> {
         .execute(pool).await.map_err(|e| e.to_string())?;
 
     // Configuration is file-backed. Do not retain legacy configuration tables.
-    crate::config_store::initialize(pool)?;
+    crate::db::initialize_config(pool)?;
     let mut config_cleanup = pool.begin().await.map_err(|e| e.to_string())?;
     sqlx::query("PRAGMA secure_delete = ON")
         .execute(&mut *config_cleanup).await.map_err(|e| e.to_string())?;
@@ -429,7 +365,7 @@ pub async fn init_database(pool: &DbPool) -> Result<(), String> {
     let next_id = recorded_targets.iter()
         .filter_map(|id| id.strip_prefix("project:")?.parse::<i64>().ok())
         .filter_map(|id| id.checked_add(1)).max().unwrap_or(1);
-    crate::config_store::update(pool, |config| {
+    crate::db::update_config(pool, |config| {
         config.next_scan_directory_id = config.next_scan_directory_id.max(next_id);
         Ok(())
     })?;
@@ -470,7 +406,7 @@ pub async fn prepare_config_dir(config_dir: &Path) -> Result<(), String> {
     let _ = std::fs::remove_file(config_dir.join("db.sqlite-wal"));
     let _ = std::fs::remove_file(config_dir.join("db.sqlite-shm"));
     let pool = create_pool(&path_to_string(&db_path)).await?;
-    crate::config_store::update(&pool, |config| {
+    crate::db::update_config(&pool, |config| {
         *config = crate::config_store::AppConfig::default();
         Ok(())
     })?;
@@ -569,7 +505,7 @@ async fn seed_builtin_agents_from(
 /// effect.
 async fn seed_builtin_scan_directories(pool: &DbPool) -> Result<(), String> {
     let agents = get_all_agents(pool).await?;
-    crate::config_store::update(pool, |config| {
+    crate::db::update_config(pool, |config| {
         let paths: HashSet<_> = agents.iter().filter(|agent| agent.is_builtin)
             .map(|agent| agent.global_skills_dir.as_str()).collect();
         config.scan_directories.retain(|dir| !dir.is_builtin || paths.contains(dir.path.as_str()));
@@ -702,44 +638,6 @@ pub async fn get_skills_by_agent(pool: &DbPool, agent_id: &str) -> Result<Vec<Sk
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())
-}
-
-/// A skill enriched with the installation-specific fields for a given agent.
-///
-/// Returned by `get_skills_for_agent`. The extra fields come from the
-/// `skill_installations` row and allow the frontend `SkillCard` to display
-/// the correct source indicator without a second round-trip.
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct SkillForAgent {
-    /// Explicit installation record versus Shared Hub availability.
-    pub installation_source: String,
-    pub id: String,
-    /// Stable row identity for list/detail routing.
-    pub row_id: String,
-    pub name: String,
-    pub description: Option<String>,
-    /// Absolute path to the `SKILL.md` file.
-    pub file_path: String,
-    /// Absolute path to the skill directory as installed for this agent
-    /// (i.e., `skill_installations.installed_path`).
-    pub dir_path: String,
-    /// How the skill is linked: "symlink", "copy", or "native".
-    pub link_type: String,
-    /// Symlink target path, if `link_type` is "symlink".
-    pub symlink_target: Option<String>,
-    pub is_central: bool,
-    /// Logical origin of the managed skill (resource library, GitHub, etc.).
-    pub source: Option<String>,
-    pub source_kind: Option<String>,
-    pub source_root: Option<String>,
-    pub is_read_only: bool,
-    pub conflict_group: Option<String>,
-    pub conflict_count: i64,
-    pub source_url: Option<String>,
-    pub source_author: Option<String>,
-    pub source_repo: Option<String>,
-    pub source_path: Option<String>,
-    pub created_at: Option<String>,
 }
 
 /// Retrieve application-managed skills installed for a given agent, enriched
@@ -1896,7 +1794,7 @@ pub async fn get_skill_collections(
 
 /// Configuration accessors keep the existing IPC contract while storing no settings in SQLite.
 pub async fn get_scan_directories(pool: &DbPool) -> Result<Vec<ScanDirectory>, String> {
-    let mut dirs = crate::config_store::load(pool)?.scan_directories;
+    let mut dirs = crate::db::load_config(pool)?.scan_directories;
     dirs.sort_by(|a, b| b.is_builtin.cmp(&a.is_builtin).then(a.added_at.cmp(&b.added_at)));
     Ok(dirs)
 }
@@ -1912,7 +1810,7 @@ fn next_scan_directory_id(config: &mut crate::config_store::AppConfig) -> i64 {
 }
 
 pub async fn add_scan_directory(pool: &DbPool, path: &str, label: Option<&str>) -> Result<ScanDirectory, String> {
-    crate::config_store::update(pool, |config| {
+    crate::db::update_config(pool, |config| {
         if config.scan_directories.iter().any(|dir| dir.path == path) {
             return Err("Scan directory already exists".into());
         }
@@ -1925,7 +1823,7 @@ pub async fn add_scan_directory(pool: &DbPool, path: &str, label: Option<&str>) 
 
 pub async fn update_scan_directory(pool: &DbPool, path: &str, new_path: &str, label: Option<&str>) -> Result<ScanDirectory, String> {
     if new_path.trim().is_empty() { return Err("Scan directory path cannot be empty".into()); }
-    crate::config_store::update(pool, |config| {
+    crate::db::update_config(pool, |config| {
         if config.scan_directories.iter().any(|dir| dir.path == new_path && dir.path != path) {
             return Err("Scan directory already exists".into());
         }
@@ -1940,7 +1838,7 @@ pub async fn update_scan_directory(pool: &DbPool, path: &str, new_path: &str, la
 pub async fn remove_scan_directory(pool: &DbPool, path: &str) -> Result<(), String> {
     let dir = get_scan_directories(pool).await?.into_iter().find(|dir| dir.path == path).ok_or("Scan directory not found")?;
     if dir.is_builtin { return Err("Cannot remove built-in scan directory".into()); }
-    crate::config_store::update(pool, |config| {
+    crate::db::update_config(pool, |config| {
         config.scan_directories.retain(|entry| entry.id != dir.id);
         Ok(())
     })?;
@@ -1948,7 +1846,7 @@ pub async fn remove_scan_directory(pool: &DbPool, path: &str) -> Result<(), Stri
 }
 
 pub async fn toggle_scan_directory(pool: &DbPool, path: &str, is_active: bool) -> Result<(), String> {
-    crate::config_store::update(pool, |config| {
+    crate::db::update_config(pool, |config| {
         let dir = config.scan_directories.iter_mut().find(|dir| dir.path == path).ok_or("Scan directory not found")?;
         dir.is_active = is_active;
         Ok(())
@@ -1956,7 +1854,7 @@ pub async fn toggle_scan_directory(pool: &DbPool, path: &str, is_active: bool) -
 }
 
 pub async fn upsert_builtin_scan_directory(pool: &DbPool, path: &str, label: &str) -> Result<(), String> {
-    crate::config_store::update(pool, |config| {
+    crate::db::update_config(pool, |config| {
         if let Some(dir) = config.scan_directories.iter_mut().find(|dir| dir.path == path) {
             dir.label = Some(label.into());
             dir.is_builtin = true;
@@ -1971,11 +1869,11 @@ pub async fn upsert_builtin_scan_directory(pool: &DbPool, path: &str, label: &st
 }
 
 pub async fn get_setting(pool: &DbPool, key: &str) -> Result<Option<String>, String> {
-    Ok(crate::config_store::load(pool)?.settings.get(key).cloned())
+    Ok(crate::db::load_config(pool)?.settings.get(key).cloned())
 }
 
 pub async fn set_setting(pool: &DbPool, key: &str, value: &str) -> Result<(), String> {
-    crate::config_store::update(pool, |config| {
+    crate::db::update_config(pool, |config| {
         config.settings.insert(key.into(), value.into());
         Ok(())
     })

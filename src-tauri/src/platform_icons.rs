@@ -200,7 +200,7 @@ fn read_icons(root: &Path) -> Result<BTreeMap<String, String>, String> {
 pub async fn get_platform_icons(
     state: State<'_, AppState>,
 ) -> Result<BTreeMap<String, String>, String> {
-    let path = crate::config_store::config_path(&state.db)?;
+    let path = crate::db::config_path(&state.db)?;
     read_icons(path.parent().ok_or("Invalid config directory")?)
 }
 fn save_icon(root: &Path, agent_id: &str, data_url: Option<&str>) -> Result<(), String> {
@@ -262,7 +262,7 @@ pub async fn set_platform_icon(
     agent_id: String,
     data_url: Option<String>,
 ) -> Result<(), String> {
-    let path = crate::config_store::config_path(&state.db)?;
+    let path = crate::db::config_path(&state.db)?;
     save_icon(
         path.parent().ok_or("Invalid config directory")?,
         &agent_id,

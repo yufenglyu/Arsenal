@@ -1219,7 +1219,7 @@ mod tests {
             .execute(pool)
             .await
             .expect("delete seeded agents");
-        crate::config_store::update(pool, |config| { config.scan_directories.clear(); Ok(()) })
+        crate::db::update_config(pool, |config| { config.scan_directories.clear(); Ok(()) })
             .expect("delete seeded scan directories");
     }
 
@@ -1239,7 +1239,7 @@ mod tests {
             .expect("delete agents");
         // Also clear the builtin scan directories that init_database seeds,
         // so the custom-scan-dir loop has nothing to scan either.
-        crate::config_store::update(&pool, |config| { config.scan_directories.clear(); Ok(()) })
+        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
             .expect("delete scan_directories");
 
         // Add one agent whose skills dir definitely does not exist.
@@ -1461,7 +1461,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        crate::config_store::update(&pool, |config| { config.scan_directories.clear(); Ok(()) })
+        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
             .unwrap();
 
         let codex_agent = db::Agent {
@@ -1511,7 +1511,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        crate::config_store::update(&pool, |config| { config.scan_directories.clear(); Ok(()) })
+        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
             .unwrap();
 
         for agent in [
@@ -1595,7 +1595,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        crate::config_store::update(&pool, |config| { config.scan_directories.clear(); Ok(()) })
+        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
             .unwrap();
 
         for agent in [
@@ -1689,7 +1689,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        crate::config_store::update(&pool, |config| { config.scan_directories.clear(); Ok(()) })
+        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
             .unwrap();
         for agent in [
             db::Agent {
@@ -2003,7 +2003,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        crate::config_store::update(&pool, |config| { config.scan_directories.clear(); Ok(()) })
+        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
             .unwrap();
 
         let factory_root = tmp.path().join(".factory/skills");
@@ -2087,7 +2087,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        crate::config_store::update(&pool, |config| { config.scan_directories.clear(); Ok(()) })
+        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
             .unwrap();
 
         let cursor_root = tmp.path().join(".cursor/skills");
@@ -2143,7 +2143,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        crate::config_store::update(&pool, |config| { config.scan_directories.clear(); Ok(()) })
+        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
             .unwrap();
 
         let shared_root = tmp.path().join(".agents/skills");
@@ -2203,7 +2203,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        crate::config_store::update(&pool, |config| { config.scan_directories.clear(); Ok(()) })
+        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
             .unwrap();
 
         let factory_root = tmp.path().join(".factory/skills");
