@@ -12,6 +12,7 @@ import tempfile
 
 TABLES = set("skills skill_installations skill_sources skill_source_syncs skill_metadata agent_skill_observations agents collections collection_skills github_repository_stats skill_explanations repository_mirror_recovery import_transaction_receipts repository_mirror_snapshots repository_mirrors repository_local_directories repository_address_moves repository_notebooks folder_notes".split())
 REQUIRED = TABLES - {"repository_notebooks", "folder_notes"}
+LATER_REPOSITORY_TABLES = set("repository_mirror_recovery import_transaction_receipts repository_mirror_snapshots repository_mirrors repository_local_directories repository_address_moves".split())
 BOOLS = set("is_central is_managed remote_deleted is_read_only is_detected is_builtin is_enabled committed".split())
 PAIRS = {"skill_installations": ("skill_id", "agent_id"), "collection_skills": ("collection_id", "skill_id"), "skill_explanations": ("skill_id", "lang")}
 
@@ -78,7 +79,12 @@ def _migrate(directory, offline_confirmed=False):
             if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok": raise ValueError("Source integrity check failed")
             if connection.execute("PRAGMA foreign_key_check").fetchone(): raise ValueError("Source has broken references")
             names = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
-            if names - TABLES or REQUIRED - names: raise ValueError("Unsupported database schema; upgrade and recover using the old application first")
+            missing = REQUIRED - names
+            # The pre-mirror release has the same core columns and none of these
+            # six later domains. Accept only the complete known legacy shape,
+            # never an arbitrary missing-table subset or unknown columns.
+            legacy = missing == LATER_REPOSITORY_TABLES
+            if names - TABLES or (missing and not legacy): raise ValueError("Unsupported database schema; upgrade and recover using the old application first")
             catalog = sqlite3.connect(":memory:")
             try:
                 catalog.executescript(Path(__file__).with_name("legacy-json-migration-schema.sql").read_text(encoding="utf-8"))
@@ -96,6 +102,9 @@ def _migrate(directory, offline_confirmed=False):
                     if key in rows: raise ValueError("Duplicate normalized identity")
                     rows[key] = row
                 tables[table] = rows
+            if legacy:
+                for table in LATER_REPOSITORY_TABLES:
+                    tables[table] = {}
             sequence = 0
             if "repository_notebooks" in names:
                 result = connection.execute("SELECT seq FROM sqlite_sequence WHERE name='repository_notebooks'").fetchone()

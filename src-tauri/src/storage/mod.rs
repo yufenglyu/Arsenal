@@ -8,3 +8,6 @@ pub mod fixtures;
 
 #[cfg(test)]
 mod durability_tests;
+
+#[cfg(test)]
+mod migrated_data_tests;

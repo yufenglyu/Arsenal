@@ -113,6 +113,24 @@ class MigrationTests(unittest.TestCase):
         self.db.commit()
         with self.assertRaises(ValueError): m.migrate(self.root, True)
 
+    def test_known_pre_mirror_schema_preserves_core_rows(self):
+        for table in m.LATER_REPOSITORY_TABLES:
+            self.db.execute('DROP TABLE "' + table + '"')
+        self.db.commit()
+        before = (self.root / "db.sqlite").read_bytes()
+        m.migrate(self.root, True)
+        self.assertIn("skill", self.table("skills"))
+        self.assertEqual(self.table("repository_notebooks")["1"]["notebook"], "Text")
+        for table in m.LATER_REPOSITORY_TABLES:
+            self.assertEqual(self.table(table), {})
+        self.assertEqual(before, (self.root / "db.sqlite").read_bytes())
+
+    def test_partial_missing_repository_schema_is_rejected(self):
+        self.db.execute('DROP TABLE repository_mirrors')
+        self.db.commit()
+        with self.assertRaises(ValueError): m.migrate(self.root, True)
+        self.assertFalse((self.root / "store").exists())
+
 if __name__ == "__main__":
     import sys
     import shutil
