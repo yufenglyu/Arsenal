@@ -95,3 +95,12 @@ it("adds the migrated repository to an unrelated existing report without losing 
  expect(updates.getState().preview?.repositories[0].snapshotId).toBe("snapshot-one");
  expect(updates.getState().preview?.repositories[1].snapshotId).toBeNull();
 });
+
+it("invalidates a preview when directory migration still needs recovery",async()=>{
+ invoke.mockRejectedValue("addressRecovery");
+ await expect(updates.getState().changeRepositoryAddress("owner/repo","new/repo")).rejects.toBe("addressRecovery");
+ expect(updates.getState().preview?.repositories[0]).toMatchObject({snapshotId:null,error:"addressRecovery"});
+ render(<UpdateCenter embedded/>);
+ expect(screen.getByRole("button",{name:"同步整仓"})).toBeDisabled();
+ expect(screen.getByRole("alert")).toHaveTextContent("目录迁移尚未恢复完成");
+});

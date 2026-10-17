@@ -85,6 +85,7 @@ pub fn run() {
             });
 
             tauri::async_runtime::block_on(async {
+                let _ = commands::repository_address::recover(&pool).await;
                 commands::github_import::recover_import_transactions(&pool).await
             }).map_err(std::io::Error::other)?;
             app.manage(AppState { db: pool });

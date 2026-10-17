@@ -235,6 +235,7 @@ pub async fn check(
     repositories: Option<Vec<String>>,
 ) -> Result<RepositorySyncPreviewReport, String> {
     let _guard = MIRROR_LOCK.lock().await;
+    super::repository_address::recover(pool).await?;
     resume_interrupted(pool).await?;
     linker::normalize_resource_backed_central_records_impl(pool).await?;
     // Scan before freezing the denominator, including independent local skills.
@@ -390,6 +391,7 @@ pub async fn apply_repository_snapshot(
 }
 pub(crate) async fn apply(pool: &DbPool, id: &str) -> Result<(), String> {
     let _guard = MIRROR_LOCK.lock().await;
+    super::repository_address::recover(pool).await?;
     resume_interrupted(pool).await?;
     let row = sqlx::query("SELECT payload,digest FROM repository_mirror_snapshots WHERE id=? AND state<>'invalidated'")
         .bind(id)
@@ -949,7 +951,7 @@ mod tests {
         assert!(std::fs::symlink_metadata(&link.central_path).is_err());
     }
     #[tokio::test]
-    async fn address_migration_preserves_relations_and_syncs_in_original_directory() {
+    async fn address_migration_moves_directory_preserves_relations_and_syncs_in_new_directory() {
         let (_dir, pool, snapshot) = fixture().await;
         let id = persist_snapshot(&pool, &snapshot).await.unwrap();
         apply(&pool, &id).await.unwrap();
@@ -962,10 +964,29 @@ mod tests {
         let mut notebook = super::super::notebook_repository::Repository::new(1, "example/fixtures".into());
         notebook.notebook = "keep notebook".into();
         super::super::notebook_repository::put(&pool, &notebook).await.unwrap();
+        linker::normalize_resource_backed_central_records_impl(&pool).await.unwrap();
+        let project = _dir.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let project = db::add_scan_directory(&pool, &project.to_string_lossy(), Some("fixture project")).await.unwrap();
+        linker::install_resource_skill_to_agent_impl(&pool, "one", &format!("project:{}", project.id), "symlink").await.unwrap();
+        linker::install_resource_skill_to_agent_impl(&pool, "one", "claude-code", "copy").await.unwrap();
         let before_installs = db::get_skill_installations(&pool, "one").await.unwrap();
+        let copy = before_installs.iter().find(|item| item.link_type == "copy").unwrap();
+        std::fs::write(Path::new(&copy.installed_path).join("local-copy.txt"), "keep local copy until sync").unwrap();
         super::super::repository_address::migrate(&pool, "example/fixtures", "new-owner/new-repo").await.unwrap();
         assert_eq!(apply(&pool, &id).await.unwrap_err(), "PREVIEW_EXPIRED");
         assert_eq!(db::get_skill_installations(&pool, "one").await.unwrap().len(), before_installs.len());
+        let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
+        let moved = root.join("new-owner").join("new-repo").join("one");
+        assert!(!Path::new(original.canonical_path.as_ref().unwrap()).exists());
+        assert!(moved.join("SKILL.md").is_file());
+        assert!(Path::new(&copy.installed_path).join("local-copy.txt").is_file());
+        for install in &before_installs {
+            assert!(Path::new(&install.installed_path).join("SKILL.md").is_file());
+            if install.link_type == "symlink" { assert!(crate::path_utils::paths_resolve_to_same_entry(Path::new(&install.installed_path), &moved)); }
+        }
+        assert_eq!(std::fs::read(root.join("new-owner/new-repo/README.md")).unwrap(), b"remote docs");
+        assert!(skills::get_central_skills_impl(&pool).await.unwrap().iter().any(|skill| skill.id=="one"));
         let saved = super::super::notebook_repository::get(&pool, 1).await.unwrap();
         assert_eq!(saved.repository_uid, notebook.repository_uid);
         assert_eq!(saved.notebook, notebook.notebook);
@@ -980,7 +1001,7 @@ mod tests {
         let id = persist_snapshot(&pool, &next).await.unwrap();
         apply(&pool, &id).await.unwrap();
         let after = db::get_skill_by_id(&pool, "one").await.unwrap().unwrap();
-        assert_eq!(after.canonical_path, original.canonical_path);
+        assert_eq!(after.canonical_path.as_deref(), Some(moved.to_string_lossy().as_ref()));
         let metadata = db::get_skill_metadata(&pool, "one").await.unwrap();
         assert_eq!(db::parse_skill_metadata_tags(metadata.as_ref()), vec!["keep tag"]);
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM collection_skills WHERE skill_id='one' AND collection_id=?").bind(&collection.id).fetch_one(&pool).await.unwrap();
@@ -989,13 +1010,12 @@ mod tests {
         for install in db::get_skill_installations(&pool, "one").await.unwrap() {
             assert_eq!(std::fs::read(Path::new(&install.installed_path).join("extra.txt")).unwrap(), b"new file");
         }
-        let container = Path::new(original.canonical_path.as_ref().unwrap()).parent().unwrap();
+        let container = moved.parent().unwrap();
         assert_eq!(std::fs::read(container.join("README.md")).unwrap(), b"new docs");
         let third = db::get_skill_by_id(&pool, "three").await.unwrap().unwrap();
         assert_eq!(Path::new(third.canonical_path.as_ref().unwrap()).parent().unwrap(), container);
-        // The old address cannot reclaim a container now owned by the new source.
-        let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
-        assert!(super::super::repository_address::directory(&pool, &root, "example", "example/fixtures").await.is_err());
+        assert!(!root.join("example/fixtures").exists());
+        assert!(!Path::new(&copy.installed_path).join("local-copy.txt").exists());
     }
 
     #[tokio::test]
@@ -1016,6 +1036,11 @@ mod tests {
         assert_eq!(db::get_skill_source(&pool, "one").await.unwrap().unwrap().source_repo.as_deref(), Some("example/fixtures"));
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_mirrors WHERE repository='example/fixtures'").fetch_one(&pool).await.unwrap();
         assert_eq!(count, 1);
+        let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
+        assert!(root.join("example/fixtures/one/SKILL.md").is_file());
+        assert!(!root.join("other/repo").exists());
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_address_moves").fetch_one(&pool).await.unwrap();
+        assert_eq!(count, 0);
     }
 
     #[tokio::test]
@@ -1027,7 +1052,68 @@ mod tests {
         super::super::repository_address::migrate(&pool, "example/fixtures", "next/repo").await.unwrap();
         super::super::repository_address::migrate(&pool, "next/repo", "third/repo").await.unwrap();
         let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
-        assert_eq!(super::super::repository_address::directory(&pool, &root, "third", "third/repo").await.unwrap(), repo_directory(&root, &snapshot.repo));
+        assert_eq!(super::super::repository_address::directory(&pool, &root, "third", "third/repo").await.unwrap(), root.join("third").join("repo"));
+    }
+
+    #[tokio::test]
+    async fn address_migration_rejects_existing_directory_without_touching_files() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap(); apply(&pool, &id).await.unwrap();
+        let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
+        std::fs::create_dir_all(root.join("occupied/repo")).unwrap();
+        std::fs::write(root.join("occupied/repo/keep.txt"), "unrelated").unwrap();
+        assert_eq!(super::super::repository_address::migrate(&pool, "example/fixtures", "occupied/repo").await.unwrap_err(), "addressConflict");
+        assert_eq!(std::fs::read(root.join("occupied/repo/keep.txt")).unwrap(), b"unrelated");
+        assert!(root.join("example/fixtures/one/SKILL.md").is_file());
+    }
+
+    #[tokio::test]
+    async fn address_migration_recovers_precommit_rename_before_scan() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap(); apply(&pool, &id).await.unwrap();
+        let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
+        let payload = serde_json::json!({"old":"example/fixtures","new":"new/repo","from":"example/fixtures","to":"new/repo","had_directory":true,"links":[]});
+        sqlx::query("INSERT INTO repository_address_moves(id,payload) VALUES('fixture',?)").bind(payload.to_string()).execute(&pool).await.unwrap();
+        std::fs::create_dir_all(root.join("new")).unwrap();
+        std::fs::rename(root.join("example/fixtures"), root.join("new/repo")).unwrap();
+        assert!(matches!(skills::get_resource_library_skills_impl(&pool).await, Err(error) if error == "addressRecovery"));
+        assert!(db::get_skill_by_id(&pool, "one").await.unwrap().is_some());
+        super::super::repository_address::recover(&pool).await.unwrap();
+        let skills = skills::get_resource_library_skills_impl(&pool).await.unwrap();
+        assert_eq!(skills.len(), 2);
+        assert!(skills.iter().any(|skill| skill.id == "one"));
+        assert!(root.join("example/fixtures/one/SKILL.md").is_file());
+        assert!(!root.join("new/repo").exists());
+        assert!(super::super::repository_address::recover(&pool).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn address_migration_recovers_committed_move_and_interrupted_link_replacement() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap(); apply(&pool, &id).await.unwrap();
+        let link = linker::install_resource_skill_to_agent_impl(&pool,"one","claude-code","symlink").await.unwrap();
+        let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
+        let old = root.join("example").join("fixtures").join("one"); let new = root.join("new").join("repo").join("one");
+        let links = linker::prepare_installation_relocation_impl(&pool,"one",&old,&new).await.unwrap();
+        let payload = serde_json::json!({"old":"example/fixtures","new":"new/repo","from":"example/fixtures","to":"new/repo","had_directory":true,"links":links});
+        std::fs::create_dir_all(root.join("new")).unwrap();
+        std::fs::rename(root.join("example/fixtures"),root.join("new/repo")).unwrap();
+        sqlx::query("UPDATE skills SET canonical_path=?,file_path=? WHERE id='one'").bind(new.to_string_lossy().as_ref()).bind(new.join("SKILL.md").to_string_lossy().as_ref()).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO repository_address_moves(id,payload,committed) VALUES('fixture',?,1)").bind(payload.to_string()).execute(&pool).await.unwrap();
+        crate::path_utils::remove_symlink_path(Path::new(&link.symlink_path)).unwrap();
+        // A foreign entry is never removed by recovery.
+        std::fs::create_dir(&link.symlink_path).unwrap();
+        std::fs::write(Path::new(&link.symlink_path).join("keep.txt"), "foreign").unwrap();
+        assert_eq!(super::super::repository_address::recover(&pool).await.unwrap_err(), "addressRecovery");
+        assert_eq!(std::fs::read(Path::new(&link.symlink_path).join("keep.txt")).unwrap(), b"foreign");
+        std::fs::remove_file(Path::new(&link.symlink_path).join("keep.txt")).unwrap();
+        std::fs::remove_dir(&link.symlink_path).unwrap();
+        assert_eq!(super::super::repository_address::recover(&pool).await.unwrap(), vec![("example/fixtures".into(),"new/repo".into())]);
+        assert!(crate::path_utils::paths_resolve_to_same_entry(Path::new(&link.symlink_path), &new));
+        let records = db::get_skill_installations(&pool,"one").await.unwrap();
+        assert_eq!(records[0].installed_path, link.symlink_path);
+        assert_eq!(records[0].symlink_target.as_deref(), Some(new.to_string_lossy().as_ref()));
+        assert!(!root.join("example/fixtures").exists());
     }
 
     #[test]

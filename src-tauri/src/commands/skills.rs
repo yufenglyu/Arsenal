@@ -1848,14 +1848,32 @@ async fn resource_bundle_preview_for_target(
 /// for that skill (regardless of whether the link type is symlink or copy).
 #[tauri::command]
 pub async fn get_central_skills(state: State<'_, AppState>) -> Result<Vec<SkillWithLinks>, String> {
-    let _ = super::linker::reconcile_orphaned_central_skills(&state.db).await;
-    let skills = db::get_central_skills(&state.db).await?;
+    let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
+    super::repository_address::recover(&state.db).await?;
+    get_central_skills_impl(&state.db).await
+}
 
-    let mut result = Vec::with_capacity(skills.len());
-    for skill in skills {
-        result.push(skill_with_links(&state.db, skill).await?);
+pub(crate) async fn get_central_skills_impl(pool: &DbPool) -> Result<Vec<SkillWithLinks>, String> {
+    use sqlx::Row;
+    let _ = super::linker::reconcile_orphaned_central_skills(pool).await;
+    let mut skills = db::get_central_skills(pool).await?;
+    // A relocated resource remains the primary DB record; expose its managed
+    // central link as a view without moving that primary identity back again.
+    for row in sqlx::query("SELECT skill_id,installed_path FROM skill_installations WHERE agent_id='central' AND is_managed=1").fetch_all(pool).await.map_err(|e|e.to_string())? {
+        let id: String = row.get("skill_id");
+        if skills.iter().any(|skill| skill.id == id) { continue; }
+        if let Some(mut skill) = db::get_skill_by_id(pool, &id).await? {
+            let path = PathBuf::from(row.get::<String,_>("installed_path"));
+            if !path.join("SKILL.md").is_file() || !std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink()) { continue; }
+            if !skill.canonical_path.as_ref().is_some_and(|source| crate::path_utils::paths_resolve_to_same_entry(&path, Path::new(source))) { continue; }
+            skill.file_path = path.join("SKILL.md").to_string_lossy().into_owned();
+            skill.canonical_path = Some(path.to_string_lossy().into_owned());
+            skill.is_central = true;
+            skills.push(skill);
+        }
     }
-
+    let mut result = Vec::with_capacity(skills.len());
+    for skill in skills { result.push(skill_with_links(pool, skill).await?); }
     Ok(result)
 }
 
@@ -1863,6 +1881,8 @@ pub async fn get_central_skills(state: State<'_, AppState>) -> Result<Vec<SkillW
 pub async fn get_resource_library_skills(
     state: State<'_, AppState>,
 ) -> Result<Vec<SkillWithLinks>, String> {
+    let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
+    super::repository_address::recover(&state.db).await?;
     get_resource_library_skills_impl(&state.db).await
 }
 
@@ -1939,6 +1959,8 @@ pub async fn export_resource_skill_directory_list(
     state: State<'_, AppState>,
     output_path: String,
 ) -> Result<usize, String> {
+    let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
+    super::repository_address::recover(&state.db).await?;
     let skills = get_resource_library_skills_impl(&state.db).await?;
     let resource_root = db::get_skill_resource_library_dir(&state.db).await?;
     let mut rows: BTreeMap<String, Vec<SkillWithLinks>> = BTreeMap::new();
@@ -2469,6 +2491,9 @@ async fn sync_resource_library_skills(
     pool: &DbPool,
     resource_root: &Path,
 ) -> Result<Vec<super::scanner::ScannedSkill>, String> {
+    let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_address_moves").fetch_one(pool).await.map_err(|e| e.to_string())?;
+    if pending != 0 { return Err("addressRecovery".into()); }
+
     std::fs::create_dir_all(resource_root)
         .map_err(|e| format!("Failed to create Skill Resource Library directory: {}", e))?;
 

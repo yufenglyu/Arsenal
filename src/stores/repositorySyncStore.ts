@@ -91,6 +91,10 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
           await useResourceLibraryStore.getState().loadResourceLibrary();
           await useNotebookStore.getState().load();
           await get().recheckRepository(target);
+        } catch (error) {
+          const code = error instanceof Error ? error.message : String(error);
+          if (code === "addressRecovery") set(state=>({preview:state.preview ? {...state.preview,repositories:state.preview.repositories.map(row=>row.repository.toLowerCase()===repository.toLowerCase() ? {...row,snapshotId:null,error:code} : row)} : null}));
+          throw error;
         } finally { set({migratingRepository:null}); }
       },
       updateErrors: {},

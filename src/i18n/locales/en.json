@@ -1432,7 +1432,7 @@
     },
     "address": {
       "title": "Change repository address",
-      "hint": "Validate the new repository and update all sources while preserving local paths, tags, collections and installations. A fresh check follows; content changes require confirming a whole-repository sync.",
+      "hint": "Validate the new repository, move its local directory to the new owner/repository path and retarget managed links while preserving tags, collections and installations. A fresh check follows; applying remote content still requires confirming a whole-repository sync.",
       "current": "Current repository",
       "newAddress": "New repository address",
       "save": "Validate and migrate",
@@ -1447,7 +1447,10 @@
         "addressConflict": "The target repository or local directory is already in use. Migration cannot merge repositories.",
         "addressLayout": "Local skills do not share one repository directory. Migration is unavailable.",
         "addressDatabase": "Saving failed. The migration was not committed.",
-        "unknown": "The change failed. Refresh and retry."
+        "unknown": "The change failed. Refresh and retry.",
+        "addressMove": "Moving the directory failed. The original directory was restored.",
+        "addressLinks": "Installation links have changed or cannot be migrated safely. Check them and retry.",
+        "addressRecovery": "Directory migration needs recovery. Retry the address change or restart. Scanning and synchronization wait until recovery completes."
       }
     }
   },

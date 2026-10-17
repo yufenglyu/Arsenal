@@ -154,6 +154,8 @@ pub async fn init_schema(pool: &DbPool) -> Result<(), String> {
 
     sqlx::query("CREATE TABLE IF NOT EXISTS repository_local_directories (repository TEXT PRIMARY KEY COLLATE NOCASE, directory TEXT NOT NULL UNIQUE)").execute(pool).await.map_err(|e| e.to_string())?;
 
+    sqlx::query("CREATE TABLE IF NOT EXISTS repository_address_moves (id TEXT PRIMARY KEY, payload TEXT NOT NULL, committed INTEGER NOT NULL DEFAULT 0)").execute(pool).await.map_err(|e| e.to_string())?;
+
     // Enable WAL mode (no-op for in-memory databases)
     sqlx::query("PRAGMA journal_mode=WAL")
         .execute(pool)

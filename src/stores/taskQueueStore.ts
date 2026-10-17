@@ -98,6 +98,7 @@ export function taskErrorMessage(
   const code = error && typeof error === "object" && "code" in error ? String(error.code) : null;
   if (code && ["PREVIEW_EXPIRED","SNAPSHOT_UNAVAILABLE","LOCAL_IDENTITY_CHANGED","UNSAFE_TARGET","UNSAFE_INSTALL_TARGET","UNSAFE_SNAPSHOT_PATH","SNAPSHOT_CACHE_FULL","SNAPSHOT_TOO_LARGE","WRITE_FAILED"].includes(code)) return i18n.t(`workflow.errors.${code}`);
   const text = error instanceof Error ? error.message : String(error);
+  if (/^address[A-Za-z]+$/.test(text) && i18n.exists(`workflow.address.errors.${text}`)) return i18n.t(`workflow.address.errors.${text}`);
   // Background tasks already store safe, translated errors. Preserve them when
   // a dialog or a check wrapper handles that same error a second time.
   const translatedErrors = i18n.t("workflow.errors", { returnObjects: true });

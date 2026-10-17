@@ -205,6 +205,8 @@ pub async fn export_app_backup(
     state: State<'_, AppState>,
     options: Option<BackupOptions>,
 ) -> Result<Vec<u8>, String> {
+    let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
+    super::repository_address::recover(&state.db).await?;
     export_app_backup_archive_impl(&state.db, complete_backup_options(options)).await
 }
 
@@ -214,6 +216,8 @@ pub async fn export_app_backup_to_path(
     dest_path: String,
     options: Option<BackupOptions>,
 ) -> Result<(), String> {
+    let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
+    super::repository_address::recover(&state.db).await?;
     let archive =
         export_app_backup_archive_impl(&state.db, complete_backup_options(options)).await?;
     write_backup_archive_to_path(&dest_path, &archive)
@@ -225,6 +229,8 @@ pub async fn import_app_backup(
     backup: Vec<u8>,
     repository_only: Option<bool>,
 ) -> Result<(), String> {
+    let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
+    super::repository_address::recover(&state.db).await?;
     let mut data = read_app_backup_bytes(&backup)?;
     if repository_only.unwrap_or(false) {
         restrict_to_repository(&mut data);
@@ -282,6 +288,8 @@ pub async fn upload_webdav_backup(
     config: WebDavConfig,
     options: Option<BackupOptions>,
 ) -> Result<WebDavBackupFile, String> {
+    let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
+    super::repository_address::recover(&state.db).await?;
     let _ = options;
     let archive = export_app_backup_archive_impl(&state.db, repository_backup_options())
         .await

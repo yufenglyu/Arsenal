@@ -390,6 +390,7 @@ async fn import_github_repo_skills_cancellable(
     operation: Option<&super::github_cancellation::Operation>,
 ) -> Result<GitHubRepoImportResult, String> {
     let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
+    super::repository_address::recover(pool).await?;
     emit_github_import_progress(
         app,
         GitHubImportProgressPayload {

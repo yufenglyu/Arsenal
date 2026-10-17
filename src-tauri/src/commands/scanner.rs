@@ -721,6 +721,8 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
 /// SQLite. Returns a `ScanResult` with per-agent skill counts.
 #[tauri::command]
 pub async fn scan_all_skills(state: State<'_, AppState>) -> Result<ScanResult, String> {
+    let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
+    super::repository_address::recover(&state.db).await?;
     scan_all_skills_impl(&state.db).await
 }
 

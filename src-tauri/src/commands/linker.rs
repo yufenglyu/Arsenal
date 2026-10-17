@@ -3787,6 +3787,81 @@ mod tests {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct InstallationRelocation {
+    record: SkillInstallation,
+    previous_target: Option<PathBuf>,
+    source: PathBuf,
+}
+
+async fn validate_relocation_path(pool: &DbPool, record: &SkillInstallation) -> Result<PathBuf, String> {
+    let target = install_target_for_agent_id(pool, &record.agent_id).await?;
+    let path = PathBuf::from(&record.installed_path);
+    let relative = path.strip_prefix(&target.skills_dir).map_err(|_| "UNSAFE_INSTALL_TARGET")?;
+    if relative.as_os_str().is_empty() || !relative.components().all(|p| matches!(p, Component::Normal(_))) {
+        return Err("UNSAFE_INSTALL_TARGET".into());
+    }
+    let mut ancestor = target.skills_dir.clone();
+    for part in relative.parent().unwrap_or(Path::new("")).components() {
+        ancestor.push(part);
+        if std::fs::symlink_metadata(&ancestor).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err("UNSAFE_INSTALL_TARGET".into());
+        }
+    }
+    Ok(path)
+}
+
+/// Capture exact link entries before moving a source. Copy installations are untouched.
+pub(crate) async fn prepare_installation_relocation_impl(pool: &DbPool, skill_id: &str, old: &Path, new: &Path) -> Result<Vec<InstallationRelocation>, String> {
+    let mut result = Vec::new();
+    for record in db::get_skill_installations(pool, skill_id).await? {
+        let entry = Path::new(&record.installed_path);
+        if old.parent().is_some_and(|p| entry.starts_with(p)) || new.parent().is_some_and(|p| entry.starts_with(p)) { return Err("UNSAFE_INSTALL_TARGET".into()); }
+        if record.link_type == "copy" { continue; }
+        if record.link_type != "symlink" { return Err("UNSAFE_INSTALL_TARGET".into()); }
+        let path = validate_relocation_path(pool, &record).await?;
+        let previous_target = match std::fs::symlink_metadata(&path) {
+            Ok(meta) if meta.file_type().is_symlink() && crate::path_utils::paths_resolve_to_same_entry(&path, old) => Some(std::fs::read_link(&path).map_err(|_| "UNSAFE_INSTALL_TARGET")?),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            _ => return Err("UNSAFE_INSTALL_TARGET".into()),
+        };
+        result.push(InstallationRelocation { record, previous_target, source: new.to_path_buf() });
+    }
+    Ok(result)
+}
+
+/// Idempotent journal replay repairs recorded links at their original installation locations.
+pub(crate) async fn apply_installation_relocation_impl(pool: &DbPool, plan: &InstallationRelocation) -> Result<(), String> {
+    let root = db::get_skill_resource_library_dir(pool).await?;
+    super::repository_mirror::ensure_owned_path(&root, &plan.source)?;
+    if !plan.source.join("SKILL.md").is_file() { return Err("WRITE_FAILED".into()); }
+    let path = validate_relocation_path(pool, &plan.record).await?;
+    let parent = path.parent().ok_or("UNSAFE_INSTALL_TARGET")?;
+    let target = symlink_target_path(parent, &plan.source);
+    match std::fs::symlink_metadata(&path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            if !crate::path_utils::paths_resolve_to_same_entry(&path, &plan.source) {
+                let existing = std::fs::read_link(&path).map_err(|_| "UNSAFE_INSTALL_TARGET")?;
+                if Some(&existing) != plan.previous_target.as_ref() && existing != target { return Err("UNSAFE_INSTALL_TARGET".into()); }
+                remove_symlink_path(&path).map_err(|_| "WRITE_FAILED")?;
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+        _ => return Err("UNSAFE_INSTALL_TARGET".into()),
+    }
+    if std::fs::symlink_metadata(&path).is_err() {
+        std::fs::create_dir_all(parent).map_err(|_| "WRITE_FAILED")?;
+        create_symlink(&target, &path)?;
+    }
+    if !crate::path_utils::paths_resolve_to_same_entry(&path, &plan.source) { return Err("WRITE_FAILED".into()); }
+    let mut record = plan.record.clone();
+    record.symlink_target = Some(path_to_string(&plan.source));
+    db::upsert_skill_installation(pool, &record).await?;
+    sqlx::query("UPDATE agent_skill_observations SET symlink_target=? WHERE agent_id=? AND skill_id=? AND dir_path=?")
+        .bind(&record.symlink_target).bind(&record.agent_id).bind(&record.skill_id).bind(&record.installed_path).execute(pool).await.map_err(|_| "WRITE_FAILED")?;
+    Ok(())
+}
+
 /// Strict mirror refreshes only recorded targets; copy edits intentionally follow the source.
 pub(crate) async fn refresh_resource_installations_impl(pool: &DbPool, skill_id: &str) -> Result<(), String> {
     let source = resource_source_dir_for_skill(pool, skill_id).await?;
