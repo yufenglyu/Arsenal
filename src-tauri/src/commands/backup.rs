@@ -1,3 +1,4 @@
+use crate::db::backup::{CollectionSkillBackup, RepositoryDirectoryBackup, RepositoryStatsBackup};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use futures_util::StreamExt;
@@ -5,7 +6,6 @@ use percent_encoding::percent_decode_str;
 use quick_xml::events::Event;
 use reqwest::{Client, Method, Url};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::io::{Cursor, Read, Write};
@@ -79,14 +79,7 @@ pub struct WebDavBackupFile {
     pub modified_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-struct CollectionSkillBackup {
-    collection_id: String,
-    skill_id: String,
-    added_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SettingBackup {
     key: String,
     value: String,
@@ -165,16 +158,6 @@ impl From<&ScanDirectory> for ScanDirectoryBackup {
         }
     }
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-struct RepositoryStatsBackup {
-    repository: String,
-    stars: i64,
-    checked_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-struct RepositoryDirectoryBackup { repository: String, directory: String }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AppBackup {
@@ -826,9 +809,9 @@ fn generated_backup_timestamp(name: &str) -> Option<NaiveDateTime> {
     let timestamp = timestamp
         .strip_suffix(".zip")
         .or_else(|| timestamp.strip_suffix(".json"))?;
-    NaiveDateTime::parse_from_str(timestamp, "%Y%m%d%H%M%S").ok().or_else(|| {
-        NaiveDateTime::parse_from_str(timestamp.get(..17)?, "%Y-%m-%d-%H%M%S").ok()
-    })
+    NaiveDateTime::parse_from_str(timestamp, "%Y%m%d%H%M%S")
+        .ok()
+        .or_else(|| NaiveDateTime::parse_from_str(timestamp.get(..17)?, "%Y-%m-%d-%H%M%S").ok())
 }
 
 fn generated_backup_timestamp_utc(name: &str) -> Option<DateTime<Utc>> {
@@ -951,40 +934,37 @@ async fn export_app_backup_data_impl(
         .await?;
     }
     fill_central_symlink_files_without_resource(&mut skill_backups, &central_root)?;
-    let (collections, collection_skills, settings, agents, scan_directories) = if options
-        .include_app_config
-    {
-        (
-            db::get_all_collections(pool).await?,
-            sqlx::query_as::<_, CollectionSkillBackup>(
-                "SELECT collection_id, skill_id, added_at FROM collection_skills ORDER BY collection_id, added_at",
+    let (collections, collection_skills, settings, agents, scan_directories) =
+        if options.include_app_config {
+            (
+                db::get_all_collections(pool).await?,
+                db::backup::memberships(pool)?,
+                crate::db::load_config(pool)?
+                    .settings
+                    .into_iter()
+                    .map(|(key, value)| SettingBackup { key, value })
+                    .filter(|setting| is_exportable_setting_key(&setting.key))
+                    .collect(),
+                db::get_all_agents(pool)
+                    .await?
+                    .iter()
+                    .map(AgentBackup::from)
+                    .collect(),
+                db::get_scan_directories(pool)
+                    .await?
+                    .iter()
+                    .map(ScanDirectoryBackup::from)
+                    .collect(),
             )
-            .fetch_all(pool)
-            .await
-            .map_err(|e| e.to_string())?,
-            crate::db::load_config(pool)?.settings.into_iter()
-                .map(|(key, value)| SettingBackup { key, value })
-                .filter(|setting| is_exportable_setting_key(&setting.key))
-                .collect(),
-            db::get_all_agents(pool)
-                .await?
-                .iter()
-                .map(AgentBackup::from)
-                .collect(),
-            db::get_scan_directories(pool)
-                .await?
-                .iter()
-                .map(ScanDirectoryBackup::from)
-                .collect(),
-        )
-    } else {
-        (
-            db::get_all_collections(pool).await?,
-            sqlx::query_as::<_, CollectionSkillBackup>("SELECT collection_id, skill_id, added_at FROM collection_skills ORDER BY collection_id, added_at")
-                .fetch_all(pool).await.map_err(|e| e.to_string())?,
-            Vec::new(), Vec::new(), Vec::new(),
-        )
-    };
+        } else {
+            (
+                db::get_all_collections(pool).await?,
+                db::backup::memberships(pool)?,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            )
+        };
 
     let current_agents = db::get_all_agents(pool).await?;
     let included_skill_ids: HashSet<String> = skill_backups
@@ -997,51 +977,54 @@ async fn export_app_backup_data_impl(
         .map(|agent| agent.id.clone())
         .collect();
     let skill_installations = if options.include_installations {
-        sqlx::query_as::<_, SkillInstallationMethodRow>(
-            "SELECT skill_id, agent_id, link_type
-             FROM skill_installations
-             WHERE is_managed = 1
-             ORDER BY skill_id, agent_id",
-        )
-        .fetch_all(pool)
-        .await
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .filter(|installation| {
-            included_skill_ids.contains(&installation.skill_id)
-                && restorable_agent_ids.contains(&installation.agent_id)
-        })
-        .map(|installation| SkillInstallationBackup {
-            skill_id: installation.skill_id,
-            agent_id: installation.agent_id,
-            method: Some(
-                validated_install_method(Some(&installation.link_type))
-                    .as_str()
-                    .to_string(),
-            ),
-        })
-        .collect()
+        db::backup::installations(pool)?
+            .into_iter()
+            .filter(|installation| {
+                included_skill_ids.contains(&installation.skill_id)
+                    && restorable_agent_ids.contains(&installation.agent_id)
+            })
+            .map(|installation| SkillInstallationBackup {
+                skill_id: installation.skill_id,
+                agent_id: installation.agent_id,
+                method: Some(
+                    validated_install_method(Some(&installation.link_type))
+                        .as_str()
+                        .to_string(),
+                ),
+            })
+            .collect()
     } else {
         Vec::new()
     };
 
-    let repositories: HashSet<String> = skill_backups.iter()
+    let repositories: HashSet<String> = skill_backups
+        .iter()
         .filter_map(|skill| skill.source.as_ref()?.source_repo.as_deref())
         .filter(|repo| is_portable_github_repo(repo))
-        .map(str::to_ascii_lowercase).collect();
-    let repository_stats = sqlx::query_as::<_, RepositoryStatsBackup>(
-        "SELECT repository, stars, checked_at FROM github_repository_stats ORDER BY repository"
-    ).fetch_all(pool).await.map_err(|error| error.to_string())?
-        .into_iter().filter(|stats| repositories.contains(&stats.repository.to_ascii_lowercase())).collect();
+        .map(str::to_ascii_lowercase)
+        .collect();
+    let repository_stats = db::backup::stats(pool)?
+        .into_iter()
+        .filter(|stats| repositories.contains(&stats.repository.to_ascii_lowercase()))
+        .collect();
     let repository_directories = if options.include_resource_library {
-        sqlx::query_as::<_, RepositoryDirectoryBackup>("SELECT repository,directory FROM repository_local_directories ORDER BY repository")
-            .fetch_all(pool).await.map_err(|e| e.to_string())?
-    } else { Vec::new() };
+        db::backup::directories(pool)?
+    } else {
+        Vec::new()
+    };
     let mut backup = AppBackup {
         repository_directories,
         repository_stats,
-        repository_notebooks: if options.include_resource_library { super::notebook_repository::list(pool).await? } else { Vec::new() },
-        folder_notes: if options.include_resource_library { super::metadata::folder_notes(pool).await? } else { Vec::new() },
+        repository_notebooks: if options.include_resource_library {
+            super::notebook_repository::list(pool).await?
+        } else {
+            Vec::new()
+        },
+        folder_notes: if options.include_resource_library {
+            super::metadata::folder_notes(pool).await?
+        } else {
+            Vec::new()
+        },
         schema_version: BACKUP_SCHEMA_VERSION,
         exported_at: Utc::now().to_rfc3339(),
         included: options,
@@ -1220,8 +1203,10 @@ async fn import_app_backup_data_impl(pool: &DbPool, backup: AppBackup) -> Result
         .map_err(|e| format!("Failed to create Skill Resource Library root: {}", e))?;
     validate_restore_plan(&backup.skills)?;
     for stats in &backup.repository_stats {
-        if !is_portable_github_repo(&stats.repository) || stats.stars < 0
-            || DateTime::parse_from_rfc3339(&stats.checked_at).is_err() {
+        if !is_portable_github_repo(&stats.repository)
+            || stats.stars < 0
+            || DateTime::parse_from_rfc3339(&stats.checked_at).is_err()
+        {
             return Err("Backup contains invalid repository statistics".into());
         }
     }
@@ -1229,27 +1214,41 @@ async fn import_app_backup_data_impl(pool: &DbPool, backup: AppBackup) -> Result
     let mut mapping_paths = HashSet::new();
     for mapping in &backup.repository_directories {
         let relative = normalize_relative_path(&mapping.directory)?;
-        if !is_portable_github_repo(&mapping.repository) || relative.components().count() != 2
-            || !mapping_keys.insert(mapping.repository.to_lowercase()) || !mapping_paths.insert(relative_path_key(&relative)?) {
+        if !is_portable_github_repo(&mapping.repository)
+            || relative.components().count() != 2
+            || !mapping_keys.insert(mapping.repository.to_lowercase())
+            || !mapping_paths.insert(relative_path_key(&relative)?)
+        {
             return Err("Backup contains invalid repository directory mappings".into());
         }
-        super::repository_mirror::ensure_owned_path(&resource_root, &resource_root.join(&relative))?;
-        let existing: Vec<(String,String)> = sqlx::query_as("SELECT repository,directory FROM repository_local_directories WHERE repository=? COLLATE NOCASE OR directory=? COLLATE NOCASE")
-            .bind(&mapping.repository).bind(&mapping.directory).fetch_all(pool).await.map_err(|e|e.to_string())?;
-        if existing.iter().any(|(repo,dir)| !repo.eq_ignore_ascii_case(&mapping.repository) || dir != &mapping.directory) {
+        super::repository_mirror::ensure_owned_path(
+            &resource_root,
+            &resource_root.join(&relative),
+        )?;
+        let existing =
+            db::backup::matching_directories(pool, &mapping.repository, &mapping.directory)?;
+        if existing.iter().any(|(repo, dir)| {
+            !repo.eq_ignore_ascii_case(&mapping.repository) || dir != &mapping.directory
+        }) {
             return Err("Backup repository directory mapping conflicts with local data".into());
         }
     }
-    let mut mapping_tx = pool.begin().await.map_err(|e|e.to_string())?;
-    for mapping in &backup.repository_directories {
-        sqlx::query("INSERT OR IGNORE INTO repository_local_directories(repository,directory) VALUES(?,?)")
-            .bind(&mapping.repository).bind(path_to_portable_relative(&normalize_relative_path(&mapping.directory)?).ok_or("Invalid repository directory")?).execute(&mut *mapping_tx).await.map_err(|e|e.to_string())?;
-        sqlx::query("INSERT OR IGNORE INTO repository_mirrors(repository) VALUES(?)")
-            .bind(&mapping.repository).execute(&mut *mapping_tx).await.map_err(|e|e.to_string())?;
-    }
-    mapping_tx.commit().await.map_err(|e|e.to_string())?;
+    let mappings = backup
+        .repository_directories
+        .iter()
+        .map(|mapping| {
+            Ok(RepositoryDirectoryBackup {
+                repository: mapping.repository.clone(),
+                directory: path_to_portable_relative(&normalize_relative_path(&mapping.directory)?)
+                    .ok_or("Invalid repository directory")?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    db::backup::restore_directories(pool, &mappings).await?;
     super::notebook_repository::restore(pool, &backup.repository_notebooks).await?;
-    for note in &backup.folder_notes { super::metadata::save_note(pool, note).await?; }
+    for note in &backup.folder_notes {
+        super::metadata::save_note(pool, note).await?;
+    }
 
     for setting in backup.settings {
         if !is_exportable_setting_key(&setting.key) {
@@ -1369,26 +1368,8 @@ async fn import_app_backup_data_impl(pool: &DbPool, backup: AppBackup) -> Result
         upsert_collection_backup(pool, &collection).await?;
     }
 
-    for membership in backup.collection_skills {
-        sqlx::query(
-            "INSERT OR IGNORE INTO collection_skills (collection_id, skill_id, added_at)
-             VALUES (?, ?, ?)",
-        )
-        .bind(&membership.collection_id)
-        .bind(&membership.skill_id)
-        .bind(&membership.added_at)
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    }
-
-    for stats in backup.repository_stats {
-        sqlx::query("INSERT INTO github_repository_stats (repository, stars, checked_at) VALUES (?, ?, ?) \
-            ON CONFLICT(repository) DO UPDATE SET stars=excluded.stars, checked_at=excluded.checked_at \
-            WHERE julianday(excluded.checked_at) >= julianday(github_repository_stats.checked_at)")
-            .bind(stats.repository).bind(stats.stars).bind(stats.checked_at)
-            .execute(pool).await.map_err(|error| error.to_string())?;
-    }
+    db::backup::restore_memberships(pool, &backup.collection_skills).await?;
+    db::backup::restore_stats(pool, &backup.repository_stats).await?;
     crate::commands::skills::get_resource_library_skills_impl(pool).await?;
 
     Ok(())
@@ -1446,16 +1427,7 @@ async fn upsert_restored_resource_skill(
     db_skill.source = sanitize_skill_origin(db_skill.source);
     db_skill.content = None;
     db::upsert_skill(pool, &db_skill).await?;
-    sqlx::query("DELETE FROM skill_source_syncs WHERE skill_id = ?")
-        .bind(&db_skill.id)
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    sqlx::query("DELETE FROM skill_sources WHERE skill_id = ?")
-        .bind(&db_skill.id)
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    db::backup::clear_source(pool, &db_skill.id).await?;
     if let Some(mut source) = sanitize_skill_source(skill.source.clone()) {
         source.skill_id = db_skill.id.clone();
         db::upsert_skill_source(pool, &source).await?;
@@ -1997,41 +1969,18 @@ async fn update_existing_custom_agent_backup(
     pool: &DbPool,
     agent: &AgentBackup,
 ) -> Result<(), String> {
-    sqlx::query(
-        "UPDATE agents SET
-           display_name = ?,
-           is_detected = ?,
-           is_enabled = ?
-         WHERE id = ? AND is_builtin = 0",
+    db::backup::restore_custom_agent(
+        pool,
+        &agent.id,
+        &agent.display_name,
+        agent.is_detected,
+        agent.is_enabled,
     )
-    .bind(&agent.display_name)
-    .bind(agent.is_detected)
-    .bind(agent.is_enabled)
-    .bind(&agent.id)
-    .execute(pool)
     .await
-    .map(|_| ())
-    .map_err(|e| e.to_string())
 }
 
 async fn upsert_collection_backup(pool: &DbPool, collection: &Collection) -> Result<(), String> {
-    sqlx::query(
-        "INSERT INTO collections (id, name, description, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           name = excluded.name,
-           description = excluded.description,
-           updated_at = excluded.updated_at",
-    )
-    .bind(&collection.id)
-    .bind(&collection.name)
-    .bind(&collection.description)
-    .bind(&collection.created_at)
-    .bind(&collection.updated_at)
-    .execute(pool)
-    .await
-    .map(|_| ())
-    .map_err(|e| e.to_string())
+    db::backup::restore_collection(pool, collection).await
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2055,13 +2004,6 @@ fn validated_install_method(value: Option<&str>) -> BackupInstallMethod {
         Some("symlink") => BackupInstallMethod::Symlink,
         _ => BackupInstallMethod::Symlink,
     }
-}
-
-#[derive(Debug, FromRow)]
-struct SkillInstallationMethodRow {
-    skill_id: String,
-    agent_id: String,
-    link_type: String,
 }
 
 const BACKUP_SETTING_ALLOWLIST: &[&str] = &[
@@ -2211,11 +2153,13 @@ mod tests {
         db::init_database(&pool).await.expect("init");
         let central = dir.path().join("central");
         std::fs::create_dir_all(&central).expect("central");
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
-            .bind(central.to_string_lossy().to_string())
-            .execute(&pool)
-            .await
-            .expect("central path");
+        pool.write(|data| {
+            data.table_mut("agents").get_mut("central").unwrap()["global_skills_dir"] =
+                serde_json::json!(central.to_string_lossy());
+            Ok(())
+        })
+        .await
+        .unwrap();
         let resource = dir.path().join("resource-library");
         std::fs::create_dir_all(&resource).expect("resource");
         db::set_skill_resource_library_dir(&pool, &resource.to_string_lossy())
@@ -2227,31 +2171,66 @@ mod tests {
     #[tokio::test]
     async fn repository_backup_preserves_migrated_directories_and_rejects_unsafe_paths() {
         let (pool, _dir) = setup_test_db().await;
-        sqlx::query("INSERT INTO repository_local_directories(repository,directory) VALUES('new/repo','old/repo')").execute(&pool).await.unwrap();
-        let backup = export_app_backup_data_impl(&pool, repository_backup_options()).await.unwrap();
+        db::backup::restore_directories(
+            &pool,
+            &[RepositoryDirectoryBackup {
+                repository: "new/repo".into(),
+                directory: "old/repo".into(),
+            }],
+        )
+        .await
+        .unwrap();
+        let backup = export_app_backup_data_impl(&pool, repository_backup_options())
+            .await
+            .unwrap();
         assert_eq!(backup.repository_directories.len(), 1);
         let (restored, _other) = setup_test_db().await;
-        import_app_backup_data_impl(&restored, backup.clone()).await.unwrap();
+        import_app_backup_data_impl(&restored, backup.clone())
+            .await
+            .unwrap();
         let root = db::get_skill_resource_library_dir(&restored).await.unwrap();
-        assert_eq!(super::super::repository_address::directory(&restored, &root, "new", "new/repo").await.unwrap(), root.join("old/repo"));
+        assert_eq!(
+            super::super::repository_address::directory(&restored, &root, "new", "new/repo")
+                .await
+                .unwrap(),
+            root.join("old/repo")
+        );
         let mut invalid = backup;
         invalid.repository_directories[0].directory = "../escape".into();
         let (fresh, _fresh_dir) = setup_test_db().await;
         assert!(import_app_backup_data_impl(&fresh, invalid).await.is_err());
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_local_directories").fetch_one(&fresh).await.unwrap();
+        let count = fresh
+            .read(|data| Ok(data.table("repository_local_directories").len()))
+            .unwrap();
         assert_eq!(count, 0);
     }
 
     #[tokio::test]
     async fn repository_backup_roundtrip_preserves_folder_notes() {
-        let (pool,_dir)=setup_test_db().await;
-        super::super::metadata::save_note(&pool,&super::super::metadata::FolderNote{id:"folder".into(),notes:"memo".into(),skill_ids:vec!["member".into()]}).await.unwrap();
-        let backup=export_app_backup_data_impl(&pool,repository_backup_options()).await.unwrap();
-        assert_eq!(backup.folder_notes.len(),1);
-        let (restored,_other)=setup_test_db().await;
-        import_app_backup_data_impl(&restored,backup).await.unwrap();
-        let notes=super::super::metadata::folder_notes(&restored).await.unwrap();
-        assert_eq!(notes[0].notes,"memo");assert_eq!(notes[0].skill_ids,vec!["member"]);
+        let (pool, _dir) = setup_test_db().await;
+        super::super::metadata::save_note(
+            &pool,
+            &super::super::metadata::FolderNote {
+                id: "folder".into(),
+                notes: "memo".into(),
+                skill_ids: vec!["member".into()],
+            },
+        )
+        .await
+        .unwrap();
+        let backup = export_app_backup_data_impl(&pool, repository_backup_options())
+            .await
+            .unwrap();
+        assert_eq!(backup.folder_notes.len(), 1);
+        let (restored, _other) = setup_test_db().await;
+        import_app_backup_data_impl(&restored, backup)
+            .await
+            .unwrap();
+        let notes = super::super::metadata::folder_notes(&restored)
+            .await
+            .unwrap();
+        assert_eq!(notes[0].notes, "memo");
+        assert_eq!(notes[0].skill_ids, vec!["member"]);
     }
 
     #[tokio::test]
@@ -2262,14 +2241,21 @@ mod tests {
         row.notebook = "historical internal body".into();
         let note_id = uuid::Uuid::new_v4().to_string();
         row.obsidian = Some(super::super::notebook::Binding {
-            binding_version: 2, note_id: Some(note_id.clone()), vault_key: "default".into(),
-            relative_path: "Missing Vault/renamed.md".into(), obsidian_uri: format!("obsidian://skillshub-note?id={note_id}"),
+            binding_version: 2,
+            note_id: Some(note_id.clone()),
+            vault_key: "default".into(),
+            relative_path: "Missing Vault/renamed.md".into(),
+            obsidian_uri: format!("obsidian://skillshub-note?id={note_id}"),
         });
         notebooks::put(&pool, &row).await.unwrap();
-        let backup = export_app_backup_data_impl(&pool, repository_backup_options()).await.unwrap();
+        let backup = export_app_backup_data_impl(&pool, repository_backup_options())
+            .await
+            .unwrap();
         assert_eq!(backup.repository_notebooks.len(), 1);
         let (restored, _other) = setup_test_db().await;
-        import_app_backup_data_impl(&restored, backup).await.unwrap();
+        import_app_backup_data_impl(&restored, backup)
+            .await
+            .unwrap();
         let result = notebooks::list(&restored).await.unwrap().remove(0);
         assert_eq!(result.repository_uid, row.repository_uid);
         assert_eq!(result.notebook, row.notebook);
@@ -2281,12 +2267,13 @@ mod tests {
 
     async fn configure_agent_root(pool: &DbPool, agent_id: &str, root: &Path) {
         std::fs::create_dir_all(root).expect("agent root");
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = ?")
-            .bind(path_to_string(root))
-            .bind(agent_id)
-            .execute(pool)
-            .await
-            .expect("agent path");
+        pool.write(|data| {
+            data.table_mut("agents").get_mut(agent_id).unwrap()["global_skills_dir"] =
+                serde_json::json!(path_to_string(root));
+            Ok(())
+        })
+        .await
+        .unwrap();
     }
 
     fn zip_entry_bytes(archive: &[u8], name: &str) -> Vec<u8> {
@@ -2331,13 +2318,14 @@ mod tests {
         let collection = db::create_collection(&source, "Demo collection", None)
             .await
             .unwrap();
-        sqlx::query(
-            "INSERT INTO collection_skills (collection_id, skill_id, added_at) VALUES (?, ?, ?)",
+        db::backup::restore_memberships(
+            &source,
+            &[CollectionSkillBackup {
+                collection_id: collection.id.clone(),
+                skill_id: skills[0].id.clone(),
+                added_at: "2026-01-01T00:00:00Z".into(),
+            }],
         )
-        .bind(&collection.id)
-        .bind(&skills[0].id)
-        .bind("2026-01-01T00:00:00Z")
-        .execute(&source)
         .await
         .unwrap();
         db::set_setting(&source, "language", "zh").await.unwrap();
@@ -2383,10 +2371,9 @@ mod tests {
             Some("en")
         );
         assert_eq!(db::get_all_collections(&target).await.unwrap().len(), 1);
-        let members: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM collection_skills")
-            .fetch_one(&target)
-            .await
-            .unwrap();
+        let members = (target
+            .read(|data| Ok(data.table("collection_skills").len()))
+            .unwrap(),);
         assert_eq!(members.0, 1);
     }
 
@@ -2787,18 +2774,17 @@ mod tests {
         )
         .await
         .expect("skill");
-        sqlx::query(
-            "INSERT INTO skill_installations
-             (skill_id, agent_id, installed_path, link_type, symlink_target, is_managed, created_at)
-             VALUES (?, ?, ?, ?, ?, 0, ?)",
+        db::upsert_scanned_skill_installation(
+            &pool,
+            &db::SkillInstallation {
+                skill_id: "external-demo".into(),
+                agent_id: "cursor".into(),
+                installed_path: path_to_string(&skill_dir),
+                link_type: "native".into(),
+                symlink_target: None,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            },
         )
-        .bind("external-demo")
-        .bind("cursor")
-        .bind(path_to_string(&skill_dir))
-        .bind("native")
-        .bind(Option::<String>::None)
-        .bind("2026-01-01T00:00:00Z")
-        .execute(&pool)
         .await
         .expect("unmanaged relation");
 
@@ -2952,30 +2938,72 @@ mod tests {
         .await
         .expect("metadata");
 
-        db::save_github_stars(&pool, "openai/skills", 1234).await.unwrap();
-        db::save_github_stars(&pool, "unrelated/repository", 999).await.unwrap();
+        db::save_github_stars(&pool, "openai/skills", 1234)
+            .await
+            .unwrap();
+        db::save_github_stars(&pool, "unrelated/repository", 999)
+            .await
+            .unwrap();
         let json = export_app_backup_impl(&pool, BackupOptions::default())
             .await
             .expect("export");
         let mut serialized: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(serialized["repository_stats"].as_array().unwrap().len(), 1);
-        let checked_at = serialized["repository_stats"][0]["checked_at"].as_str().unwrap().to_string();
-        serialized.as_object_mut().unwrap().remove("repository_stats");
-        assert!(serde_json::from_value::<AppBackup>(serialized).unwrap().repository_stats.is_empty());
+        let checked_at = serialized["repository_stats"][0]["checked_at"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        serialized
+            .as_object_mut()
+            .unwrap()
+            .remove("repository_stats");
+        assert!(serde_json::from_value::<AppBackup>(serialized)
+            .unwrap()
+            .repository_stats
+            .is_empty());
         std::fs::remove_dir_all(&skill_dir).expect("remove original files");
         db::delete_skill(&pool, "demo").await.expect("delete db");
 
-        sqlx::query("DELETE FROM github_repository_stats").execute(&pool).await.unwrap();
+        pool.write(|data| {
+            data.table_mut("github_repository_stats").clear();
+            Ok(())
+        })
+        .await
+        .unwrap();
         import_app_backup_impl(&pool, &json).await.expect("import");
 
-        assert_eq!(db::get_github_stars(&pool, "openai/skills").await.unwrap(), Some(1234));
-        let restored_time: String = sqlx::query_scalar("SELECT checked_at FROM github_repository_stats WHERE repository = 'openai/skills'").fetch_one(&pool).await.unwrap();
+        assert_eq!(
+            db::get_github_stars(&pool, "openai/skills").await.unwrap(),
+            Some(1234)
+        );
+        let restored_time = pool
+            .read(|data| {
+                Ok(
+                    data.table("github_repository_stats")["openai/skills"]["checked_at"]
+                        .as_str()
+                        .unwrap()
+                        .to_string(),
+                )
+            })
+            .unwrap();
         assert_eq!(restored_time, checked_at);
-        db::save_github_stars(&pool, "openai/skills", 0).await.unwrap();
-        let archive = export_app_backup_archive_impl(&pool, repository_backup_options()).await.unwrap();
-        sqlx::query("DELETE FROM github_repository_stats").execute(&pool).await.unwrap();
+        db::save_github_stars(&pool, "openai/skills", 0)
+            .await
+            .unwrap();
+        let archive = export_app_backup_archive_impl(&pool, repository_backup_options())
+            .await
+            .unwrap();
+        pool.write(|data| {
+            data.table_mut("github_repository_stats").clear();
+            Ok(())
+        })
+        .await
+        .unwrap();
         import_app_backup_bytes_impl(&pool, &archive).await.unwrap();
-        assert_eq!(db::get_github_stars(&pool, "openai/skills").await.unwrap(), Some(0));
+        assert_eq!(
+            db::get_github_stars(&pool, "openai/skills").await.unwrap(),
+            Some(0)
+        );
         assert!(skill_dir.join("SKILL.md").exists());
         assert_eq!(
             std::fs::read(skill_dir.join("asset.bin")).unwrap(),
@@ -3070,10 +3098,16 @@ mod tests {
         db::set_skill_resource_library_dir(&pool, &resource_root.to_string_lossy())
             .await
             .expect("resource dir");
-        sqlx::query("UPDATE agents SET is_enabled = 0 WHERE id != 'central'")
-            .execute(&pool)
-            .await
-            .expect("disable platforms");
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if id != "central" {
+                    row["is_enabled"] = serde_json::json!(false);
+                }
+            }
+            Ok(())
+        })
+        .await
+        .expect("disable platforms");
 
         let resource_skill_dir = resource_root
             .join("owner")
@@ -4568,14 +4602,18 @@ mod tests {
         let address = listener.local_addr().expect("address");
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept");
-            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
             let mut request = Vec::new();
             let mut byte = [0u8; 1];
             while !request.ends_with(b"\r\n\r\n") {
                 stream.read_exact(&mut byte).expect("read request");
                 request.push(byte[0]);
             }
-            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nPK").unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nPK")
+                .unwrap();
             stream.flush().unwrap();
             // Exercise the real production download path. Previously this request
             // failed while reading the body at the ordinary 30-second deadline.
@@ -4682,7 +4720,10 @@ mod tests {
             captured.iter().any(|request| request.starts_with("PUT ")),
             "missing PUT after MKCOL: {captured:?}"
         );
-        let put = captured.iter().find(|request| request.starts_with("PUT ")).unwrap();
+        let put = captured
+            .iter()
+            .find(|request| request.starts_with("PUT "))
+            .unwrap();
         assert!(put.to_ascii_lowercase().contains("if-none-match: *"));
         assert!(uploaded.name.ends_with(".zip"));
     }

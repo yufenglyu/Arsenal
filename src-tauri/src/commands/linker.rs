@@ -1537,7 +1537,7 @@ pub async fn batch_install_resource_skill_to_agents(
 mod tests {
     use super::*;
     use crate::db;
-    use sqlx::SqlitePool;
+    use crate::db::DbPool as SqlitePool;
     use std::fs;
     use tempfile::TempDir;
 
@@ -1559,22 +1559,25 @@ mod tests {
         let pool = SqlitePool::connect(":memory:").await.unwrap();
         db::init_database(&pool).await.unwrap();
 
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
-            .bind(central_dir.to_str().unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("central") {
+                row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'claude-code'")
-            .bind(agent_dir.to_str().unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("claude-code") {
+                row["global_skills_dir"] = serde_json::json!(agent_dir.to_str().unwrap());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
-        sqlx::query("UPDATE agents SET is_enabled = 0 WHERE id NOT IN ('central', 'claude-code')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::storage::fixtures::disable_except(&pool, &["central", "claude-code"]).await;
 
         pool
     }
@@ -1687,11 +1690,15 @@ mod tests {
         fs::create_dir_all(&central_dir).unwrap();
 
         let pool = setup_db(&central_dir, &tmp.path().join("claude")).await;
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'cursor'")
-            .bind(cursor_dir.to_string_lossy().to_string())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("cursor") {
+                row["global_skills_dir"] =
+                    serde_json::json!(cursor_dir.to_string_lossy().to_string());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
         create_central_skill(&central_dir, "universal-skill");
 
         let result = install_skill_to_agent_impl(&pool, "universal-skill", "cursor")
@@ -1814,11 +1821,15 @@ mod tests {
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
             .await
             .unwrap();
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'cursor'")
-            .bind(cursor_dir.to_string_lossy().into_owned())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("cursor") {
+                row["global_skills_dir"] =
+                    serde_json::json!(cursor_dir.to_string_lossy().into_owned());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let source_dir = create_resource_skill(&pool, &resource_dir, "resource-only").await;
 
@@ -1868,15 +1879,25 @@ mod tests {
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
             .await
             .unwrap();
-        sqlx::query("UPDATE agents SET is_enabled = 0 WHERE id != 'central'")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'cursor'")
-            .bind(central_dir.to_string_lossy().into_owned())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            for row in d.table_mut("agents").values_mut() {
+                if row["id"] != "central" {
+                    row["is_enabled"] = false.into();
+                }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("cursor") {
+                row["global_skills_dir"] =
+                    serde_json::json!(central_dir.to_string_lossy().into_owned());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         create_resource_skill(&pool, &resource_dir, "shared-root").await;
 
@@ -1946,10 +1967,16 @@ mod tests {
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
             .await
             .unwrap();
-        sqlx::query("UPDATE agents SET is_enabled = 0 WHERE id != 'central'")
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            for row in d.table_mut("agents").values_mut() {
+                if row["id"] != "central" {
+                    row["is_enabled"] = false.into();
+                }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
         let scan_dir = db::add_scan_directory(&pool, &tmp.path().to_string_lossy(), Some("Home"))
             .await
             .unwrap();
@@ -2021,10 +2048,16 @@ mod tests {
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
             .await
             .unwrap();
-        sqlx::query("UPDATE agents SET is_enabled = 0 WHERE id != 'central'")
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            for row in d.table_mut("agents").values_mut() {
+                if row["id"] != "central" {
+                    row["is_enabled"] = false.into();
+                }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
         let resource_source = create_resource_skill(&pool, &resource_dir, "dual-source").await;
         add_resource_skill_to_central_impl(&pool, "dual-source")
             .await
@@ -2119,12 +2152,13 @@ mod tests {
     }
 
     async fn point_agent_at_central(pool: &DbPool, agent_id: &str, central_dir: &Path) {
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = ?")
-            .bind(central_dir.to_string_lossy().to_string())
-            .bind(agent_id)
-            .execute(pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            d.table_mut("agents").get_mut(agent_id).unwrap()["global_skills_dir"] =
+                central_dir.to_string_lossy().to_string().into();
+            Ok(())
+        })
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
@@ -2194,18 +2228,7 @@ mod tests {
         )
         .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO skill_installations
-             (skill_id, agent_id, installed_path, link_type, symlink_target, is_managed, created_at)
-             VALUES (?, 'codex', ?, 'symlink', ?, 0, ?)",
-        )
-        .bind("legacy-resource")
-        .bind(legacy_link.to_string_lossy().into_owned())
-        .bind(source_dir.to_string_lossy().into_owned())
-        .bind(chrono::Utc::now().to_rfc3339())
-        .execute(&pool)
-        .await
-        .unwrap();
+        crate::storage::fixtures::insert(&pool, "skill_installations", serde_json::json!({"skill_id":"legacy-resource","agent_id":"codex","installed_path":legacy_link.to_string_lossy().into_owned(),"link_type":"symlink","symlink_target":source_dir.to_string_lossy().into_owned(),"is_managed":false,"created_at":chrono::Utc::now().to_rfc3339()})).await.unwrap();
 
         install_skill_to_agent_impl(&pool, "legacy-resource", "codex")
             .await
@@ -2985,11 +3008,14 @@ mod tests {
         let pool = setup_db(&central_dir, &claude_dir).await;
 
         // Override a second non-universal agent's dir too.
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'workbuddy'")
-            .bind(workbuddy_dir.to_str().unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("workbuddy") {
+                row["global_skills_dir"] = serde_json::json!(workbuddy_dir.to_str().unwrap());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         create_central_skill(&central_dir, "batch-skill");
 
@@ -3279,10 +3305,14 @@ mod tests {
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
             .await
             .unwrap();
-        sqlx::query(
-            "UPDATE agents SET is_enabled = 0 WHERE id != 'central' AND id != 'claude-code'",
-        )
-        .execute(&pool)
+        pool.write(|d| {
+            for (id, row) in d.table_mut("agents") {
+                if id != "central" && id != "claude-code" {
+                    row["is_enabled"] = false.into();
+                }
+            }
+            Ok(())
+        })
         .await
         .unwrap();
         create_resource_skill(&pool, &grouped, "canvas-design").await;
@@ -3312,10 +3342,14 @@ mod tests {
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
             .await
             .unwrap();
-        sqlx::query(
-            "UPDATE agents SET is_enabled = 0 WHERE id != 'central' AND id != 'claude-code'",
-        )
-        .execute(&pool)
+        pool.write(|d| {
+            for (id, row) in d.table_mut("agents") {
+                if id != "central" && id != "claude-code" {
+                    row["is_enabled"] = false.into();
+                }
+            }
+            Ok(())
+        })
         .await
         .unwrap();
         create_resource_skill(&pool, &grouped, "ask-matt").await;
@@ -3355,10 +3389,14 @@ mod tests {
         fs::create_dir_all(&agent_dir).unwrap();
 
         let pool = setup_db(&central_dir, &agent_dir).await;
-        sqlx::query(
-            "UPDATE agents SET is_enabled = 0 WHERE id != 'central' AND id != 'claude-code'",
-        )
-        .execute(&pool)
+        pool.write(|d| {
+            for (id, row) in d.table_mut("agents") {
+                if id != "central" && id != "claude-code" {
+                    row["is_enabled"] = false.into();
+                }
+            }
+            Ok(())
+        })
         .await
         .unwrap();
 
@@ -3430,14 +3468,22 @@ mod tests {
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
             .await
             .unwrap();
-        sqlx::query("UPDATE agents SET is_enabled = 0 WHERE id != 'central'")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE agents SET is_enabled = 1 WHERE id = 'claude-code'")
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            for row in d.table_mut("agents").values_mut() {
+                if row["id"] != "central" {
+                    row["is_enabled"] = false.into();
+                }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        pool.write(|d| {
+            d.table_mut("agents").get_mut("claude-code").unwrap()["is_enabled"] = true.into();
+            Ok(())
+        })
+        .await
+        .unwrap();
         create_resource_skill(&pool, &resource_dir, "shared-skill").await;
 
         add_resource_skill_to_central_impl(&pool, "shared-skill")
@@ -3474,10 +3520,14 @@ mod tests {
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
             .await
             .unwrap();
-        sqlx::query(
-            "UPDATE agents SET is_enabled = 0 WHERE id != 'central' AND id != 'claude-code'",
-        )
-        .execute(&pool)
+        pool.write(|d| {
+            for (id, row) in d.table_mut("agents") {
+                if id != "central" && id != "claude-code" {
+                    row["is_enabled"] = false.into();
+                }
+            }
+            Ok(())
+        })
         .await
         .unwrap();
         create_resource_skill(&pool, &resource_dir, "academy-guide").await;
@@ -3538,10 +3588,16 @@ mod tests {
         fs::create_dir_all(&project_dir).unwrap();
 
         let pool = setup_db(&central_dir, &agent_dir).await;
-        sqlx::query("UPDATE agents SET is_enabled = 0 WHERE id != 'central'")
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            for row in d.table_mut("agents").values_mut() {
+                if row["id"] != "central" {
+                    row["is_enabled"] = false.into();
+                }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
             .await
             .unwrap();
@@ -3794,11 +3850,20 @@ pub(crate) struct InstallationRelocation {
     source: PathBuf,
 }
 
-async fn validate_relocation_path(pool: &DbPool, record: &SkillInstallation) -> Result<PathBuf, String> {
+async fn validate_relocation_path(
+    pool: &DbPool,
+    record: &SkillInstallation,
+) -> Result<PathBuf, String> {
     let target = install_target_for_agent_id(pool, &record.agent_id).await?;
     let path = PathBuf::from(&record.installed_path);
-    let relative = path.strip_prefix(&target.skills_dir).map_err(|_| "UNSAFE_INSTALL_TARGET")?;
-    if relative.as_os_str().is_empty() || !relative.components().all(|p| matches!(p, Component::Normal(_))) {
+    let relative = path
+        .strip_prefix(&target.skills_dir)
+        .map_err(|_| "UNSAFE_INSTALL_TARGET")?;
+    if relative.as_os_str().is_empty()
+        || !relative
+            .components()
+            .all(|p| matches!(p, Component::Normal(_)))
+    {
         return Err("UNSAFE_INSTALL_TARGET".into());
     }
     let mut ancestor = target.skills_dir.clone();
@@ -3812,29 +3877,56 @@ async fn validate_relocation_path(pool: &DbPool, record: &SkillInstallation) -> 
 }
 
 /// Capture exact link entries before moving a source. Copy installations are untouched.
-pub(crate) async fn prepare_installation_relocation_impl(pool: &DbPool, skill_id: &str, old: &Path, new: &Path) -> Result<Vec<InstallationRelocation>, String> {
+pub(crate) async fn prepare_installation_relocation_impl(
+    pool: &DbPool,
+    skill_id: &str,
+    old: &Path,
+    new: &Path,
+) -> Result<Vec<InstallationRelocation>, String> {
     let mut result = Vec::new();
     for record in db::get_skill_installations(pool, skill_id).await? {
         let entry = Path::new(&record.installed_path);
-        if old.parent().is_some_and(|p| entry.starts_with(p)) || new.parent().is_some_and(|p| entry.starts_with(p)) { return Err("UNSAFE_INSTALL_TARGET".into()); }
-        if record.link_type == "copy" { continue; }
-        if record.link_type != "symlink" { return Err("UNSAFE_INSTALL_TARGET".into()); }
+        if old.parent().is_some_and(|p| entry.starts_with(p))
+            || new.parent().is_some_and(|p| entry.starts_with(p))
+        {
+            return Err("UNSAFE_INSTALL_TARGET".into());
+        }
+        if record.link_type == "copy" {
+            continue;
+        }
+        if record.link_type != "symlink" {
+            return Err("UNSAFE_INSTALL_TARGET".into());
+        }
         let path = validate_relocation_path(pool, &record).await?;
         let previous_target = match std::fs::symlink_metadata(&path) {
-            Ok(meta) if meta.file_type().is_symlink() && crate::path_utils::paths_resolve_to_same_entry(&path, old) => Some(std::fs::read_link(&path).map_err(|_| "UNSAFE_INSTALL_TARGET")?),
+            Ok(meta)
+                if meta.file_type().is_symlink()
+                    && crate::path_utils::paths_resolve_to_same_entry(&path, old) =>
+            {
+                Some(std::fs::read_link(&path).map_err(|_| "UNSAFE_INSTALL_TARGET")?)
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             _ => return Err("UNSAFE_INSTALL_TARGET".into()),
         };
-        result.push(InstallationRelocation { record, previous_target, source: new.to_path_buf() });
+        result.push(InstallationRelocation {
+            record,
+            previous_target,
+            source: new.to_path_buf(),
+        });
     }
     Ok(result)
 }
 
 /// Idempotent journal replay repairs recorded links at their original installation locations.
-pub(crate) async fn apply_installation_relocation_impl(pool: &DbPool, plan: &InstallationRelocation) -> Result<(), String> {
+pub(crate) async fn apply_installation_relocation_impl(
+    pool: &DbPool,
+    plan: &InstallationRelocation,
+) -> Result<(), String> {
     let root = db::get_skill_resource_library_dir(pool).await?;
     super::repository_mirror::ensure_owned_path(&root, &plan.source)?;
-    if !plan.source.join("SKILL.md").is_file() { return Err("WRITE_FAILED".into()); }
+    if !plan.source.join("SKILL.md").is_file() {
+        return Err("WRITE_FAILED".into());
+    }
     let path = validate_relocation_path(pool, &plan.record).await?;
     let parent = path.parent().ok_or("UNSAFE_INSTALL_TARGET")?;
     let target = symlink_target_path(parent, &plan.source);
@@ -3842,57 +3934,95 @@ pub(crate) async fn apply_installation_relocation_impl(pool: &DbPool, plan: &Ins
         Ok(meta) if meta.file_type().is_symlink() => {
             if !crate::path_utils::paths_resolve_to_same_entry(&path, &plan.source) {
                 let existing = std::fs::read_link(&path).map_err(|_| "UNSAFE_INSTALL_TARGET")?;
-                if Some(&existing) != plan.previous_target.as_ref() && existing != target { return Err("UNSAFE_INSTALL_TARGET".into()); }
+                if Some(&existing) != plan.previous_target.as_ref() && existing != target {
+                    return Err("UNSAFE_INSTALL_TARGET".into());
+                }
                 remove_symlink_path(&path).map_err(|_| "WRITE_FAILED")?;
             }
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         _ => return Err("UNSAFE_INSTALL_TARGET".into()),
     }
     if std::fs::symlink_metadata(&path).is_err() {
         std::fs::create_dir_all(parent).map_err(|_| "WRITE_FAILED")?;
         create_symlink(&target, &path)?;
     }
-    if !crate::path_utils::paths_resolve_to_same_entry(&path, &plan.source) { return Err("WRITE_FAILED".into()); }
+    if !crate::path_utils::paths_resolve_to_same_entry(&path, &plan.source) {
+        return Err("WRITE_FAILED".into());
+    }
     let mut record = plan.record.clone();
     record.symlink_target = Some(path_to_string(&plan.source));
     db::upsert_skill_installation(pool, &record).await?;
-    sqlx::query("UPDATE agent_skill_observations SET symlink_target=? WHERE agent_id=? AND skill_id=? AND dir_path=?")
-        .bind(&record.symlink_target).bind(&record.agent_id).bind(&record.skill_id).bind(&record.installed_path).execute(pool).await.map_err(|_| "WRITE_FAILED")?;
+    pool.write(|d| {
+        for row in d.table_mut("agent_skill_observations").values_mut() {
+            if row["agent_id"] == record.agent_id
+                && row["skill_id"] == record.skill_id
+                && row["dir_path"] == record.installed_path
+            {
+                row["symlink_target"] = serde_json::json!(record.symlink_target);
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| "WRITE_FAILED")?;
     Ok(())
 }
 
 /// Strict mirror refreshes only recorded targets; copy edits intentionally follow the source.
-pub(crate) async fn refresh_resource_installations_impl(pool: &DbPool, skill_id: &str) -> Result<(), String> {
+pub(crate) async fn refresh_resource_installations_impl(
+    pool: &DbPool,
+    skill_id: &str,
+) -> Result<(), String> {
     let source = resource_source_dir_for_skill(pool, skill_id).await?;
     let expected = super::remote_sources::local_skill_files(&source)?;
     for record in db::get_skill_installations(pool, skill_id).await? {
         let target = install_target_for_agent_id(pool, &record.agent_id).await?;
         let path = PathBuf::from(&record.installed_path);
-        let relative = path.strip_prefix(&target.skills_dir).map_err(|_| "UNSAFE_INSTALL_TARGET")?;
-        if relative.as_os_str().is_empty() || !relative.components().all(|part| matches!(part, Component::Normal(_))) {
+        let relative = path
+            .strip_prefix(&target.skills_dir)
+            .map_err(|_| "UNSAFE_INSTALL_TARGET")?;
+        if relative.as_os_str().is_empty()
+            || !relative
+                .components()
+                .all(|part| matches!(part, Component::Normal(_)))
+        {
             return Err("UNSAFE_INSTALL_TARGET".into());
         }
         let mut ancestor = target.skills_dir.clone();
         for part in relative.parent().unwrap_or(Path::new("")).components() {
             ancestor.push(part);
-            if std::fs::symlink_metadata(&ancestor).is_ok_and(|m|m.file_type().is_symlink()) { return Err("UNSAFE_INSTALL_TARGET".into()); }
+            if std::fs::symlink_metadata(&ancestor).is_ok_and(|m| m.file_type().is_symlink()) {
+                return Err("UNSAFE_INSTALL_TARGET".into());
+            }
         }
         if record.link_type == "copy" {
-            if std::fs::symlink_metadata(&path).is_ok_and(|m|m.file_type().is_symlink()) { return Err("UNSAFE_INSTALL_TARGET".into()); }
-            if path.exists() && super::remote_sources::local_skill_files(&path)? == expected { continue; }
+            if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
+                return Err("UNSAFE_INSTALL_TARGET".into());
+            }
+            if path.exists() && super::remote_sources::local_skill_files(&path)? == expected {
+                continue;
+            }
             let root = db::get_skill_resource_library_dir(pool).await?;
             let mut transaction = super::github_import::ImportDirectoryTransaction::new(&root)?;
             let staged = transaction.root.join("installation");
             copy_dir_all(&source, &staged)?;
             transaction.install(&staged, &path, true)?;
-            if super::remote_sources::local_skill_files(&path)? != expected { return Err("WRITE_FAILED: installation verification failed".into()); }
+            if super::remote_sources::local_skill_files(&path)? != expected {
+                return Err("WRITE_FAILED: installation verification failed".into());
+            }
             transaction.commit()?;
         } else if !crate::path_utils::paths_resolve_to_same_entry(&path, &source) {
             // Existing linker validates and repairs recorded links, including central.
-            if record.agent_id == "central" { add_resource_skill_to_central_impl(pool, skill_id).await?; }
-            else { install_resource_skill_to_agent_impl(pool, skill_id, &record.agent_id, "symlink").await?; }
-            if !crate::path_utils::paths_resolve_to_same_entry(&path, &source) { return Err("WRITE_FAILED: installation link verification failed".into()); }
+            if record.agent_id == "central" {
+                add_resource_skill_to_central_impl(pool, skill_id).await?;
+            } else {
+                install_resource_skill_to_agent_impl(pool, skill_id, &record.agent_id, "symlink")
+                    .await?;
+            }
+            if !crate::path_utils::paths_resolve_to_same_entry(&path, &source) {
+                return Err("WRITE_FAILED: installation link verification failed".into());
+            }
         }
     }
     Ok(())
@@ -3901,25 +4031,55 @@ pub(crate) async fn refresh_resource_installations_impl(pool: &DbPool, skill_id:
 /// The central scanner may make a resource-backed link the canonical DB row.
 /// Before mirroring, restore the primary resource identity and record the hosted link.
 /// Standalone central directories and links outside the resource library are untouched.
-pub(crate) async fn normalize_resource_backed_central_records_impl(pool:&DbPool)->Result<(),String>{
-    let root=resolved_path(&db::get_skill_resource_library_dir(pool).await?);
-    let Some(central)=db::get_agent_by_id(pool,"central").await? else {return Ok(());};
-    let central_root=resolved_path(Path::new(&central.global_skills_dir));
+pub(crate) async fn normalize_resource_backed_central_records_impl(
+    pool: &DbPool,
+) -> Result<(), String> {
+    let root = resolved_path(&db::get_skill_resource_library_dir(pool).await?);
+    let Some(central) = db::get_agent_by_id(pool, "central").await? else {
+        return Ok(());
+    };
+    let central_root = resolved_path(Path::new(&central.global_skills_dir));
     for mut skill in db::get_central_skills(pool).await? {
-        let Some(path)=skill.canonical_path.as_deref().map(PathBuf::from) else {continue;};
+        let Some(path) = skill.canonical_path.as_deref().map(PathBuf::from) else {
+            continue;
+        };
         if !resolved_symlink_entry(&path).starts_with(&central_root)
-            || !std::fs::symlink_metadata(&path).is_ok_and(|m|m.file_type().is_symlink()) {continue;}
-        let resource=resolved_path(&path);
-        if resource==root || !resource.starts_with(&root) {continue;}
-        db::upsert_skill_installation(pool,&SkillInstallation{skill_id:skill.id.clone(),agent_id:"central".into(),installed_path:path_to_string(&path),link_type:"symlink".into(),symlink_target:Some(path_to_string(&resource)),created_at:chrono::Utc::now().to_rfc3339()}).await?;
-        skill.canonical_path=Some(path_to_string(&resource));
-        skill.file_path=path_to_string(&resource.join("SKILL.md"));
-        skill.is_central=false;
+            || !std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink())
+        {
+            continue;
+        }
+        let resource = resolved_path(&path);
+        if resource == root || !resource.starts_with(&root) {
+            continue;
+        }
+        db::upsert_skill_installation(
+            pool,
+            &SkillInstallation {
+                skill_id: skill.id.clone(),
+                agent_id: "central".into(),
+                installed_path: path_to_string(&path),
+                link_type: "symlink".into(),
+                symlink_target: Some(path_to_string(&resource)),
+                created_at: chrono::Utc::now().to_rfc3339(),
+            },
+        )
+        .await?;
+        skill.canonical_path = Some(path_to_string(&resource));
+        skill.file_path = path_to_string(&resource.join("SKILL.md"));
+        skill.is_central = false;
         // Generic upsert deliberately preserves central records; this verified
         // normalization is the explicit transition back to the primary library.
-        sqlx::query("UPDATE skills SET canonical_path=?, file_path=?, is_central=0 WHERE id=? AND is_central=1")
-            .bind(&skill.canonical_path).bind(&skill.file_path).bind(&skill.id)
-            .execute(pool).await.map_err(|e|e.to_string())?;
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("skills").get_mut(&skill.id) {
+                if row["is_central"] == true {
+                    row["canonical_path"] = serde_json::json!(skill.canonical_path);
+                    row["file_path"] = serde_json::json!(skill.file_path);
+                    row["is_central"] = false.into();
+                }
+            }
+            Ok(())
+        })
+        .await?;
     }
     Ok(())
 }

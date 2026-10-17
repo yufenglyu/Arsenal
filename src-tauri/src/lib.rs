@@ -2,11 +2,11 @@ pub mod commands;
 pub mod config_store;
 pub mod db;
 mod db_config;
-pub mod storage;
-mod protocol;
 pub mod path_utils;
-pub mod platforms;
 pub mod platform_icons;
+pub mod platforms;
+mod protocol;
+pub mod storage;
 
 #[cfg(test)]
 mod storage_baseline;
@@ -22,32 +22,12 @@ pub struct AppState {
     pub db: DbPool,
 }
 
-fn migrate_legacy_app_data_if_needed(new_dir: &Path, legacy_dir: &Path) -> Result<(), String> {
-    let new_db = new_dir.join("db.sqlite");
-    let legacy_db = legacy_dir.join("db.sqlite");
-    if new_db.exists() || !legacy_db.exists() {
-        return Ok(());
+fn check_storage_migration(new_dir: &Path, legacy_dir: &Path) -> Result<(), String> {
+    if !new_dir.join("store/manifest.json").is_file()
+        && (new_dir.join("db.sqlite").exists() || legacy_dir.join("db.sqlite").exists())
+    {
+        return Err("STORAGE_MIGRATION_REQUIRED: see docs/JSON存储迁移操作指南.md".into());
     }
-
-    fs::create_dir_all(new_dir).map_err(|e| {
-        format!(
-            "Failed to create ~/.skillshub directory for legacy data migration: {}",
-            e
-        )
-    })?;
-
-    for filename in ["db.sqlite", "db.sqlite-wal", "db.sqlite-shm"] {
-        let source = legacy_dir.join(filename);
-        if source.exists() {
-            fs::copy(&source, new_dir.join(filename)).map_err(|e| {
-                format!(
-                    "Failed to migrate legacy app data file '{}': {}",
-                    filename, e
-                )
-            })?;
-        }
-    }
-
     Ok(())
 }
 
@@ -61,38 +41,23 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let db_dir = path_utils::app_data_dir();
-            let legacy_db_dir = path_utils::legacy_app_data_dir();
-            migrate_legacy_app_data_if_needed(&db_dir, &legacy_db_dir)
-                .expect("Failed to migrate legacy ~/.skillsmanage data");
-            fs::create_dir_all(&db_dir).expect("Failed to create ~/.skillshub directory");
-            let db_path_buf = path_utils::resolve_database_path();
-            if let Some(parent) = db_path_buf.parent() {
-                fs::create_dir_all(parent).expect("Failed to create database directory");
-            }
-            let db_path = path_utils::path_to_string(&db_path_buf);
-
-            // Create pool and initialize schema
-            let pool = tauri::async_runtime::block_on(async {
-                db::create_pool(&db_path)
-                    .await
-                    .expect("Failed to open SQLite database")
-            });
-            tauri::async_runtime::block_on(async {
-                db::init_database(&pool)
-                    .await
-                    .expect("Failed to initialize database schema")
-            });
+            check_storage_migration(&db_dir, &path_utils::legacy_app_data_dir())
+                .map_err(std::io::Error::other)?;
+            fs::create_dir_all(&db_dir)?;
+            let pool = storage::store::Store::open(&db_dir).map_err(std::io::Error::other)?;
+            tauri::async_runtime::block_on(db::init_database(&pool))
+                .map_err(std::io::Error::other)?;
 
             tauri::async_runtime::block_on(async {
-                let _ = commands::repository_address::recover(&pool).await;
+                commands::repository_address::recover(&pool).await?;
                 commands::github_import::recover_import_transactions(&pool).await
-            }).map_err(std::io::Error::other)?;
+            })
+            .map_err(std::io::Error::other)?;
             app.manage(AppState { db: pool });
             #[cfg(all(windows, not(debug_assertions)))]
             if app.config().identifier == "com.iamzhihuix.skillsmanage" {
@@ -101,11 +66,17 @@ pub fn run() {
                 }
             }
             if let Some(urls) = app.deep_link().get_current()? {
-                commands::notebook::queue_navigation(app.handle(), urls.into_iter().map(|u| u.to_string()));
+                commands::notebook::queue_navigation(
+                    app.handle(),
+                    urls.into_iter().map(|u| u.to_string()),
+                );
             }
             let handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
-                commands::notebook::queue_navigation(&handle, event.urls().into_iter().map(|u| u.to_string()));
+                commands::notebook::queue_navigation(
+                    &handle,
+                    event.urls().into_iter().map(|u| u.to_string()),
+                );
             });
             Ok(())
         })
@@ -136,7 +107,11 @@ pub fn run() {
             commands::github_import::refresh_repository_stars,
             commands::github_import::refresh_repository,
             commands::skills::preview_local_resource_skills,
-            commands::metadata::get_folder_notes, commands::metadata::save_folder_note, commands::metadata::count_skill_tag, commands::metadata::change_skill_tag, commands::metadata::rename_skill_tag,
+            commands::metadata::get_folder_notes,
+            commands::metadata::save_folder_note,
+            commands::metadata::count_skill_tag,
+            commands::metadata::change_skill_tag,
+            commands::metadata::rename_skill_tag,
             // Scanner
             commands::scanner::scan_all_skills,
             // Agents
@@ -239,50 +214,37 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::migrate_legacy_app_data_if_needed;
-    use std::fs;
-
+    use super::check_storage_migration;
     #[test]
-    fn migrate_legacy_app_data_copies_existing_database_files() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let legacy_dir = dir.path().join(".skillsmanage");
-        let new_dir = dir.path().join(".skillshub");
-        fs::create_dir_all(&legacy_dir).expect("legacy dir");
-        fs::write(legacy_dir.join("db.sqlite"), "main-db").expect("legacy db");
-        fs::write(legacy_dir.join("db.sqlite-wal"), "wal").expect("legacy wal");
-        fs::write(legacy_dir.join("db.sqlite-shm"), "shm").expect("legacy shm");
-
-        migrate_legacy_app_data_if_needed(&new_dir, &legacy_dir).expect("migration");
-
+    fn legacy_storage_requires_explicit_migration_without_copying() {
+        let temp = tempfile::tempdir().unwrap();
+        let old = temp.path().join("old");
+        let new = temp.path().join("new");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("db.sqlite"), b"legacy fixture").unwrap();
+        assert!(check_storage_migration(&new, &old)
+            .unwrap_err()
+            .starts_with("STORAGE_MIGRATION_REQUIRED"));
+        assert!(!new.exists());
         assert_eq!(
-            fs::read_to_string(new_dir.join("db.sqlite")).unwrap(),
-            "main-db"
-        );
-        assert_eq!(
-            fs::read_to_string(new_dir.join("db.sqlite-wal")).unwrap(),
-            "wal"
-        );
-        assert_eq!(
-            fs::read_to_string(new_dir.join("db.sqlite-shm")).unwrap(),
-            "shm"
+            std::fs::read(old.join("db.sqlite")).unwrap(),
+            b"legacy fixture"
         );
     }
-
     #[test]
-    fn migrate_legacy_app_data_does_not_overwrite_new_database() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let legacy_dir = dir.path().join(".skillsmanage");
-        let new_dir = dir.path().join(".skillshub");
-        fs::create_dir_all(&legacy_dir).expect("legacy dir");
-        fs::create_dir_all(&new_dir).expect("new dir");
-        fs::write(legacy_dir.join("db.sqlite"), "legacy-db").expect("legacy db");
-        fs::write(new_dir.join("db.sqlite"), "new-db").expect("new db");
-
-        migrate_legacy_app_data_if_needed(&new_dir, &legacy_dir).expect("migration");
-
-        assert_eq!(
-            fs::read_to_string(new_dir.join("db.sqlite")).unwrap(),
-            "new-db"
-        );
+    fn valid_json_location_does_not_copy_old_database() {
+        let temp = tempfile::tempdir().unwrap();
+        let old = temp.path().join("old");
+        let new = temp.path().join("new");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(new.join("store")).unwrap();
+        std::fs::write(old.join("db.sqlite"), b"legacy fixture").unwrap();
+        std::fs::write(
+            new.join("store/manifest.json"),
+            b"validated separately by Store::open",
+        )
+        .unwrap();
+        check_storage_migration(&new, &old).unwrap();
+        assert!(!new.join("db.sqlite").exists());
     }
 }

@@ -150,17 +150,21 @@ pub fn get_platform_dir_impl() -> String {
 
 pub async fn update_app_data_dir_impl(pool: &DbPool, path: &str) -> Result<String, String> {
     let next = normalize_app_data_dir(path)?;
-    let current = app_data_dir();
-    if next != current && !next.join("db.sqlite").exists() {
-        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
-            .execute(pool)
-            .await
-            .map_err(|e| format!("Failed to checkpoint database before copy: {}", e))?;
-        copy_app_data_dir(&current, &next)?;
-    } else {
-        std::fs::create_dir_all(&next)
-            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+    let current = pool.directory();
+    if next == current {
+        return Ok(path_to_string(&next));
     }
+    // Hold the source writer lock while copying one committed generation.
+    let _snapshot = pool.begin().await?;
+    if !next.join("store/manifest.json").exists() {
+        if next.join("db.sqlite").exists() {
+            return Err("STORAGE_MIGRATION_REQUIRED".into());
+        }
+        crate::config_store::with_snapshot(|| copy_app_data_dir(current, &next))?;
+    }
+    // Opening validates checksums and also rejects a directory owned by another process.
+    let validated = crate::storage::store::Store::open(&next)?;
+    drop(validated);
     write_app_data_dir_override(&next)?;
     Ok(path_to_string(&next))
 }
@@ -274,11 +278,13 @@ async fn demote_skills_outside_new_central_root(
             .unwrap_or_else(|| std::path::PathBuf::from(&skill.file_path));
 
         if skill_dir.starts_with(&old_root) && !skill_dir.starts_with(&new_root) {
-            sqlx::query("UPDATE skills SET is_central = 0 WHERE id = ?")
-                .bind(&skill.id)
-                .execute(pool)
-                .await
-                .map_err(|e| e.to_string())?;
+            pool.write(|data| {
+                if let Some(row) = data.table_mut("skills").get_mut(&skill.id) {
+                    row["is_central"] = serde_json::json!(false);
+                }
+                Ok(())
+            })
+            .await?;
         }
     }
 
@@ -400,7 +406,7 @@ pub async fn check_app_update(state: State<'_, AppState>) -> Result<AppUpdateInf
 mod tests {
     use super::*;
     use crate::db;
-    use sqlx::SqlitePool;
+    use crate::storage::store::Store as SqlitePool;
     use std::path::Path;
 
     async fn setup_test_db() -> DbPool {
@@ -579,7 +585,9 @@ mod tests {
     #[tokio::test]
     async fn test_remove_builtin_scan_directory_fails() {
         let pool = setup_test_db().await;
-        crate::db::upsert_builtin_scan_directory(&pool, "/builtin/path", "Builtin").await.unwrap();
+        crate::db::upsert_builtin_scan_directory(&pool, "/builtin/path", "Builtin")
+            .await
+            .unwrap();
 
         let result = remove_scan_directory_impl(&pool, "/builtin/path").await;
         assert!(result.is_err(), "Removing a built-in directory should fail");
@@ -643,16 +651,27 @@ mod tests {
     #[tokio::test]
     async fn note_prompt_changes_clear_cached_explanations() {
         let pool = setup_test_db().await;
-        set_setting_impl(&pool, "ai_note_prompt", "old").await.unwrap();
-        sqlx::query("INSERT INTO skill_explanations (skill_id, lang, model, explanation) VALUES ('test', 'zh', 'model', 'cached')")
-            .execute(&pool).await.unwrap();
-        set_setting_impl(&pool, "ai_note_prompt", "old").await.unwrap();
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM skill_explanations").fetch_one(&pool).await.unwrap();
+        set_setting_impl(&pool, "ai_note_prompt", "old")
+            .await
+            .unwrap();
+        crate::storage::fixtures::insert(&pool,"skill_explanations",serde_json::json!({"skill_id":"test","lang":"zh","model":"model","explanation":"cached"})).await.unwrap();
+        set_setting_impl(&pool, "ai_note_prompt", "old")
+            .await
+            .unwrap();
+        let count: i64 = crate::storage::fixtures::count(&pool, "skill_explanations", None);
         assert_eq!(count, 1);
-        set_setting_impl(&pool, "ai_note_prompt", "new").await.unwrap();
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM skill_explanations").fetch_one(&pool).await.unwrap();
+        set_setting_impl(&pool, "ai_note_prompt", "new")
+            .await
+            .unwrap();
+        let count: i64 = crate::storage::fixtures::count(&pool, "skill_explanations", None);
         assert_eq!(count, 0);
-        assert_eq!(get_setting_impl(&pool, "ai_note_prompt").await.unwrap().as_deref(), Some("new"));
+        assert_eq!(
+            get_setting_impl(&pool, "ai_note_prompt")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("new")
+        );
     }
 
     #[tokio::test]

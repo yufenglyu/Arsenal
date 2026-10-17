@@ -1,53 +1,54 @@
-//! SQLite persistence for repository notebooks.
-use crate::db::DbPool;
-use crate::commands::notebook_repository::{Repository, validate};
-use sqlx::Row;
-
-pub async fn schema(pool: &DbPool) -> Result<(), String> {
-    sqlx::query("CREATE TABLE IF NOT EXISTS repository_notebooks (id INTEGER PRIMARY KEY AUTOINCREMENT, source_key TEXT NOT NULL UNIQUE, repository_uid TEXT NOT NULL UNIQUE, data TEXT NOT NULL)")
-        .execute(pool).await.map_err(|_| "noteDatabase")?;
+//! Native JSON repository notebooks, preserving stable identities.
+use crate::commands::notebook_repository::{validate, Repository};
+use crate::db::{rows, DbPool};
+pub async fn schema(_pool: &DbPool) -> Result<(), String> {
     Ok(())
 }
-
+fn list_data(d: &crate::storage::store::Data) -> Result<Vec<Repository>, String> {
+    let mut rows = rows::<Repository>(d, "repository_notebooks")?;
+    rows.sort_by_key(|r| r.id);
+    Ok(rows)
+}
 pub async fn list(pool: &DbPool) -> Result<Vec<Repository>, String> {
-    schema(pool).await?;
-    sqlx::query("SELECT data FROM repository_notebooks ORDER BY id").fetch_all(pool).await.map_err(|_| "noteDatabase")?
-        .into_iter().map(|r| serde_json::from_str(r.get("data")).map_err(|_| "noteDatabase".into())).collect()
+    pool.read(list_data)
 }
-
 pub async fn put(pool: &DbPool, row: &Repository) -> Result<(), String> {
-    schema(pool).await?;
-    let data = serde_json::to_string(row).map_err(|_| "noteDatabase")?;
-    sqlx::query("INSERT INTO repository_notebooks (id, source_key, repository_uid, data) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET source_key=excluded.source_key, repository_uid=excluded.repository_uid, data=excluded.data")
-        .bind(row.id).bind(&row.source_key).bind(&row.repository_uid).bind(data).execute(pool).await.map_err(|_| "noteDatabase")?;
-    Ok(())
+    pool.write(|d| {
+        let mut all = list_data(d)?;
+        all.retain(|r| r.id != row.id);
+        // Match the old persistence constraints; binding validation belongs to callers.
+        if all
+            .iter()
+            .any(|r| r.source_key == row.source_key || r.repository_uid == row.repository_uid)
+        {
+            return Err("noteDatabase".into());
+        }
+        crate::db::put(d, "repository_notebooks", row.id.to_string(), row)
+    })
+    .await
 }
-
-pub async fn restore(pool: &DbPool, rows: &[Repository]) -> Result<(), String> {
-    validate(rows)?;
-    schema(pool).await?;
-    let existing = list(pool).await?;
-    let mut merged = existing.clone();
-    for row in rows {
-        merged.retain(|r| r.source_key != row.source_key);
-        merged.push(row.clone());
-    }
-    validate(&merged)?;
-    let mut tx = pool.begin().await.map_err(|_| "noteDatabase")?;
-    for row in rows {
-        let mut row = row.clone();
-        row.id = if let Some(old) = existing.iter().find(|r| r.source_key == row.source_key) { old.id } else {
-            let max: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM repository_notebooks").fetch_one(&mut *tx).await.map_err(|_| "noteDatabase")?;
-            max + 1
-        };
-        sqlx::query("INSERT INTO repository_notebooks (id, source_key, repository_uid, data) VALUES (?, ?, ?, ?) ON CONFLICT(source_key) DO UPDATE SET repository_uid=excluded.repository_uid, data=excluded.data")
-            .bind(row.id).bind(&row.source_key).bind(&row.repository_uid).bind(serde_json::to_string(&row).map_err(|_| "noteDatabase")?)
-            .execute(&mut *tx).await.map_err(|_| "noteDatabase")?;
-    }
-    tx.commit().await.map_err(|_| "noteDatabase".into())
+pub async fn restore(pool: &DbPool, incoming: &[Repository]) -> Result<(), String> {
+    validate(incoming)?;
+    pool.write(|d| {
+        let mut all = list_data(d)?;
+        for row in incoming {
+            let mut row = row.clone();
+            row.id = all
+                .iter()
+                .find(|r| r.source_key == row.source_key)
+                .map(|r| r.id)
+                .unwrap_or_else(|| all.iter().map(|r| r.id).max().unwrap_or(0) + 1);
+            all.retain(|r| r.source_key != row.source_key);
+            all.push(row);
+        }
+        validate(&all)?;
+        for row in all {
+            crate::db::put(d, "repository_notebooks", row.id.to_string(), &row)?;
+        }
+        Ok(())
+    })
+    .await
 }
-
 pub async fn next_id(pool: &DbPool) -> Result<i64, String> {
-    sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) + 1 FROM repository_notebooks")
-        .fetch_one(pool).await.map_err(|_| "noteDatabase".into())
+    pool.read(|d| Ok(list_data(d)?.iter().map(|r| r.id).max().unwrap_or(0) + 1))
 }

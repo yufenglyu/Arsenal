@@ -1208,24 +1208,29 @@ mod tests {
 
     async fn setup_test_db() -> DbPool {
         use crate::db;
-        use sqlx::SqlitePool;
+        use crate::db::DbPool as SqlitePool;
         let pool = SqlitePool::connect(":memory:").await.expect("in-memory DB");
         db::init_database(&pool).await.expect("init");
         pool
     }
 
     async fn isolate_scan_test(pool: &DbPool) {
-        sqlx::query("DELETE FROM agents")
-            .execute(pool)
-            .await
-            .expect("delete seeded agents");
-        crate::db::update_config(pool, |config| { config.scan_directories.clear(); Ok(()) })
-            .expect("delete seeded scan directories");
+        pool.write(|d| {
+            d.table_mut("agents").clear();
+            Ok(())
+        })
+        .await
+        .unwrap();
+        crate::db::update_config(pool, |config| {
+            config.scan_directories.clear();
+            Ok(())
+        })
+        .expect("delete seeded scan directories");
     }
 
     #[tokio::test]
     async fn test_scan_all_skills_impl_empty_dirs() {
-        use sqlx::SqlitePool;
+        use crate::db::DbPool as SqlitePool;
 
         // Build a pool with tables but no seeded agents so the test is
         // isolated from whatever the user has installed on their machine.
@@ -1233,14 +1238,19 @@ mod tests {
         db::init_database(&pool).await.expect("init");
         // Remove all seeded agents so the test is isolated from whatever the
         // user has installed on their machine.
-        sqlx::query("DELETE FROM agents")
-            .execute(&pool)
-            .await
-            .expect("delete agents");
+        pool.write(|d| {
+            d.table_mut("agents").clear();
+            Ok(())
+        })
+        .await
+        .unwrap();
         // Also clear the builtin scan directories that init_database seeds,
         // so the custom-scan-dir loop has nothing to scan either.
-        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
-            .expect("delete scan_directories");
+        crate::db::update_config(&pool, |config| {
+            config.scan_directories.clear();
+            Ok(())
+        })
+        .expect("delete scan_directories");
 
         // Add one agent whose skills dir definitely does not exist.
         let dummy_agent = db::Agent {
@@ -1457,12 +1467,17 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let pool = setup_test_db().await;
 
-        sqlx::query("DELETE FROM agents")
-            .execute(&pool)
-            .await
-            .unwrap();
-        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
-            .unwrap();
+        pool.write(|d| {
+            d.table_mut("agents").clear();
+            Ok(())
+        })
+        .await
+        .unwrap();
+        crate::db::update_config(&pool, |config| {
+            config.scan_directories.clear();
+            Ok(())
+        })
+        .unwrap();
 
         let codex_agent = db::Agent {
             id: "codex".to_string(),
@@ -1507,12 +1522,17 @@ mod tests {
         fs::create_dir_all(&resource_dir).unwrap();
 
         let pool = setup_test_db().await;
-        sqlx::query("DELETE FROM agents")
-            .execute(&pool)
-            .await
-            .unwrap();
-        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
-            .unwrap();
+        pool.write(|d| {
+            d.table_mut("agents").clear();
+            Ok(())
+        })
+        .await
+        .unwrap();
+        crate::db::update_config(&pool, |config| {
+            config.scan_directories.clear();
+            Ok(())
+        })
+        .unwrap();
 
         for agent in [
             db::Agent {
@@ -1591,12 +1611,17 @@ mod tests {
         fs::create_dir_all(&resource_dir).unwrap();
 
         let pool = setup_test_db().await;
-        sqlx::query("DELETE FROM agents")
-            .execute(&pool)
-            .await
-            .unwrap();
-        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
-            .unwrap();
+        pool.write(|d| {
+            d.table_mut("agents").clear();
+            Ok(())
+        })
+        .await
+        .unwrap();
+        crate::db::update_config(&pool, |config| {
+            config.scan_directories.clear();
+            Ok(())
+        })
+        .unwrap();
 
         for agent in [
             db::Agent {
@@ -1685,12 +1710,17 @@ mod tests {
         );
 
         let pool = setup_test_db().await;
-        sqlx::query("DELETE FROM agents")
-            .execute(&pool)
-            .await
-            .unwrap();
-        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
-            .unwrap();
+        pool.write(|d| {
+            d.table_mut("agents").clear();
+            Ok(())
+        })
+        .await
+        .unwrap();
+        crate::db::update_config(&pool, |config| {
+            config.scan_directories.clear();
+            Ok(())
+        })
+        .unwrap();
         for agent in [
             db::Agent {
                 id: "central".to_string(),
@@ -1893,16 +1923,18 @@ mod tests {
             .unwrap();
         assert!(skill.is_some());
 
-        let observed_count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)
-             FROM skill_installations
-             WHERE skill_id = ? AND agent_id = ? AND is_managed = 0",
-        )
-        .bind("custom-dir-skill")
-        .bind(&project_agent_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let observed_count = pool
+            .read(|d| {
+                Ok(d.table("skill_installations")
+                    .values()
+                    .filter(|r| {
+                        r["skill_id"] == "custom-dir-skill"
+                            && r["agent_id"] == project_agent_id
+                            && !r["is_managed"].as_bool().unwrap_or(false)
+                    })
+                    .count())
+            })
+            .unwrap();
         assert_eq!(observed_count, 1);
     }
 
@@ -1995,16 +2027,20 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let pool = setup_test_db().await;
         // This platform is optional in the trimmed catalog; seed the test fixture explicitly.
-        sqlx::query("INSERT INTO agents (id, display_name, category, global_skills_dir, is_builtin, is_enabled) VALUES ('factory-droid', 'Factory Droid', 'platform', '~/.factory/skills', 0, 1)")
-            .execute(&pool).await.unwrap();
+        crate::storage::fixtures::insert(&pool, "agents", serde_json::json!({"id":"factory-droid","display_name":"Factory Droid","category":"platform","global_skills_dir":"~/.factory/skills","is_builtin":false,"is_enabled":true})).await.unwrap();
 
-
-        sqlx::query("DELETE FROM agents WHERE id NOT IN ('factory-droid', 'central')")
-            .execute(&pool)
-            .await
-            .unwrap();
-        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
-            .unwrap();
+        pool.write(|d| {
+            d.table_mut("agents")
+                .retain(|id, _| id == "factory-droid" || id == "central");
+            Ok(())
+        })
+        .await
+        .unwrap();
+        crate::db::update_config(&pool, |config| {
+            config.scan_directories.clear();
+            Ok(())
+        })
+        .unwrap();
 
         let factory_root = tmp.path().join(".factory/skills");
         let shared_root = tmp.path().join(".agents/skills");
@@ -2017,16 +2053,24 @@ mod tests {
             &valid_skill_md("Using Superpowers", "Shared Factory-compatible skill"),
         );
 
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'factory-droid'")
-            .bind(factory_root.to_string_lossy().to_string())
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
-            .bind(shared_root.to_string_lossy().to_string())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("factory-droid") {
+                row["global_skills_dir"] =
+                    serde_json::json!(factory_root.to_string_lossy().to_string());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("central") {
+                row["global_skills_dir"] =
+                    serde_json::json!(shared_root.to_string_lossy().to_string());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let result = scan_all_skills_impl(&pool).await.unwrap();
 
@@ -2083,12 +2127,18 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let pool = setup_test_db().await;
 
-        sqlx::query("DELETE FROM agents WHERE id NOT IN ('cursor', 'central')")
-            .execute(&pool)
-            .await
-            .unwrap();
-        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
-            .unwrap();
+        pool.write(|d| {
+            d.table_mut("agents")
+                .retain(|id, _| id == "cursor" || id == "central");
+            Ok(())
+        })
+        .await
+        .unwrap();
+        crate::db::update_config(&pool, |config| {
+            config.scan_directories.clear();
+            Ok(())
+        })
+        .unwrap();
 
         let cursor_root = tmp.path().join(".cursor/skills");
         let shared_root = tmp.path().join(".agents/skills");
@@ -2101,16 +2151,24 @@ mod tests {
             &valid_skill_md("Shared Skill", "Universal compatibility skill"),
         );
 
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'cursor'")
-            .bind(cursor_root.to_string_lossy().to_string())
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
-            .bind(shared_root.to_string_lossy().to_string())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("cursor") {
+                row["global_skills_dir"] =
+                    serde_json::json!(cursor_root.to_string_lossy().to_string());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("central") {
+                row["global_skills_dir"] =
+                    serde_json::json!(shared_root.to_string_lossy().to_string());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let result = scan_all_skills_impl(&pool).await.unwrap();
 
@@ -2139,12 +2197,18 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let pool = setup_test_db().await;
 
-        sqlx::query("DELETE FROM agents WHERE id NOT IN ('antigravity', 'central')")
-            .execute(&pool)
-            .await
-            .unwrap();
-        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
-            .unwrap();
+        pool.write(|d| {
+            d.table_mut("agents")
+                .retain(|id, _| id == "antigravity" || id == "central");
+            Ok(())
+        })
+        .await
+        .unwrap();
+        crate::db::update_config(&pool, |config| {
+            config.scan_directories.clear();
+            Ok(())
+        })
+        .unwrap();
 
         let shared_root = tmp.path().join(".agents/skills");
         fs::create_dir_all(&shared_root).unwrap();
@@ -2154,11 +2218,13 @@ mod tests {
             &valid_skill_md("Native Universal Skill", "Primary root is shared"),
         );
 
-        sqlx::query(
-            "UPDATE agents SET global_skills_dir = ? WHERE id IN ('antigravity', 'central')",
-        )
-        .bind(shared_root.to_string_lossy().to_string())
-        .execute(&pool)
+        pool.write(|d| {
+            for id in ["antigravity", "central"] {
+                d.table_mut("agents").get_mut(id).unwrap()["global_skills_dir"] =
+                    shared_root.to_string_lossy().to_string().into();
+            }
+            Ok(())
+        })
         .await
         .unwrap();
 
@@ -2195,16 +2261,20 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let pool = setup_test_db().await;
         // This platform is optional in the trimmed catalog; seed the test fixture explicitly.
-        sqlx::query("INSERT INTO agents (id, display_name, category, global_skills_dir, is_builtin, is_enabled) VALUES ('factory-droid', 'Factory Droid', 'platform', '~/.factory/skills', 0, 1)")
-            .execute(&pool).await.unwrap();
+        crate::storage::fixtures::insert(&pool, "agents", serde_json::json!({"id":"factory-droid","display_name":"Factory Droid","category":"platform","global_skills_dir":"~/.factory/skills","is_builtin":false,"is_enabled":true})).await.unwrap();
 
-
-        sqlx::query("DELETE FROM agents WHERE id NOT IN ('factory-droid', 'central')")
-            .execute(&pool)
-            .await
-            .unwrap();
-        crate::db::update_config(&pool, |config| { config.scan_directories.clear(); Ok(()) })
-            .unwrap();
+        pool.write(|d| {
+            d.table_mut("agents")
+                .retain(|id, _| id == "factory-droid" || id == "central");
+            Ok(())
+        })
+        .await
+        .unwrap();
+        crate::db::update_config(&pool, |config| {
+            config.scan_directories.clear();
+            Ok(())
+        })
+        .unwrap();
 
         let factory_root = tmp.path().join(".factory/skills");
         let shared_root = tmp.path().join(".agents/skills");
@@ -2222,16 +2292,24 @@ mod tests {
             &valid_skill_md("Central Skill", "Shared compatibility copy"),
         );
 
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'factory-droid'")
-            .bind(factory_root.to_string_lossy().to_string())
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
-            .bind(shared_root.to_string_lossy().to_string())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("factory-droid") {
+                row["global_skills_dir"] =
+                    serde_json::json!(factory_root.to_string_lossy().to_string());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("central") {
+                row["global_skills_dir"] =
+                    serde_json::json!(shared_root.to_string_lossy().to_string());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         scan_all_skills_impl(&pool).await.unwrap();
 
@@ -2289,16 +2367,18 @@ mod tests {
 
         scan_all_skills_impl(&pool).await.unwrap();
 
-        let installation: db::SkillInstallation = sqlx::query_as(
-            "SELECT skill_id, agent_id, installed_path, link_type, symlink_target, created_at
-             FROM skill_installations
-             WHERE skill_id = ? AND agent_id = ?",
-        )
-        .bind("my-skill")
-        .bind("path-agent")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let installation: db::SkillInstallation = pool
+            .read(|d| {
+                serde_json::from_value(
+                    d.table("skill_installations")
+                        .values()
+                        .find(|r| r["skill_id"] == "my-skill" && r["agent_id"] == "path-agent")
+                        .unwrap()
+                        .clone(),
+                )
+                .map_err(|e| e.to_string())
+            })
+            .unwrap();
 
         // installed_path must NOT be the SKILL.md file path.
         assert!(
@@ -2407,21 +2487,23 @@ mod tests {
         // Point Shared Hub at the shared temp directory.
         // Use "AA Central Test" as the display_name so it sorts BEFORE "ZZ Codex Test"
         // (ORDER BY display_name ASC) ensuring the central scan runs first.
-        sqlx::query(
-            "UPDATE agents SET display_name = 'AA Central Test', global_skills_dir = ? WHERE id = 'central'",
-        )
-        .bind(tmp.path().to_string_lossy().into_owned())
-        .execute(&pool)
+        pool.write(|d| {
+            let row = d.table_mut("agents").get_mut("central").unwrap();
+            row["display_name"] = "AA Central Test".into();
+            row["global_skills_dir"] = tmp.path().to_string_lossy().into_owned().into();
+            Ok(())
+        })
         .await
         .unwrap();
 
         // Point a platform agent at the SAME temp directory,
         // sorted AFTER the central agent so it is processed last (worst case).
-        sqlx::query(
-            "UPDATE agents SET display_name = 'ZZ Codex Test', global_skills_dir = ? WHERE id = 'codex'",
-        )
-        .bind(tmp.path().to_string_lossy().into_owned())
-        .execute(&pool)
+        pool.write(|d| {
+            let row = d.table_mut("agents").get_mut("codex").unwrap();
+            row["display_name"] = "ZZ Codex Test".into();
+            row["global_skills_dir"] = tmp.path().to_string_lossy().into_owned().into();
+            Ok(())
+        })
         .await
         .unwrap();
 

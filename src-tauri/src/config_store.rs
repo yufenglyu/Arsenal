@@ -21,14 +21,23 @@ pub struct ConfigStore {
 
 impl ConfigStore {
     pub fn new(directory: &Path) -> Self {
-        Self { path: directory.join("config.json") }
+        Self {
+            path: directory.join("config.json"),
+        }
     }
 
-    pub fn path(&self) -> &Path { &self.path }
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 
-    pub fn load(&self) -> Result<AppConfig, String> { load_path(&self.path) }
+    pub fn load(&self) -> Result<AppConfig, String> {
+        load_path(&self.path)
+    }
 
-    pub fn update<T>(&self, change: impl FnOnce(&mut AppConfig) -> Result<T, String>) -> Result<T, String> {
+    pub fn update<T>(
+        &self,
+        change: impl FnOnce(&mut AppConfig) -> Result<T, String>,
+    ) -> Result<T, String> {
         update_path(&self.path, change)
     }
 }
@@ -104,6 +113,14 @@ pub fn load_path(path: &Path) -> Result<AppConfig, String> {
     read(path)
 }
 
+/// Keep a physical configuration snapshot consistent with in-process settings writes.
+pub fn with_snapshot<T>(copy: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    let _guard = CONFIG_LOCK
+        .lock()
+        .map_err(|_| "Configuration lock failed")?;
+    copy()
+}
+
 pub fn update_path<T>(
     path: &Path,
     change: impl FnOnce(&mut AppConfig) -> Result<T, String>,
@@ -128,12 +145,21 @@ mod tests {
         let first = tempfile::tempdir().unwrap();
         let second = tempfile::tempdir().unwrap();
         let config = ConfigStore::new(first.path());
-        config.update(|data| {
-            data.settings.insert("language".into(), "en".into());
-            Ok(())
-        }).unwrap();
-        assert_eq!(ConfigStore::new(first.path()).load().unwrap().settings["language"], "en");
-        assert!(ConfigStore::new(second.path()).load().unwrap().settings.is_empty());
+        config
+            .update(|data| {
+                data.settings.insert("language".into(), "en".into());
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            ConfigStore::new(first.path()).load().unwrap().settings["language"],
+            "en"
+        );
+        assert!(ConfigStore::new(second.path())
+            .load()
+            .unwrap()
+            .settings
+            .is_empty());
         assert!(!first.path().join("db.sqlite").exists());
     }
 
@@ -151,6 +177,7 @@ mod tests {
             .await
             .unwrap();
         pool.close().await;
+        drop(pool);
         let pool = db::create_pool(database.to_str().unwrap()).await.unwrap();
         db::init_database(&pool).await.unwrap();
         assert_eq!(
@@ -163,13 +190,12 @@ mod tests {
             .unwrap();
         assert_eq!(restored.path, project.path);
         assert!(!restored.is_active);
-        let tables: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('settings', 'scan_directories')",
-        )
-        .fetch_one(&pool)
-        .await
+        pool.read(|data| {
+            assert!(data.table("settings").is_empty());
+            assert!(data.table("scan_directories").is_empty());
+            Ok(())
+        })
         .unwrap();
-        assert_eq!(tables, 0);
         assert!(dir.path().join("config.json").is_file());
     }
 
@@ -179,14 +205,15 @@ mod tests {
         let pool = db::create_pool(dir.path().join("db.sqlite").to_str().unwrap())
             .await
             .unwrap();
-        sqlx::query("CREATE TABLE settings (key TEXT, value TEXT)")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO settings VALUES ('language', 'legacy')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|data| {
+            data.table_mut("settings").insert(
+                "language".into(),
+                serde_json::json!({"key":"language","value":"legacy"}),
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
         db::init_database(&pool).await.unwrap();
         assert_eq!(db::get_setting(&pool, "language").await.unwrap(), None);
     }

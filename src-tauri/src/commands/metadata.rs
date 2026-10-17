@@ -1,6 +1,6 @@
-pub use crate::storage::models::{FolderNote, MetadataRow};
-pub use crate::db::metadata::{folder_notes, save_note};
 use crate::db::metadata::{change_tag, rename_tag};
+pub use crate::db::metadata::{folder_notes, save_note};
+pub use crate::storage::models::{FolderNote, MetadataRow};
 use crate::AppState;
 use tauri::State;
 
@@ -42,19 +42,13 @@ mod tests {
     use super::*;
     #[tokio::test]
     async fn rename_requires_merge_confirmation_and_preserves_notes() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::query("CREATE TABLE skill_metadata (skill_id TEXT PRIMARY KEY, notes TEXT, tags TEXT, updated_at TEXT)").execute(&pool).await.unwrap();
+        let pool = crate::db::DbPool::memory().unwrap();
         for (id, tags) in [
             ("one", vec!["Old", "Keep"]),
             ("two", vec!["Old", "New"]),
             ("three", vec!["Keep"]),
         ] {
-            sqlx::query("INSERT INTO skill_metadata VALUES (?, 'memo', ?, '')")
-                .bind(id)
-                .bind(serde_json::to_string(&tags).unwrap())
-                .execute(&pool)
-                .await
-                .unwrap();
+            pool.write(|d|{d.table_mut("skill_metadata").insert(id.into(),serde_json::json!({"skill_id":id,"notes":"memo","tags":serde_json::to_string(&tags).unwrap(),"updated_at":""}));Ok(())}).await.unwrap();
         }
         assert!(rename_tag(&pool, "Old", "New", false).await.is_err());
         let rows = rename_tag(&pool, "old", " New ", true).await.unwrap();
@@ -67,36 +61,31 @@ mod tests {
             vec!["New"]
         );
         assert!(rename_tag(&pool, "New", " ", false).await.is_err());
-        let untouched: String =
-            sqlx::query_scalar("SELECT tags FROM skill_metadata WHERE skill_id='three'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let untouched: String = pool
+            .read(|d| {
+                Ok(d.table("skill_metadata")["three"]["tags"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned())
+            })
+            .unwrap();
         assert_eq!(untouched, "[\"Keep\"]");
     }
 
     #[tokio::test]
     async fn tag_changes_preserve_notes_and_unselected_skills() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::query("CREATE TABLE skills (id TEXT PRIMARY KEY)")
-            .execute(&pool)
+        let pool = crate::db::DbPool::memory().unwrap();
+        for id in ["a", "b", "c"] {
+            pool.write(|d| {
+                d.table_mut("skills")
+                    .insert(id.into(), serde_json::json!({"id":id}));
+                Ok(())
+            })
             .await
             .unwrap();
-        sqlx::query("CREATE TABLE skill_metadata (skill_id TEXT PRIMARY KEY, notes TEXT, tags TEXT, updated_at TEXT)").execute(&pool).await.unwrap();
-        for id in ["a", "b", "c"] {
-            sqlx::query("INSERT INTO skills VALUES (?)")
-                .bind(id)
-                .execute(&pool)
-                .await
-                .unwrap();
         }
         for (id, tags) in [("a", vec!["A", "B"]), ("b", vec!["B"]), ("c", vec!["A"])] {
-            sqlx::query("INSERT INTO skill_metadata VALUES (?, 'memo', ?, '')")
-                .bind(id)
-                .bind(serde_json::to_string(&tags).unwrap())
-                .execute(&pool)
-                .await
-                .unwrap();
+            pool.write(|d|{d.table_mut("skill_metadata").insert(id.into(),serde_json::json!({"skill_id":id,"notes":"memo","tags":serde_json::to_string(&tags).unwrap(),"updated_at":""}));Ok(())}).await.unwrap();
         }
         let ids = Some(vec!["a".into(), "b".into()]);
         let added = change_tag(&pool, "A", ids.clone(), false).await.unwrap();
@@ -110,7 +99,7 @@ mod tests {
     }
     #[tokio::test]
     async fn folder_notes_roundtrip_and_replace_without_absolute_paths() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::DbPool::memory().unwrap();
         let mut note = FolderNote {
             id: "stable".into(),
             notes: "memo".into(),

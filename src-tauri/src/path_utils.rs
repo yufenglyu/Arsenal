@@ -153,14 +153,6 @@ pub fn normalize_app_data_dir(path: &str) -> Result<PathBuf, String> {
     normalize_app_data_dir_with_home(path, &resolve_home_dir())
 }
 
-pub fn default_database_path() -> PathBuf {
-    app_data_dir().join("db.sqlite")
-}
-
-pub fn resolve_database_path() -> PathBuf {
-    app_data_dir().join("db.sqlite")
-}
-
 fn auto_app_data_dir_without_pointer(
     exe_dir: Option<&Path>,
     extra_dir: Option<&Path>,
@@ -222,40 +214,6 @@ pub fn write_app_data_dir_override(path: &Path) -> Result<(), String> {
     )
 }
 
-pub fn sqlite_sidecar_paths(db_path: &Path) -> Vec<PathBuf> {
-    let file_name = db_path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "db.sqlite".to_string());
-    let parent = db_path.parent().unwrap_or(Path::new("."));
-    vec![
-        db_path.to_path_buf(),
-        parent.join(format!("{file_name}-wal")),
-        parent.join(format!("{file_name}-shm")),
-    ]
-}
-
-pub fn copy_sqlite_database(from: &Path, to: &Path) -> Result<(), String> {
-    if from == to {
-        return Ok(());
-    }
-    if let Some(parent) = to.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create database directory: {}", e))?;
-    }
-    for (source, dest) in sqlite_sidecar_paths(from)
-        .into_iter()
-        .zip(sqlite_sidecar_paths(to))
-    {
-        if !source.exists() {
-            continue;
-        }
-        std::fs::copy(&source, &dest)
-            .map_err(|e| format!("Failed to copy database file '{}': {}", source.display(), e))?;
-    }
-    Ok(())
-}
-
 pub fn copy_app_data_dir(from: &Path, to: &Path) -> Result<(), String> {
     if from == to {
         return Ok(());
@@ -263,7 +221,33 @@ pub fn copy_app_data_dir(from: &Path, to: &Path) -> Result<(), String> {
     if to.starts_with(from) {
         return Err("Config directory cannot be inside the current config directory".to_string());
     }
-    copy_app_data_dir_recursive(from, to)
+    let store = to.join("store");
+    std::fs::create_dir_all(&store).map_err(|e| e.to_string())?;
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(store.join("store.lock"))
+        .map_err(|e| e.to_string())?;
+    lock.try_lock()
+        .map_err(|_| "Destination data directory is already open".to_string())?;
+    if store.join("manifest.json").exists() {
+        return Err("Destination already contains JSON storage".into());
+    }
+    copy_app_data_dir_recursive(from, to)?;
+    let manifest = from.join("store/manifest.json");
+    if manifest.exists() {
+        use std::io::Write;
+        let pending = store.join("copy-manifest.pending");
+        let mut file = std::fs::File::create(&pending).map_err(|e| e.to_string())?;
+        file.write_all(&std::fs::read(manifest).map_err(|e| e.to_string())?)
+            .and_then(|_| file.sync_all())
+            .map_err(|e| e.to_string())?;
+        drop(file);
+        std::fs::rename(pending, store.join("manifest.json")).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 fn copy_app_data_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
@@ -279,7 +263,14 @@ fn copy_app_data_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     {
         let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
         let name = entry.file_name();
-        if name == "database-path" {
+        if name == "database-path"
+            || name == "db.sqlite"
+            || name == "db.sqlite-wal"
+            || name == "db.sqlite-shm"
+            || (src.file_name().is_some_and(|n| n == "store")
+                && (name == "store.lock" || name == "manifest.json"))
+            || name.to_string_lossy().ends_with(".pending")
+        {
             continue;
         }
         let src_path = entry.path();
@@ -1049,19 +1040,23 @@ mod tests {
     }
 
     #[test]
-    fn copy_sqlite_database_copies_wal_sidecars() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let from = dir.path().join("from").join("db.sqlite");
-        let to = dir.path().join("to").join("custom.sqlite");
-        std::fs::create_dir_all(from.parent().unwrap()).expect("from dir");
-        std::fs::write(&from, "main-db").expect("db");
-        std::fs::write(dir.path().join("from").join("db.sqlite-wal"), "wal").expect("wal");
-        copy_sqlite_database(&from, &to).expect("copy");
-        assert_eq!(std::fs::read_to_string(&to).unwrap(), "main-db");
+    fn copy_json_store_does_not_copy_writer_lock_or_old_database() {
+        let temp = tempfile::tempdir().unwrap();
+        let from = temp.path().join("from");
+        let to = temp.path().join("to");
+        std::fs::create_dir_all(from.join("store/objects")).unwrap();
+        std::fs::write(from.join("store/manifest.json"), "manifest fixture").unwrap();
+        std::fs::write(from.join("store/objects/fixture.json"), "{}").unwrap();
+        std::fs::write(from.join("store/store.lock"), "not copied").unwrap();
+        std::fs::write(from.join("db.sqlite"), "old archive").unwrap();
+        copy_app_data_dir(&from, &to).unwrap();
         assert_eq!(
-            std::fs::read_to_string(dir.path().join("to").join("custom.sqlite-wal")).unwrap(),
-            "wal"
+            std::fs::read_to_string(to.join("store/manifest.json")).unwrap(),
+            "manifest fixture"
         );
+        assert_eq!(std::fs::read(to.join("store/store.lock")).unwrap(), b"");
+        assert!(!to.join("db.sqlite").exists());
+        assert!(copy_app_data_dir(&from, &to).is_err());
     }
 
     #[test]
@@ -1074,10 +1069,7 @@ mod tests {
         std::fs::write(from.join("database-path"), "stale").expect("legacy");
         std::fs::write(from.join("library").join("skill.md"), "skill").expect("library");
         copy_app_data_dir(&from, &to).expect("copy");
-        assert_eq!(
-            std::fs::read_to_string(to.join("db.sqlite")).unwrap(),
-            "main-db"
-        );
+        assert!(!to.join("db.sqlite").exists());
         assert_eq!(
             std::fs::read_to_string(to.join("library").join("skill.md")).unwrap(),
             "skill"

@@ -6,7 +6,7 @@ use crate::{
     AppState,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
+
 use std::path::{Path, PathBuf};
 use tauri::State;
 
@@ -16,12 +16,12 @@ pub(crate) async fn directory(
     owner: &str,
     repository: &str,
 ) -> Result<PathBuf, String> {
-    let saved: Option<String> =
-        sqlx::query_scalar("SELECT directory FROM repository_local_directories WHERE repository=?")
-            .bind(repository)
-            .fetch_optional(pool)
-            .await
-            .map_err(|_| "addressDatabase")?;
+    let saved = pool.read(|d| {
+        Ok(d.table("repository_local_directories")
+            .get(repository)
+            .and_then(|r| r["directory"].as_str())
+            .map(str::to_owned))
+    })?;
     let path = if let Some(saved) = saved {
         root.join(saved.split('/').collect::<PathBuf>())
     } else {
@@ -36,8 +36,7 @@ pub(crate) async fn directory(
         .map_err(|_| "UNSAFE_TARGET")?
         .to_string_lossy()
         .replace('\\', "/");
-    let occupied: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_local_directories WHERE directory=? COLLATE NOCASE AND repository<>? COLLATE NOCASE")
-        .bind(&relative).bind(repository).fetch_one(pool).await.map_err(|_| "addressDatabase")?;
+    let occupied = directory_conflicts(pool, &relative, repository)?;
     if occupied != 0 {
         return Err("addressConflict".into());
     }
@@ -86,13 +85,13 @@ pub(crate) async fn migrate(pool: &DbPool, old: &str, new: &str) -> Result<(), S
     recover(pool).await?;
     linker::normalize_resource_backed_central_records_impl(pool).await?;
     let root = db::get_skill_resource_library_dir(pool).await?;
-    let spelling: Option<String> = sqlx::query_scalar(
-        "SELECT source_repo FROM skill_sources WHERE source_repo=? COLLATE NOCASE LIMIT 1",
-    )
-    .bind(old)
-    .fetch_optional(pool)
-    .await
-    .map_err(|_| "addressDatabase")?;
+    let spelling = pool.read(|d| {
+        Ok(d.table("skill_sources")
+            .values()
+            .filter_map(|r| r["source_repo"].as_str())
+            .find(|v| v.eq_ignore_ascii_case(old))
+            .map(str::to_owned))
+    })?;
     let display = spelling.as_deref().unwrap_or(old);
     let owner = display.split('/').next().ok_or("addressInvalid")?;
     let path = directory(pool, &root, owner, display).await?;
@@ -111,14 +110,12 @@ pub(crate) async fn migrate(pool: &DbPool, old: &str, new: &str) -> Result<(), S
         .map_err(|_| "UNSAFE_TARGET")?
         .to_string_lossy()
         .replace('\\', "/");
-    let directory_conflict: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_local_directories WHERE directory=? COLLATE NOCASE AND repository<>? COLLATE NOCASE")
-        .bind(&relative).bind(old).fetch_one(pool).await.map_err(|_| "addressDatabase")?;
+    let directory_conflict = directory_conflicts(pool, &relative, old)?;
     if directory_conflict != 0 {
         return Err("addressConflict".into());
     }
     let _notes = notebook::WRITE.lock().await;
     let notebooks = notebook_repository::list(pool).await?;
-    let old_key = format!("github:{}", old.to_lowercase());
     let new_key = format!("github:{}", new.to_lowercase());
     if notebooks
         .iter()
@@ -126,32 +123,49 @@ pub(crate) async fn migrate(pool: &DbPool, old: &str, new: &str) -> Result<(), S
     {
         return Err("addressConflict".into());
     }
-    let busy: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_mirror_snapshots WHERE (repository=? COLLATE NOCASE OR repository=? COLLATE NOCASE) AND (state='applying' OR (state='failed' AND id IN (SELECT snapshot_id FROM repository_mirror_recovery)))")
-        .bind(old).bind(new).fetch_one(pool).await.map_err(|_| "addressDatabase")?;
+    let busy = pool.read(|d| {
+        Ok(d.table("repository_mirror_snapshots")
+            .values()
+            .filter(|r| {
+                let repo = r["repository"].as_str().unwrap_or("");
+                let state = r["state"].as_str().unwrap_or("");
+                (repo.eq_ignore_ascii_case(old) || repo.eq_ignore_ascii_case(new))
+                    && (state == "applying"
+                        || (state == "failed"
+                            && d.table("repository_mirror_recovery")
+                                .contains_key(r["id"].as_str().unwrap_or(""))))
+            })
+            .count())
+    })?;
     if busy != 0 {
         return Err("addressBusy".into());
     }
-    let exists: i64 = sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM skill_sources WHERE source_repo=? COLLATE NOCASE) + (SELECT COUNT(*) FROM repository_mirrors WHERE repository=? COLLATE NOCASE)")
-        .bind(old).bind(old).fetch_one(pool).await.map_err(|_| "addressDatabase")?;
+    let exists = repository_count(pool, old, false)?;
     if exists == 0 {
         return Err("addressMissing".into());
     }
-    let conflict: i64 = sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM skill_sources WHERE source_repo=? COLLATE NOCASE) + (SELECT COUNT(*) FROM repository_mirrors WHERE repository=? COLLATE NOCASE) + (SELECT COUNT(*) FROM repository_local_directories WHERE repository=? COLLATE NOCASE)")
-        .bind(new).bind(new).bind(new).fetch_one(pool).await.map_err(|_| "addressDatabase")?;
+    let conflict = repository_count(pool, new, true)?;
     if conflict != 0 {
         return Err("addressConflict".into());
     }
     // Ensure all members use this repository container before preserving it.
-    let rows = sqlx::query("SELECT s.id,s.file_path,s.canonical_path FROM skills s JOIN skill_sources ss ON ss.skill_id=s.id WHERE ss.source_repo=? COLLATE NOCASE")
-        .bind(old).fetch_all(pool).await.map_err(|_| "addressDatabase")?;
+    let rows = pool.read(|d| {
+        Ok(d.table("skill_sources")
+            .values()
+            .filter(|r| {
+                r["source_repo"]
+                    .as_str()
+                    .is_some_and(|v| v.eq_ignore_ascii_case(old))
+            })
+            .filter_map(|r| d.table("skills").get(r["skill_id"].as_str()?))
+            .cloned()
+            .collect::<Vec<_>>())
+    })?;
     let mut updates = Vec::new();
     let mut links = Vec::new();
     for row in rows {
-        let id: String = row.get("id");
-        let target = PathBuf::from(
-            row.get::<Option<String>, _>("canonical_path")
-                .ok_or("addressLayout")?,
-        );
+        let id: String = row["id"].as_str().ok_or("addressDatabase")?.to_owned();
+        let target = PathBuf::from(row["canonical_path"].as_str().ok_or("addressLayout")?);
         repository_mirror::ensure_owned_path(&root, &target)?;
         let resolved = target.canonicalize().unwrap_or(target.clone());
         let container = path.canonicalize().unwrap_or(path.clone());
@@ -164,7 +178,7 @@ pub(crate) async fn migrate(pool: &DbPool, old: &str, new: &str) -> Result<(), S
                 .await
                 .map_err(|_| "addressLinks")?,
         );
-        let file = PathBuf::from(row.get::<String, _>("file_path"));
+        let file = PathBuf::from(row["file_path"].as_str().ok_or("addressDatabase")?);
         if !crate::path_utils::paths_resolve_to_same_entry(
             file.parent().ok_or("addressLayout")?,
             &target,
@@ -178,14 +192,10 @@ pub(crate) async fn migrate(pool: &DbPool, old: &str, new: &str) -> Result<(), S
         ));
     }
     // Refuse to move a directory that contains records owned by another source.
-    for row in sqlx::query("SELECT id,canonical_path FROM skills")
-        .fetch_all(pool)
-        .await
-        .map_err(|_| "addressDatabase")?
-    {
-        let id: String = row.get("id");
-        if row
-            .get::<Option<String>, _>("canonical_path")
+    for row in pool.read(|d| Ok(d.table("skills").values().cloned().collect::<Vec<_>>()))? {
+        let id: String = row["id"].as_str().ok_or("addressDatabase")?.to_owned();
+        if row["canonical_path"]
+            .as_str()
             .as_ref()
             .is_some_and(|p| Path::new(p).starts_with(&path))
             && !updates.iter().any(|(own, _, _)| own == &id)
@@ -209,74 +219,39 @@ pub(crate) async fn migrate(pool: &DbPool, old: &str, new: &str) -> Result<(), S
         links,
     };
     let move_id = uuid::Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO repository_address_moves(id,payload) VALUES(?,?)")
-        .bind(&move_id)
-        .bind(serde_json::to_string(&journal).map_err(|_| "addressDatabase")?)
-        .execute(pool)
-        .await
-        .map_err(|_| "addressDatabase")?;
-    let result: Result<(),String> = async {
+    let payload = serde_json::to_string(&journal).map_err(|_| "addressDatabase")?;
+    pool.write(|d| {
+        d.table_mut("repository_address_moves").insert(
+            move_id.clone(),
+            serde_json::json!({"id":move_id,"payload":payload,"committed":false}),
+        );
+        Ok(())
+    })
+    .await?;
+    let result: Result<(), String> = async {
         if !same_path {
-            std::fs::create_dir_all(new_path.parent().ok_or("addressLayout")?).map_err(|_| "addressMove")?;
-            if journal.had_directory { std::fs::rename(&path, &new_path).map_err(|_| "addressMove")?; }
-            else { std::fs::create_dir(&new_path).map_err(|_| "addressMove")?; }
+            std::fs::create_dir_all(new_path.parent().ok_or("addressLayout")?)
+                .map_err(|_| "addressMove")?;
+            if journal.had_directory {
+                std::fs::rename(&path, &new_path).map_err(|_| "addressMove")?;
+            } else {
+                std::fs::create_dir(&new_path).map_err(|_| "addressMove")?;
+            }
         }
-        let mut tx = pool.begin().await.map_err(|_| "addressDatabase")?;
-        for (id, file, canonical) in &updates {
-            sqlx::query("UPDATE skills SET canonical_path=?,file_path=? WHERE id=?")
-                .bind(canonical.to_string_lossy().as_ref()).bind(file.to_string_lossy().as_ref()).bind(id).execute(&mut *tx).await.map_err(|_| "addressDatabase")?;
-        }
-    sqlx::query("UPDATE skills SET source='github:' || ? WHERE id IN (SELECT skill_id FROM skill_sources WHERE source_repo=? COLLATE NOCASE)")
-        .bind(new).bind(old).execute(&mut *tx).await.map_err(|_| "addressDatabase")?;
-    // Clear old raw download URLs; source_repo + source_path resolve the new remote.
-    sqlx::query("UPDATE skill_sources SET source_repo=?,source_author=?,source_url=NULL,updated_at=? WHERE source_repo=? COLLATE NOCASE")
-        .bind(new).bind(new.split('/').next()).bind(chrono::Utc::now().to_rfc3339()).bind(old).execute(&mut *tx).await.map_err(|_| "addressDatabase")?;
-    for table in [
-        "repository_mirrors",
-        "repository_local_directories",
-        "github_repository_stats",
-    ] {
-        sqlx::query(&format!(
-            "DELETE FROM {table} WHERE repository=? COLLATE NOCASE"
-        ))
-        .bind(old)
-        .execute(&mut *tx)
+        db::repository::commit_address(
+            pool,
+            db::repository::AddressCommit {
+                old,
+                new,
+                relative: &relative,
+                move_id: &move_id,
+                updates: &updates,
+                notebooks,
+            },
+        )
         .await
-        .map_err(|_| "addressDatabase")?;
     }
-    sqlx::query("INSERT INTO repository_mirrors(repository) VALUES(?)")
-        .bind(new.to_lowercase())
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| "addressDatabase")?;
-    sqlx::query("INSERT INTO repository_local_directories(repository,directory) VALUES(?,?)")
-        .bind(new.to_lowercase())
-        .bind(relative)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| "addressDatabase")?;
-    // Retain recovery data, but make all old previews unusable, including queued IDs.
-    sqlx::query("UPDATE repository_mirror_snapshots SET state='invalidated' WHERE repository=? COLLATE NOCASE")
-        .bind(old).execute(&mut *tx).await.map_err(|_| "addressDatabase")?;
-    for mut row in notebooks
-        .into_iter()
-        .filter(|row| row.source_key.eq_ignore_ascii_case(&old_key))
-    {
-        row.source_key = new_key.clone();
-        row.full_name = new.into();
-        row.url = format!("https://github.com/{new}");
-        row.stars = None;
-        sqlx::query("UPDATE repository_notebooks SET source_key=?,data=? WHERE id=?")
-            .bind(&new_key)
-            .bind(serde_json::to_string(&row).map_err(|_| "addressDatabase")?)
-            .bind(row.id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|_| "addressDatabase")?;
-    }
-    sqlx::query("UPDATE repository_address_moves SET committed=1 WHERE id=?").bind(&move_id).execute(&mut *tx).await.map_err(|_| "addressDatabase")?;
-    tx.commit().await.map_err(|_| "addressDatabase".into())
-    }.await;
+    .await;
     if let Err(error) = result {
         let completed = recover(pool).await.map_err(|_| "addressRecovery")?;
         if completed
@@ -305,19 +280,22 @@ struct MoveJournal {
 /// Must run before any scanner interprets temporarily missing directories.
 pub(crate) async fn recover(pool: &DbPool) -> Result<Vec<(String, String)>, String> {
     let root = db::get_skill_resource_library_dir(pool).await?;
-    let rows = sqlx::query("SELECT id,payload,committed FROM repository_address_moves")
-        .fetch_all(pool)
-        .await
-        .map_err(|_| "addressDatabase")?;
+    let rows = pool.read(|d| {
+        Ok(d.table("repository_address_moves")
+            .values()
+            .cloned()
+            .collect::<Vec<_>>())
+    })?;
     let mut completed = Vec::new();
     for row in rows {
         let journal: MoveJournal =
-            serde_json::from_str(row.get("payload")).map_err(|_| "addressRecovery")?;
+            serde_json::from_str(row["payload"].as_str().ok_or("addressRecovery")?)
+                .map_err(|_| "addressRecovery")?;
         let from = root.join(journal.from.split('/').collect::<PathBuf>());
         let to = root.join(journal.to.split('/').collect::<PathBuf>());
         repository_mirror::ensure_owned_path(&root, &from).map_err(|_| "addressRecovery")?;
         repository_mirror::ensure_owned_path(&root, &to).map_err(|_| "addressRecovery")?;
-        let committed: bool = row.get("committed");
+        let committed: bool = row["committed"].as_bool().ok_or("addressRecovery")?;
         if committed {
             if !to.is_dir() {
                 return Err("addressRecovery".into());
@@ -343,11 +321,50 @@ pub(crate) async fn recover(pool: &DbPool) -> Result<Vec<(String, String)>, Stri
             }
             let _ = crate::path_utils::prune_empty_parent_dirs(&to, &root);
         }
-        sqlx::query("DELETE FROM repository_address_moves WHERE id=?")
-            .bind(row.get::<String, _>("id"))
-            .execute(pool)
-            .await
-            .map_err(|_| "addressDatabase")?;
+        pool.write(|d| {
+            d.table_mut("repository_address_moves")
+                .remove(row["id"].as_str().ok_or("addressRecovery")?);
+            Ok(())
+        })
+        .await?;
     }
     Ok(completed)
+}
+
+fn directory_conflicts(pool: &DbPool, relative: &str, repository: &str) -> Result<usize, String> {
+    pool.read(|d| {
+        Ok(d.table("repository_local_directories")
+            .values()
+            .filter(|r| {
+                r["directory"]
+                    .as_str()
+                    .is_some_and(|v| v.eq_ignore_ascii_case(relative))
+                    && !r["repository"]
+                        .as_str()
+                        .is_some_and(|v| v.eq_ignore_ascii_case(repository))
+            })
+            .count())
+    })
+}
+fn repository_count(pool: &DbPool, repository: &str, directories: bool) -> Result<usize, String> {
+    pool.read(|d| {
+        Ok([
+            ("skill_sources", "source_repo"),
+            ("repository_mirrors", "repository"),
+            ("repository_local_directories", "repository"),
+        ]
+        .into_iter()
+        .take(if directories { 3 } else { 2 })
+        .map(|(table, key)| {
+            d.table(table)
+                .values()
+                .filter(|r| {
+                    r[key]
+                        .as_str()
+                        .is_some_and(|v| v.eq_ignore_ascii_case(repository))
+                })
+                .count()
+        })
+        .sum())
+    })
 }

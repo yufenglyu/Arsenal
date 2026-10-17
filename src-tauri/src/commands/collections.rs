@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use std::{fs, path::PathBuf, time::SystemTime};
 use tauri::State;
 
@@ -102,48 +101,9 @@ async fn get_collection_skills_with_metadata(
     pool: &DbPool,
     collection_id: &str,
 ) -> Result<Vec<CollectionSkill>, String> {
-    let rows = sqlx::query(
-        "SELECT
-             s.id,
-             s.name,
-             s.description,
-             s.file_path,
-             s.canonical_path,
-             s.is_central,
-             s.source,
-             s.content,
-             s.scanned_at,
-             ss.source_url,
-             ss.source_author,
-             ss.source_repo,
-             ss.source_path
-         FROM skills s
-         JOIN collection_skills cs ON s.id = cs.skill_id
-         LEFT JOIN skill_sources ss ON ss.skill_id = s.id
-         WHERE cs.collection_id = ?
-         ORDER BY cs.added_at",
-    )
-    .bind(collection_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| e.to_string())?;
-
-    rows.into_iter()
-        .map(|row| {
-            let skill = Skill {
-                id: row.try_get("id").map_err(|e| e.to_string())?,
-                name: row.try_get("name").map_err(|e| e.to_string())?,
-                description: row.try_get("description").map_err(|e| e.to_string())?,
-                file_path: row.try_get("file_path").map_err(|e| e.to_string())?,
-                canonical_path: row.try_get("canonical_path").map_err(|e| e.to_string())?,
-                is_central: row
-                    .try_get::<i64, _>("is_central")
-                    .map_err(|e| e.to_string())?
-                    != 0,
-                source: row.try_get("source").map_err(|e| e.to_string())?,
-                content: row.try_get("content").map_err(|e| e.to_string())?,
-                scanned_at: row.try_get("scanned_at").map_err(|e| e.to_string())?,
-            };
+    db::backup::collection_details(pool, collection_id)?
+        .into_iter()
+        .map(|(skill, source)| {
             let (created_at, updated_at) = collection_skill_timestamps(&skill);
 
             Ok(CollectionSkill {
@@ -156,10 +116,16 @@ async fn get_collection_skills_with_metadata(
                 source: skill.source,
                 content: skill.content,
                 scanned_at: skill.scanned_at,
-                source_url: row.try_get("source_url").map_err(|e| e.to_string())?,
-                source_author: row.try_get("source_author").map_err(|e| e.to_string())?,
-                source_repo: row.try_get("source_repo").map_err(|e| e.to_string())?,
-                source_path: row.try_get("source_path").map_err(|e| e.to_string())?,
+                source_url: source.as_ref().and_then(|source| source.source_url.clone()),
+                source_author: source
+                    .as_ref()
+                    .and_then(|source| source.source_author.clone()),
+                source_repo: source
+                    .as_ref()
+                    .and_then(|source| source.source_repo.clone()),
+                source_path: source
+                    .as_ref()
+                    .and_then(|source| source.source_path.clone()),
                 created_at,
                 updated_at,
             })
@@ -465,8 +431,8 @@ pub async fn import_collection(
 mod tests {
     use super::*;
     use crate::db::{self, Skill};
+    use crate::storage::store::Store as SqlitePool;
     use chrono::Utc;
-    use sqlx::SqlitePool;
     use std::fs;
     use tempfile::TempDir;
 
@@ -715,12 +681,11 @@ mod tests {
         delete_collection_impl(&pool, &col.id).await.unwrap();
 
         // The collection_skills rows should also be gone.
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM collection_skills WHERE collection_id = ?")
-                .bind(&col.id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let count: i64 = crate::storage::fixtures::count(
+            &pool,
+            "collection_skills",
+            Some(("collection_id", &col.id)),
+        );
         assert_eq!(
             count, 0,
             "collection_skills should be removed on cascade delete"
@@ -982,14 +947,26 @@ mod tests {
         let pool = setup_test_db().await;
 
         // Override central and claude-code agent dirs.
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
-            .bind(central_dir.to_str().unwrap())
-            .execute(&pool)
+        (&pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if id.as_str() == "central" {
+                        row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
+                    }
+                }
+                Ok(())
+            })
             .await
             .unwrap();
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'claude-code'")
-            .bind(agent_dir.to_str().unwrap())
-            .execute(&pool)
+        (&pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if id.as_str() == "claude-code" {
+                        row["global_skills_dir"] = serde_json::json!(agent_dir.to_str().unwrap());
+                    }
+                }
+                Ok(())
+            })
             .await
             .unwrap();
 
@@ -1056,14 +1033,26 @@ mod tests {
 
         let pool = setup_test_db().await;
 
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
-            .bind(central_dir.to_str().unwrap())
-            .execute(&pool)
+        (&pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if id.as_str() == "central" {
+                        row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
+                    }
+                }
+                Ok(())
+            })
             .await
             .unwrap();
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'claude-code'")
-            .bind(agent_dir.to_str().unwrap())
-            .execute(&pool)
+        (&pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if id.as_str() == "claude-code" {
+                        row["global_skills_dir"] = serde_json::json!(agent_dir.to_str().unwrap());
+                    }
+                }
+                Ok(())
+            })
             .await
             .unwrap();
 
@@ -1149,18 +1138,37 @@ mod tests {
         fs::create_dir_all(&resource_dir).unwrap();
 
         let pool = setup_test_db().await;
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
-            .bind(central_dir.to_str().unwrap())
-            .execute(&pool)
+        (&pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if id.as_str() == "central" {
+                        row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
+                    }
+                }
+                Ok(())
+            })
             .await
             .unwrap();
-        sqlx::query("UPDATE agents SET is_enabled = 0 WHERE id != 'central'")
-            .execute(&pool)
+        (&pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if id.as_str() != "central" {
+                        row["is_enabled"] = serde_json::json!(false);
+                    }
+                }
+                Ok(())
+            })
             .await
             .unwrap();
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'cursor'")
-            .bind(central_dir.to_str().unwrap())
-            .execute(&pool)
+        (&pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if id.as_str() == "cursor" {
+                        row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
+                    }
+                }
+                Ok(())
+            })
             .await
             .unwrap();
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
@@ -1247,13 +1255,26 @@ mod tests {
         fs::create_dir_all(&resource_dir).unwrap();
 
         let pool = setup_test_db().await;
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
-            .bind(central_dir.to_str().unwrap())
-            .execute(&pool)
+        (&pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if id.as_str() == "central" {
+                        row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
+                    }
+                }
+                Ok(())
+            })
             .await
             .unwrap();
-        sqlx::query("UPDATE agents SET is_enabled = 0 WHERE id != 'central'")
-            .execute(&pool)
+        (&pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if id.as_str() != "central" {
+                        row["is_enabled"] = serde_json::json!(false);
+                    }
+                }
+                Ok(())
+            })
             .await
             .unwrap();
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())

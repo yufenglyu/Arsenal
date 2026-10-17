@@ -12,7 +12,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::Row;
+
 use std::{
     collections::{BTreeMap, HashSet},
     path::{Path, PathBuf},
@@ -202,32 +202,37 @@ async fn preview(pool: &DbPool, snapshot: &Snapshot) -> Result<RepositorySyncPre
     }
     let root = db::get_skill_resource_library_dir(pool).await?;
     report.document_changes = remote_sources::compare_files(
-        &repository_docs::files(&super::repository_address::directory(pool, &root, &snapshot.repo.owner, &format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo)).await?)?,
+        &repository_docs::files(
+            &super::repository_address::directory(
+                pool,
+                &root,
+                &snapshot.repo.owner,
+                &format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo),
+            )
+            .await?,
+        )?,
         &github::snapshot_readmes(&snapshot.contents),
     );
     Ok(report)
 }
 async fn persist_snapshot(pool: &DbPool, snapshot: &Snapshot) -> Result<String, String> {
     let payload = serde_json::to_string(snapshot).map_err(|e| e.to_string())?;
-    let used: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(length(payload)),0) FROM repository_mirror_snapshots",
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(|e| e.to_string())?;
-    if used as usize + payload.len() > 1024 * 1024 * 1024 {
+    let used = pool.read(|d| {
+        Ok(d.table("repository_mirror_snapshots")
+            .values()
+            .filter_map(|r| r["payload"].as_str())
+            .map(str::len)
+            .sum::<usize>())
+    })?;
+    if used + payload.len() > 1024 * 1024 * 1024 {
         return Err("SNAPSHOT_CACHE_FULL".into());
     }
     let id = uuid::Uuid::new_v4().to_string();
     let repository = format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo).to_lowercase();
-    sqlx::query("INSERT INTO repository_mirror_snapshots(id, repository, payload, digest, created_at) VALUES(?,?,?,?,?)")
-        .bind(&id).bind(&repository).bind(&payload).bind(digest(payload.as_bytes())).bind(chrono::Utc::now().to_rfc3339())
-        .execute(pool).await.map_err(|e|e.to_string())?;
-    sqlx::query("INSERT OR IGNORE INTO repository_mirrors(repository) VALUES(?)")
-        .bind(repository)
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    pool.write(|d| {
+        d.table_mut("repository_mirror_snapshots").insert(id.clone(), serde_json::json!({"id":id,"repository":repository,"payload":payload,"digest":digest(payload.as_bytes()),"created_at":chrono::Utc::now().to_rfc3339(),"state":"checked"}));
+        d.table_mut("repository_mirrors").entry(repository.clone()).or_insert_with(|| serde_json::json!({"repository":repository,"last_snapshot_id":null})); Ok(())
+    }).await?;
     Ok(id)
 }
 pub async fn check(
@@ -244,14 +249,13 @@ pub async fn check(
     let all = db::get_resource_library_skills(pool).await?;
     let sources = db::get_all_skill_sources(pool).await?;
     let mut groups = remote_sources::github_repo_source_groups(pool, false).await?;
-    for row in sqlx::query("SELECT repository FROM repository_mirrors")
-        .fetch_all(pool)
-        .await
-        .map_err(|e| e.to_string())?
-    {
-        groups
-            .entry(row.get::<String, _>("repository"))
-            .or_default();
+    for repository in pool.read(|d| {
+        Ok(d.table("repository_mirrors")
+            .values()
+            .filter_map(|r| r["repository"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>())
+    })? {
+        groups.entry(repository).or_default();
     }
     let scope = repositories.filter(|r| !r.is_empty()).map(|r| {
         r.into_iter()
@@ -393,24 +397,25 @@ pub(crate) async fn apply(pool: &DbPool, id: &str) -> Result<(), String> {
     let _guard = MIRROR_LOCK.lock().await;
     super::repository_address::recover(pool).await?;
     resume_interrupted(pool).await?;
-    let row = sqlx::query("SELECT payload,digest FROM repository_mirror_snapshots WHERE id=? AND state<>'invalidated'")
-        .bind(id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| e.to_string())?
+    let row = pool
+        .read(|d| {
+            Ok(d.table("repository_mirror_snapshots")
+                .get(id)
+                .filter(|r| r["state"] != "invalidated")
+                .cloned())
+        })?
         .ok_or("PREVIEW_EXPIRED")?;
-    let payload: String = row.get("payload");
-    if digest(payload.as_bytes()) != row.get::<String, _>("digest") {
+    let payload = row["payload"]
+        .as_str()
+        .ok_or("SNAPSHOT_UNAVAILABLE")?
+        .to_owned();
+    if digest(payload.as_bytes()) != row["digest"].as_str().ok_or("SNAPSHOT_UNAVAILABLE")? {
         return Err("SNAPSHOT_UNAVAILABLE".into());
     }
     let snapshot: Snapshot = serde_json::from_str(&payload).map_err(|_| "SNAPSHOT_UNAVAILABLE")?;
     let result = apply_contents(pool, id, &snapshot).await;
     if result.is_err() {
-        sqlx::query("UPDATE repository_mirror_snapshots SET state='failed' WHERE id=?")
-            .bind(id)
-            .execute(pool)
-            .await
-            .map_err(|e| e.to_string())?;
+        set_snapshot_state(pool, id, "failed").await?;
     }
     result
 }
@@ -470,7 +475,9 @@ async fn apply_contents(pool: &DbPool, id: &str, snapshot: &Snapshot) -> Result<
             return Err("LOCAL_IDENTITY_CHANGED: duplicate ownership".into());
         }
     }
-    let repository_directory = super::repository_address::directory(pool, &root, &snapshot.repo.owner, &repository).await?;
+    let repository_directory =
+        super::repository_address::directory(pool, &root, &snapshot.repo.owner, &repository)
+            .await?;
     let mut selections = Vec::new();
     let mut retained = HashSet::new();
     for candidate in &candidates {
@@ -478,9 +485,7 @@ async fn apply_contents(pool: &DbPool, id: &str, snapshot: &Snapshot) -> Result<
         let target = existing
             .and_then(|s| s.canonical_path.as_deref())
             .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                repository_directory.join(&candidate.skill_directory_name)
-            });
+            .unwrap_or_else(|| repository_directory.join(&candidate.skill_directory_name));
         ensure_owned_path(&root, &target)?;
         if existing.is_none() && target.exists() {
             return Err("LOCAL_IDENTITY_CHANGED: untracked target directory".into());
@@ -507,11 +512,7 @@ async fn apply_contents(pool: &DbPool, id: &str, snapshot: &Snapshot) -> Result<
         });
     }
     save_recovery(pool, id, &current).await?;
-    sqlx::query("UPDATE repository_mirror_snapshots SET state='applying' WHERE id=?")
-        .bind(id)
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    set_snapshot_state(pool, id, "applying").await?;
     if !selections.is_empty() {
         github::import_prepared_snapshot(
             pool,
@@ -574,22 +575,29 @@ async fn apply_contents(pool: &DbPool, id: &str, snapshot: &Snapshot) -> Result<
             .await?;
         }
     }
-    if repository_docs::files(&super::repository_address::directory(pool, &root, &snapshot.repo.owner, &format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo)).await?)?
-        != github::snapshot_readmes(&snapshot.contents)
+    if repository_docs::files(
+        &super::repository_address::directory(
+            pool,
+            &root,
+            &snapshot.repo.owner,
+            &format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo),
+        )
+        .await?,
+    )? != github::snapshot_readmes(&snapshot.contents)
     {
         return Err("WRITE_FAILED: repository document verification failed".into());
     }
-    sqlx::query("UPDATE repository_mirror_snapshots SET state='applied' WHERE id=?")
-        .bind(id)
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    sqlx::query("UPDATE repository_mirrors SET last_snapshot_id=? WHERE repository=?")
-        .bind(id)
-        .bind(repository.to_lowercase())
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    set_snapshot_state(pool, id, "applied").await?;
+    pool.write(|d| {
+        if let Some(row) = d
+            .table_mut("repository_mirrors")
+            .get_mut(&repository.to_ascii_lowercase())
+        {
+            row["last_snapshot_id"] = id.into();
+        }
+        Ok(())
+    })
+    .await?;
     Ok(())
 }
 pub(crate) fn ensure_owned_path(root: &Path, target: &Path) -> Result<(), String> {
@@ -614,12 +622,24 @@ pub(crate) fn ensure_owned_path(root: &Path, target: &Path) -> Result<(), String
 }
 
 pub(crate) async fn resume_interrupted(pool: &DbPool) -> Result<(), String> {
-    for row in sqlx::query("SELECT id,payload,digest FROM repository_mirror_snapshots WHERE state='applying' ORDER BY created_at").fetch_all(pool).await.map_err(|e|e.to_string())? {
-        let id:String=row.get("id"); let payload:String=row.get("payload");
-        if digest(payload.as_bytes()) != row.get::<String,_>("digest") {return Err("SNAPSHOT_UNAVAILABLE".into());}
-        let snapshot:Snapshot=serde_json::from_str(&payload).map_err(|_|"SNAPSHOT_UNAVAILABLE")?;
-        if let Err(error)=apply_contents(pool,&id,&snapshot).await {
-            sqlx::query("UPDATE repository_mirror_snapshots SET state='failed' WHERE id=?").bind(&id).execute(pool).await.map_err(|e|e.to_string())?;
+    let mut rows = pool.read(|d| {
+        Ok(d.table("repository_mirror_snapshots")
+            .values()
+            .filter(|r| r["state"] == "applying")
+            .cloned()
+            .collect::<Vec<_>>())
+    })?;
+    rows.sort_by(|a, b| a["created_at"].as_str().cmp(&b["created_at"].as_str()));
+    for row in rows {
+        let id = row["id"].as_str().ok_or("SNAPSHOT_UNAVAILABLE")?.to_owned();
+        let payload = row["payload"].as_str().ok_or("SNAPSHOT_UNAVAILABLE")?;
+        if digest(payload.as_bytes()) != row["digest"].as_str().ok_or("SNAPSHOT_UNAVAILABLE")? {
+            return Err("SNAPSHOT_UNAVAILABLE".into());
+        }
+        let snapshot: Snapshot =
+            serde_json::from_str(payload).map_err(|_| "SNAPSHOT_UNAVAILABLE")?;
+        if let Err(error) = apply_contents(pool, &id, &snapshot).await {
+            set_snapshot_state(pool, &id, "failed").await?;
             return Err(error);
         }
     }
@@ -631,25 +651,30 @@ mod tests {
     use super::*;
     async fn fixture() -> (tempfile::TempDir, DbPool, Snapshot) {
         let dir = tempfile::tempdir().unwrap();
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::DbPool::connect("sqlite::memory:").await.unwrap();
         db::init_database(&pool).await.unwrap();
-        sqlx::query("UPDATE agents SET is_enabled=0 WHERE id NOT IN ('central','claude-code')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::storage::fixtures::disable_except(&pool, &["central", "claude-code"]).await;
         db::set_skill_resource_library_dir(&pool, &dir.path().join("library").to_string_lossy())
             .await
             .unwrap();
-        sqlx::query("UPDATE agents SET global_skills_dir=? WHERE id='central'")
-            .bind(dir.path().join("central").to_string_lossy().as_ref())
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE agents SET global_skills_dir=? WHERE id='claude-code'")
-            .bind(dir.path().join("platform").to_string_lossy().as_ref())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("central") {
+                row["global_skills_dir"] =
+                    serde_json::json!(dir.path().join("central").to_string_lossy().as_ref());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("claude-code") {
+                row["global_skills_dir"] =
+                    serde_json::json!(dir.path().join("platform").to_string_lossy().as_ref());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
         let repo = github::GitHubRepoRef {
             owner: "example".into(),
             repo: "fixtures".into(),
@@ -747,10 +772,7 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_mirrors")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let count: i64 = crate::storage::fixtures::count(&pool, "repository_mirrors", None);
         assert_eq!(count, 1);
         apply(&pool, &id).await.unwrap();
     }
@@ -792,11 +814,14 @@ mod tests {
         assert!(report.modified.is_empty());
         assert_eq!(report.document_changes.len(), 1);
         let id = persist_snapshot(&pool, &next).await.unwrap();
-        sqlx::query("UPDATE repository_mirror_snapshots SET digest='bad' WHERE id=?")
-            .bind(&id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            d.table_mut("repository_mirror_snapshots")
+                .get_mut(&id)
+                .unwrap()["digest"] = "bad".into();
+            Ok(())
+        })
+        .await
+        .unwrap();
         assert_eq!(apply(&pool, &id).await.unwrap_err(), "SNAPSHOT_UNAVAILABLE");
         let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
         assert_eq!(
@@ -826,18 +851,23 @@ mod tests {
             b"incomplete"
         );
         let id = persist_snapshot(&pool, &snapshot).await.unwrap();
-        sqlx::query("UPDATE repository_mirror_snapshots SET state='applying' WHERE id=?")
-            .bind(&id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            d.table_mut("repository_mirror_snapshots")
+                .get_mut(&id)
+                .unwrap()["state"] = "applying".into();
+            Ok(())
+        })
+        .await
+        .unwrap();
         resume_interrupted(&pool).await.unwrap();
-        let state: String =
-            sqlx::query_scalar("SELECT state FROM repository_mirror_snapshots WHERE id=?")
-                .bind(id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let state: String = pool
+            .read(|d| {
+                Ok(d.table("repository_mirror_snapshots")[&id]["state"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned())
+            })
+            .unwrap();
         assert_eq!(state, "applied");
     }
     #[tokio::test]
@@ -956,66 +986,165 @@ mod tests {
         let id = persist_snapshot(&pool, &snapshot).await.unwrap();
         apply(&pool, &id).await.unwrap();
         let original = db::get_skill_by_id(&pool, "one").await.unwrap().unwrap();
-        db::upsert_skill_metadata(&pool, "one", Some("keep note"), &["keep tag".into()]).await.unwrap();
+        db::upsert_skill_metadata(&pool, "one", Some("keep note"), &["keep tag".into()])
+            .await
+            .unwrap();
         let collection = db::create_collection(&pool, "fixture", None).await.unwrap();
-        db::add_skill_to_collection(&pool, &collection.id, "one").await.unwrap();
-        linker::install_resource_skill_to_agent_impl(&pool, "one", "claude-code", "copy").await.unwrap();
-        let link = linker::add_resource_skill_to_central_impl(&pool, "one").await.unwrap();
-        let mut notebook = super::super::notebook_repository::Repository::new(1, "example/fixtures".into());
+        db::add_skill_to_collection(&pool, &collection.id, "one")
+            .await
+            .unwrap();
+        linker::install_resource_skill_to_agent_impl(&pool, "one", "claude-code", "copy")
+            .await
+            .unwrap();
+        let link = linker::add_resource_skill_to_central_impl(&pool, "one")
+            .await
+            .unwrap();
+        let mut notebook =
+            super::super::notebook_repository::Repository::new(1, "example/fixtures".into());
         notebook.notebook = "keep notebook".into();
-        super::super::notebook_repository::put(&pool, &notebook).await.unwrap();
-        linker::normalize_resource_backed_central_records_impl(&pool).await.unwrap();
+        super::super::notebook_repository::put(&pool, &notebook)
+            .await
+            .unwrap();
+        linker::normalize_resource_backed_central_records_impl(&pool)
+            .await
+            .unwrap();
         let project = _dir.path().join("project");
         std::fs::create_dir_all(&project).unwrap();
-        let project = db::add_scan_directory(&pool, &project.to_string_lossy(), Some("fixture project")).await.unwrap();
-        linker::install_resource_skill_to_agent_impl(&pool, "one", &format!("project:{}", project.id), "symlink").await.unwrap();
-        linker::install_resource_skill_to_agent_impl(&pool, "one", "claude-code", "copy").await.unwrap();
+        let project =
+            db::add_scan_directory(&pool, &project.to_string_lossy(), Some("fixture project"))
+                .await
+                .unwrap();
+        linker::install_resource_skill_to_agent_impl(
+            &pool,
+            "one",
+            &format!("project:{}", project.id),
+            "symlink",
+        )
+        .await
+        .unwrap();
+        linker::install_resource_skill_to_agent_impl(&pool, "one", "claude-code", "copy")
+            .await
+            .unwrap();
         let before_installs = db::get_skill_installations(&pool, "one").await.unwrap();
-        let copy = before_installs.iter().find(|item| item.link_type == "copy").unwrap();
-        std::fs::write(Path::new(&copy.installed_path).join("local-copy.txt"), "keep local copy until sync").unwrap();
-        super::super::repository_address::migrate(&pool, "example/fixtures", "new-owner/new-repo").await.unwrap();
+        let copy = before_installs
+            .iter()
+            .find(|item| item.link_type == "copy")
+            .unwrap();
+        std::fs::write(
+            Path::new(&copy.installed_path).join("local-copy.txt"),
+            "keep local copy until sync",
+        )
+        .unwrap();
+        super::super::repository_address::migrate(&pool, "example/fixtures", "new-owner/new-repo")
+            .await
+            .unwrap();
         assert_eq!(apply(&pool, &id).await.unwrap_err(), "PREVIEW_EXPIRED");
-        assert_eq!(db::get_skill_installations(&pool, "one").await.unwrap().len(), before_installs.len());
+        assert_eq!(
+            db::get_skill_installations(&pool, "one")
+                .await
+                .unwrap()
+                .len(),
+            before_installs.len()
+        );
         let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
         let moved = root.join("new-owner").join("new-repo").join("one");
         assert!(!Path::new(original.canonical_path.as_ref().unwrap()).exists());
         assert!(moved.join("SKILL.md").is_file());
-        assert!(Path::new(&copy.installed_path).join("local-copy.txt").is_file());
+        assert!(Path::new(&copy.installed_path)
+            .join("local-copy.txt")
+            .is_file());
         for install in &before_installs {
-            assert!(Path::new(&install.installed_path).join("SKILL.md").is_file());
-            if install.link_type == "symlink" { assert!(crate::path_utils::paths_resolve_to_same_entry(Path::new(&install.installed_path), &moved)); }
+            assert!(Path::new(&install.installed_path)
+                .join("SKILL.md")
+                .is_file());
+            if install.link_type == "symlink" {
+                assert!(crate::path_utils::paths_resolve_to_same_entry(
+                    Path::new(&install.installed_path),
+                    &moved
+                ));
+            }
         }
-        assert_eq!(std::fs::read(root.join("new-owner/new-repo/README.md")).unwrap(), b"remote docs");
-        assert!(skills::get_central_skills_impl(&pool).await.unwrap().iter().any(|skill| skill.id=="one"));
-        let saved = super::super::notebook_repository::get(&pool, 1).await.unwrap();
+        assert_eq!(
+            std::fs::read(root.join("new-owner/new-repo/README.md")).unwrap(),
+            b"remote docs"
+        );
+        assert!(skills::get_central_skills_impl(&pool)
+            .await
+            .unwrap()
+            .iter()
+            .any(|skill| skill.id == "one"));
+        let saved = super::super::notebook_repository::get(&pool, 1)
+            .await
+            .unwrap();
         assert_eq!(saved.repository_uid, notebook.repository_uid);
         assert_eq!(saved.notebook, notebook.notebook);
         assert_eq!(saved.full_name, "new-owner/new-repo");
         let mut next = capture(&pool, snapshot).await;
-        next.repo.owner = "new-owner".into(); next.repo.repo = "new-repo".into();
+        next.repo.owner = "new-owner".into();
+        next.repo.repo = "new-repo".into();
         next.repo.normalized_url = "https://github.com/new-owner/new-repo".into();
-        next.originals = remote_sources::github_repo_source_groups(&pool, false).await.unwrap().remove("new-owner/new-repo").unwrap();
-        next.contents.files.insert("skills/one/extra.txt".into(), b"new file".to_vec());
-        next.contents.files.insert("skills/three/SKILL.md".into(), b"---\nname: three\ndescription: third\n---\nnew".to_vec());
-        next.contents.files.insert("README.md".into(), b"new docs".to_vec());
+        next.originals = remote_sources::github_repo_source_groups(&pool, false)
+            .await
+            .unwrap()
+            .remove("new-owner/new-repo")
+            .unwrap();
+        next.contents
+            .files
+            .insert("skills/one/extra.txt".into(), b"new file".to_vec());
+        next.contents.files.insert(
+            "skills/three/SKILL.md".into(),
+            b"---\nname: three\ndescription: third\n---\nnew".to_vec(),
+        );
+        next.contents
+            .files
+            .insert("README.md".into(), b"new docs".to_vec());
         let id = persist_snapshot(&pool, &next).await.unwrap();
         apply(&pool, &id).await.unwrap();
         let after = db::get_skill_by_id(&pool, "one").await.unwrap().unwrap();
-        assert_eq!(after.canonical_path.as_deref(), Some(moved.to_string_lossy().as_ref()));
+        assert_eq!(
+            after.canonical_path.as_deref(),
+            Some(moved.to_string_lossy().as_ref())
+        );
         let metadata = db::get_skill_metadata(&pool, "one").await.unwrap();
-        assert_eq!(db::parse_skill_metadata_tags(metadata.as_ref()), vec!["keep tag"]);
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM collection_skills WHERE skill_id='one' AND collection_id=?").bind(&collection.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(
+            db::parse_skill_metadata_tags(metadata.as_ref()),
+            vec!["keep tag"]
+        );
+        let count: i64 = pool
+            .read(|d| {
+                Ok(d.table("collection_skills")
+                    .values()
+                    .filter(|r| r["skill_id"] == "one" && r["collection_id"] == collection.id)
+                    .count() as i64)
+            })
+            .unwrap();
         assert_eq!(count, 1);
-        assert_eq!(std::fs::read(Path::new(&link.central_path).join("extra.txt")).unwrap(), b"new file");
+        assert_eq!(
+            std::fs::read(Path::new(&link.central_path).join("extra.txt")).unwrap(),
+            b"new file"
+        );
         for install in db::get_skill_installations(&pool, "one").await.unwrap() {
-            assert_eq!(std::fs::read(Path::new(&install.installed_path).join("extra.txt")).unwrap(), b"new file");
+            assert_eq!(
+                std::fs::read(Path::new(&install.installed_path).join("extra.txt")).unwrap(),
+                b"new file"
+            );
         }
         let container = moved.parent().unwrap();
-        assert_eq!(std::fs::read(container.join("README.md")).unwrap(), b"new docs");
+        assert_eq!(
+            std::fs::read(container.join("README.md")).unwrap(),
+            b"new docs"
+        );
         let third = db::get_skill_by_id(&pool, "three").await.unwrap().unwrap();
-        assert_eq!(Path::new(third.canonical_path.as_ref().unwrap()).parent().unwrap(), container);
+        assert_eq!(
+            Path::new(third.canonical_path.as_ref().unwrap())
+                .parent()
+                .unwrap(),
+            container
+        );
         assert!(!root.join("example/fixtures").exists());
-        assert!(!Path::new(&copy.installed_path).join("local-copy.txt").exists());
+        assert!(!Path::new(&copy.installed_path)
+            .join("local-copy.txt")
+            .exists());
     }
 
     #[tokio::test]
@@ -1023,23 +1152,79 @@ mod tests {
         let (_dir, pool, snapshot) = fixture().await;
         let id = persist_snapshot(&pool, &snapshot).await.unwrap();
         apply(&pool, &id).await.unwrap();
-        sqlx::query("INSERT INTO repository_mirrors(repository) VALUES('new/repo')").execute(&pool).await.unwrap();
-        assert_eq!(super::super::repository_address::migrate(&pool, "example/fixtures", "new/repo").await.unwrap_err(), "addressConflict");
-        sqlx::query("UPDATE repository_mirror_snapshots SET state='applying' WHERE id=?").bind(&id).execute(&pool).await.unwrap();
-        assert_eq!(super::super::repository_address::migrate(&pool, "EXAMPLE/FIXTURES", "other/repo").await.unwrap_err(), "addressBusy");
-        assert_eq!(db::get_skill_source(&pool, "one").await.unwrap().unwrap().source_repo.as_deref(), Some("example/fixtures"));
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_local_directories").fetch_one(&pool).await.unwrap();
+        crate::storage::fixtures::insert(
+            &pool,
+            "repository_mirrors",
+            serde_json::json!({"repository":"new/repo"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            super::super::repository_address::migrate(&pool, "example/fixtures", "new/repo")
+                .await
+                .unwrap_err(),
+            "addressConflict"
+        );
+        pool.write(|d| {
+            d.table_mut("repository_mirror_snapshots")
+                .get_mut(&id)
+                .unwrap()["state"] = "applying".into();
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            super::super::repository_address::migrate(&pool, "EXAMPLE/FIXTURES", "other/repo")
+                .await
+                .unwrap_err(),
+            "addressBusy"
+        );
+        assert_eq!(
+            db::get_skill_source(&pool, "one")
+                .await
+                .unwrap()
+                .unwrap()
+                .source_repo
+                .as_deref(),
+            Some("example/fixtures")
+        );
+        let count: i64 =
+            crate::storage::fixtures::count(&pool, "repository_local_directories", None);
         assert_eq!(count, 0);
-        sqlx::query("UPDATE repository_mirror_snapshots SET state='applied' WHERE id=?").bind(&id).execute(&pool).await.unwrap();
-        sqlx::query("CREATE TRIGGER reject_address BEFORE INSERT ON repository_local_directories BEGIN SELECT RAISE(ABORT, 'fixture failure'); END").execute(&pool).await.unwrap();
-        assert_eq!(super::super::repository_address::migrate(&pool, "example/fixtures", "other/repo").await.unwrap_err(), "addressDatabase");
-        assert_eq!(db::get_skill_source(&pool, "one").await.unwrap().unwrap().source_repo.as_deref(), Some("example/fixtures"));
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_mirrors WHERE repository='example/fixtures'").fetch_one(&pool).await.unwrap();
+        pool.write(|d| {
+            d.table_mut("repository_mirror_snapshots")
+                .get_mut(&id)
+                .unwrap()["state"] = "applied".into();
+            Ok(())
+        })
+        .await
+        .unwrap();
+        pool.fail_table_write("repository_local_directories");
+        assert_eq!(
+            super::super::repository_address::migrate(&pool, "example/fixtures", "other/repo")
+                .await
+                .unwrap_err(),
+            "addressDatabase"
+        );
+        assert_eq!(
+            db::get_skill_source(&pool, "one")
+                .await
+                .unwrap()
+                .unwrap()
+                .source_repo
+                .as_deref(),
+            Some("example/fixtures")
+        );
+        let count: i64 = crate::storage::fixtures::count(
+            &pool,
+            "repository_mirrors",
+            Some(("repository", "example/fixtures")),
+        );
         assert_eq!(count, 1);
         let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
         assert!(root.join("example/fixtures/one/SKILL.md").is_file());
         assert!(!root.join("other/repo").exists());
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_address_moves").fetch_one(&pool).await.unwrap();
+        let count: i64 = crate::storage::fixtures::count(&pool, "repository_address_moves", None);
         assert_eq!(count, 0);
     }
 
@@ -1049,70 +1234,143 @@ mod tests {
         snapshot.contents.files.clear();
         let id = persist_snapshot(&pool, &snapshot).await.unwrap();
         apply(&pool, &id).await.unwrap();
-        super::super::repository_address::migrate(&pool, "example/fixtures", "next/repo").await.unwrap();
-        super::super::repository_address::migrate(&pool, "next/repo", "third/repo").await.unwrap();
+        super::super::repository_address::migrate(&pool, "example/fixtures", "next/repo")
+            .await
+            .unwrap();
+        super::super::repository_address::migrate(&pool, "next/repo", "third/repo")
+            .await
+            .unwrap();
         let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
-        assert_eq!(super::super::repository_address::directory(&pool, &root, "third", "third/repo").await.unwrap(), root.join("third").join("repo"));
+        assert_eq!(
+            super::super::repository_address::directory(&pool, &root, "third", "third/repo")
+                .await
+                .unwrap(),
+            root.join("third").join("repo")
+        );
     }
 
     #[tokio::test]
     async fn address_migration_rejects_existing_directory_without_touching_files() {
         let (_dir, pool, snapshot) = fixture().await;
-        let id = persist_snapshot(&pool, &snapshot).await.unwrap(); apply(&pool, &id).await.unwrap();
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
         let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
         std::fs::create_dir_all(root.join("occupied/repo")).unwrap();
         std::fs::write(root.join("occupied/repo/keep.txt"), "unrelated").unwrap();
-        assert_eq!(super::super::repository_address::migrate(&pool, "example/fixtures", "occupied/repo").await.unwrap_err(), "addressConflict");
-        assert_eq!(std::fs::read(root.join("occupied/repo/keep.txt")).unwrap(), b"unrelated");
+        assert_eq!(
+            super::super::repository_address::migrate(&pool, "example/fixtures", "occupied/repo")
+                .await
+                .unwrap_err(),
+            "addressConflict"
+        );
+        assert_eq!(
+            std::fs::read(root.join("occupied/repo/keep.txt")).unwrap(),
+            b"unrelated"
+        );
         assert!(root.join("example/fixtures/one/SKILL.md").is_file());
     }
 
     #[tokio::test]
     async fn address_migration_recovers_precommit_rename_before_scan() {
         let (_dir, pool, snapshot) = fixture().await;
-        let id = persist_snapshot(&pool, &snapshot).await.unwrap(); apply(&pool, &id).await.unwrap();
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
         let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
         let payload = serde_json::json!({"old":"example/fixtures","new":"new/repo","from":"example/fixtures","to":"new/repo","had_directory":true,"links":[]});
-        sqlx::query("INSERT INTO repository_address_moves(id,payload) VALUES('fixture',?)").bind(payload.to_string()).execute(&pool).await.unwrap();
+        crate::storage::fixtures::insert(
+            &pool,
+            "repository_address_moves",
+            serde_json::json!({"id":"fixture","payload":payload.to_string()}),
+        )
+        .await
+        .unwrap();
         std::fs::create_dir_all(root.join("new")).unwrap();
         std::fs::rename(root.join("example/fixtures"), root.join("new/repo")).unwrap();
-        assert!(matches!(skills::get_resource_library_skills_impl(&pool).await, Err(error) if error == "addressRecovery"));
+        assert!(
+            matches!(skills::get_resource_library_skills_impl(&pool).await, Err(error) if error == "addressRecovery")
+        );
         assert!(db::get_skill_by_id(&pool, "one").await.unwrap().is_some());
-        super::super::repository_address::recover(&pool).await.unwrap();
-        let skills = skills::get_resource_library_skills_impl(&pool).await.unwrap();
+        super::super::repository_address::recover(&pool)
+            .await
+            .unwrap();
+        let skills = skills::get_resource_library_skills_impl(&pool)
+            .await
+            .unwrap();
         assert_eq!(skills.len(), 2);
         assert!(skills.iter().any(|skill| skill.id == "one"));
         assert!(root.join("example/fixtures/one/SKILL.md").is_file());
         assert!(!root.join("new/repo").exists());
-        assert!(super::super::repository_address::recover(&pool).await.unwrap().is_empty());
+        assert!(super::super::repository_address::recover(&pool)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
     async fn address_migration_recovers_committed_move_and_interrupted_link_replacement() {
         let (_dir, pool, snapshot) = fixture().await;
-        let id = persist_snapshot(&pool, &snapshot).await.unwrap(); apply(&pool, &id).await.unwrap();
-        let link = linker::install_resource_skill_to_agent_impl(&pool,"one","claude-code","symlink").await.unwrap();
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let link =
+            linker::install_resource_skill_to_agent_impl(&pool, "one", "claude-code", "symlink")
+                .await
+                .unwrap();
         let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
-        let old = root.join("example").join("fixtures").join("one"); let new = root.join("new").join("repo").join("one");
-        let links = linker::prepare_installation_relocation_impl(&pool,"one",&old,&new).await.unwrap();
+        let old = root.join("example").join("fixtures").join("one");
+        let new = root.join("new").join("repo").join("one");
+        let links = linker::prepare_installation_relocation_impl(&pool, "one", &old, &new)
+            .await
+            .unwrap();
         let payload = serde_json::json!({"old":"example/fixtures","new":"new/repo","from":"example/fixtures","to":"new/repo","had_directory":true,"links":links});
         std::fs::create_dir_all(root.join("new")).unwrap();
-        std::fs::rename(root.join("example/fixtures"),root.join("new/repo")).unwrap();
-        sqlx::query("UPDATE skills SET canonical_path=?,file_path=? WHERE id='one'").bind(new.to_string_lossy().as_ref()).bind(new.join("SKILL.md").to_string_lossy().as_ref()).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO repository_address_moves(id,payload,committed) VALUES('fixture',?,1)").bind(payload.to_string()).execute(&pool).await.unwrap();
+        std::fs::rename(root.join("example/fixtures"), root.join("new/repo")).unwrap();
+        pool.write(|d| {
+            let row = d.table_mut("skills").get_mut("one").unwrap();
+            row["canonical_path"] = serde_json::json!(new.to_string_lossy());
+            row["file_path"] = serde_json::json!(new.join("SKILL.md").to_string_lossy());
+            Ok(())
+        })
+        .await
+        .unwrap();
+        crate::storage::fixtures::insert(
+            &pool,
+            "repository_address_moves",
+            serde_json::json!({"id":"fixture","payload":payload.to_string(),"committed":true}),
+        )
+        .await
+        .unwrap();
         crate::path_utils::remove_symlink_path(Path::new(&link.symlink_path)).unwrap();
         // A foreign entry is never removed by recovery.
         std::fs::create_dir(&link.symlink_path).unwrap();
         std::fs::write(Path::new(&link.symlink_path).join("keep.txt"), "foreign").unwrap();
-        assert_eq!(super::super::repository_address::recover(&pool).await.unwrap_err(), "addressRecovery");
-        assert_eq!(std::fs::read(Path::new(&link.symlink_path).join("keep.txt")).unwrap(), b"foreign");
+        assert_eq!(
+            super::super::repository_address::recover(&pool)
+                .await
+                .unwrap_err(),
+            "addressRecovery"
+        );
+        assert_eq!(
+            std::fs::read(Path::new(&link.symlink_path).join("keep.txt")).unwrap(),
+            b"foreign"
+        );
         std::fs::remove_file(Path::new(&link.symlink_path).join("keep.txt")).unwrap();
         std::fs::remove_dir(&link.symlink_path).unwrap();
-        assert_eq!(super::super::repository_address::recover(&pool).await.unwrap(), vec![("example/fixtures".into(),"new/repo".into())]);
-        assert!(crate::path_utils::paths_resolve_to_same_entry(Path::new(&link.symlink_path), &new));
-        let records = db::get_skill_installations(&pool,"one").await.unwrap();
+        assert_eq!(
+            super::super::repository_address::recover(&pool)
+                .await
+                .unwrap(),
+            vec![("example/fixtures".into(), "new/repo".into())]
+        );
+        assert!(crate::path_utils::paths_resolve_to_same_entry(
+            Path::new(&link.symlink_path),
+            &new
+        ));
+        let records = db::get_skill_installations(&pool, "one").await.unwrap();
         assert_eq!(records[0].installed_path, link.symlink_path);
-        assert_eq!(records[0].symlink_target.as_deref(), Some(new.to_string_lossy().as_ref()));
+        assert_eq!(
+            records[0].symlink_target.as_deref(),
+            Some(new.to_string_lossy().as_ref())
+        );
         assert!(!root.join("example/fixtures").exists());
     }
 
@@ -1147,13 +1405,7 @@ async fn save_recovery(
     id: &str,
     group: &[(db::SkillSource, db::Skill)],
 ) -> Result<(), String> {
-    let exists: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM repository_mirror_recovery WHERE snapshot_id=?")
-            .bind(id)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| e.to_string())?;
-    if exists > 0 {
+    if pool.read(|d| Ok(d.table("repository_mirror_recovery").contains_key(id)))? {
         return Ok(());
     }
     let mut items = Vec::new();
@@ -1174,22 +1426,25 @@ async fn save_recovery(
                 copies.push(serde_json::json!({"installation":installation,"files":remote_sources::local_skill_files(Path::new(&installation.installed_path))?}));
             }
         }
-        let metadata=sqlx::query("SELECT notes,tags FROM skill_metadata WHERE skill_id=?").bind(&skill.id).fetch_optional(pool).await.map_err(|e|e.to_string())?.map(|r|serde_json::json!({"notes":r.get::<Option<String>,_>("notes"),"tags":r.get::<String,_>("tags")}));
-        let collections: Vec<String> =
-            sqlx::query_scalar("SELECT collection_id FROM collection_skills WHERE skill_id=?")
-                .bind(&skill.id)
-                .fetch_all(pool)
-                .await
-                .map_err(|e| e.to_string())?;
+        let metadata = pool.read(|d| Ok(d.table("skill_metadata").get(&skill.id).cloned()))?;
+        let collections = pool.read(|d| {
+            Ok(d.table("collection_skills")
+                .values()
+                .filter(|r| r["skill_id"] == skill.id)
+                .filter_map(|r| r["collection_id"].as_str().map(str::to_owned))
+                .collect::<Vec<_>>())
+        })?;
         items.push(serde_json::json!({"source":source,"skill":skill,"files":files,"installations":installations,"copies":copies,"metadata":metadata,"collections":collections}));
     }
     let payload = serde_json::to_string(&items).map_err(|e| e.to_string())?;
-    sqlx::query("INSERT INTO repository_mirror_recovery(snapshot_id,payload) VALUES(?,?)")
-        .bind(id)
-        .bind(payload)
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    pool.write(|d| {
+        d.table_mut("repository_mirror_recovery").insert(
+            id.to_owned(),
+            serde_json::json!({"snapshot_id":id,"payload":payload}),
+        );
+        Ok(())
+    })
+    .await?;
     Ok(())
 }
 
@@ -1201,13 +1456,31 @@ pub async fn release_repository_snapshots(
 ) -> Result<(), MirrorError> {
     let _guard = MIRROR_LOCK.lock().await;
     for id in snapshot_ids {
-        sqlx::query("DELETE FROM repository_mirror_snapshots WHERE id=? AND state <> 'applying'")
-            .bind(id)
-            .execute(&state.db)
+        state
+            .db
+            .write(|d| {
+                if d.table("repository_mirror_snapshots")
+                    .get(&id)
+                    .is_some_and(|r| r["state"] != "applying")
+                {
+                    d.table_mut("repository_mirror_snapshots").remove(&id);
+                }
+                Ok(())
+            })
             .await
             .map_err(|_| MirrorError {
                 code: "WRITE_FAILED",
             })?;
     }
     Ok(())
+}
+
+async fn set_snapshot_state(pool: &DbPool, id: &str, state: &str) -> Result<(), String> {
+    pool.write(|d| {
+        if let Some(row) = d.table_mut("repository_mirror_snapshots").get_mut(id) {
+            row["state"] = state.into();
+        }
+        Ok(())
+    })
+    .await
 }

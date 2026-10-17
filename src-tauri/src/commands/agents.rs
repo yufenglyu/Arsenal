@@ -91,9 +91,17 @@ fn agent_to_with_status(agent: Agent, central_root: Option<&str>) -> AgentWithSt
     }
 }
 
-async fn refresh_agent_status(pool: &DbPool, agent: Agent, central_root: Option<&str>) -> Result<AgentWithStatus, String> {
+async fn refresh_agent_status(
+    pool: &DbPool,
+    agent: Agent,
+    central_root: Option<&str>,
+) -> Result<AgentWithStatus, String> {
     let mut status = agent_to_with_status(agent, central_root);
-    if !status.is_detected && status.is_enabled && status.id != "central" && !status.id.starts_with("project:") {
+    if !status.is_detected
+        && status.is_enabled
+        && status.id != "central"
+        && !status.id.starts_with("project:")
+    {
         db::set_agent_enabled(pool, &status.id, false).await?;
         status.is_enabled = false;
     }
@@ -307,7 +315,7 @@ pub async fn set_agent_enabled(
 mod tests {
     use super::*;
     use crate::db;
-    use sqlx::SqlitePool;
+    use crate::db::DbPool as SqlitePool;
     use std::fs;
     use tempfile::TempDir;
 
@@ -366,11 +374,14 @@ mod tests {
         let pool = setup_test_db().await;
 
         // Point claude-code's skills dir at the existing temp directory.
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'claude-code'")
-            .bind(tmp.path().to_str().unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("claude-code") {
+                row["global_skills_dir"] = serde_json::json!(tmp.path().to_str().unwrap());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let agents = get_agents_impl(&pool).await.unwrap();
         let claude = agents.iter().find(|a| a.id == "claude-code").unwrap();
@@ -385,11 +396,14 @@ mod tests {
         let pool = setup_test_db().await;
 
         // Point claude-code at a path whose parent also doesn't exist.
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'claude-code'")
-            .bind("/nonexistent/deep/path/skills")
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("claude-code") {
+                row["global_skills_dir"] = serde_json::json!("/nonexistent/deep/path/skills");
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let agents = get_agents_impl(&pool).await.unwrap();
         let claude = agents.iter().find(|a| a.id == "claude-code").unwrap();
@@ -398,8 +412,13 @@ mod tests {
             "claude-code should not be detected when dir and parent both missing"
         );
         assert!(!claude.is_enabled);
-        assert!(!db::get_agent_by_id(&pool, "claude-code").await.unwrap().unwrap().is_enabled);
-
+        assert!(
+            !db::get_agent_by_id(&pool, "claude-code")
+                .await
+                .unwrap()
+                .unwrap()
+                .is_enabled
+        );
     }
 
     #[tokio::test]
@@ -409,16 +428,22 @@ mod tests {
         fs::create_dir_all(&central).unwrap();
         let pool = setup_test_db().await;
 
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
-            .bind(central.to_str().unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'cursor'")
-            .bind(central.to_str().unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("central") {
+                row["global_skills_dir"] = serde_json::json!(central.to_str().unwrap());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("cursor") {
+                row["global_skills_dir"] = serde_json::json!(central.to_str().unwrap());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let agents = get_agents_impl(&pool).await.unwrap();
         let cursor = agents.iter().find(|agent| agent.id == "cursor").unwrap();
@@ -439,18 +464,24 @@ mod tests {
         fs::create_dir_all(&central).unwrap();
         let pool = setup_test_db().await;
 
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
-            .bind(central.to_str().unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("central") {
+                row["global_skills_dir"] = serde_json::json!(central.to_str().unwrap());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let trailing = format!("{}/", central.to_str().unwrap().replace('\\', "/"));
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'cursor'")
-            .bind(&trailing)
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("cursor") {
+                row["global_skills_dir"] = serde_json::json!(&trailing);
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let agents = get_agents_impl(&pool).await.unwrap();
         let cursor = agents.iter().find(|agent| agent.id == "cursor").unwrap();
@@ -462,11 +493,14 @@ mod tests {
         #[cfg(windows)]
         {
             let prefixed = format!(r"\\?\{}", central.to_str().unwrap());
-            sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'claude-code'")
-                .bind(&prefixed)
-                .execute(&pool)
-                .await
-                .unwrap();
+            pool.write(|d| {
+                if let Some(row) = d.table_mut("agents").get_mut("claude-code") {
+                    row["global_skills_dir"] = serde_json::json!(&prefixed);
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
             let agents = get_agents_impl(&pool).await.unwrap();
             let claude = agents
                 .iter()
@@ -487,16 +521,22 @@ mod tests {
         fs::create_dir_all(&nested).unwrap();
         let pool = setup_test_db().await;
 
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
-            .bind(central.to_str().unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'cursor'")
-            .bind(nested.to_str().unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("central") {
+                row["global_skills_dir"] = serde_json::json!(central.to_str().unwrap());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("cursor") {
+                row["global_skills_dir"] = serde_json::json!(nested.to_str().unwrap());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let agents = get_agents_impl(&pool).await.unwrap();
         let cursor = agents.iter().find(|agent| agent.id == "cursor").unwrap();
@@ -513,19 +553,25 @@ mod tests {
         fs::create_dir_all(&central).unwrap();
         let pool = setup_test_db().await;
 
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
-            .bind(central.to_str().unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("central") {
+                row["global_skills_dir"] = serde_json::json!(central.to_str().unwrap());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let independent = tmp.path().join("cursor-skills");
         fs::create_dir_all(&independent).unwrap();
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'cursor'")
-            .bind(independent.to_str().unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("cursor") {
+                row["global_skills_dir"] = serde_json::json!(independent.to_str().unwrap());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let before = get_agents_impl(&pool).await.unwrap();
         assert!(
@@ -558,11 +604,14 @@ mod tests {
         let pool = setup_test_db().await;
 
         // Point claude-code at a real directory.
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'claude-code'")
-            .bind(tmp.path().to_str().unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
+        pool.write(|d| {
+            if let Some(row) = d.table_mut("agents").get_mut("claude-code") {
+                row["global_skills_dir"] = serde_json::json!(tmp.path().to_str().unwrap());
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         // Initially not detected in DB.
         let before = db::get_agent_by_id(&pool, "claude-code")
@@ -748,30 +797,9 @@ mod tests {
     async fn test_update_custom_agent_changes_id_and_reassigns_installations() {
         let pool = setup_test_db().await;
         add_test_custom_agent(&pool, "old-platform").await;
-        sqlx::query(
-            "INSERT INTO skills
-             (id, name, description, file_path, canonical_path, is_central, source, scanned_at)
-             VALUES ('installed-skill', 'installed-skill', '', '/tmp/skill/SKILL.md', '/tmp/skill/SKILL.md', 0, 'local', datetime('now'))",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO skill_installations
-             (skill_id, agent_id, installed_path, link_type, symlink_target, is_managed, created_at)
-             VALUES ('installed-skill', 'old-platform', '/tmp/old-platform/installed-skill', 'symlink', '/tmp/skill', 1, datetime('now'))",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO agent_skill_observations
-             (row_id, agent_id, skill_id, name, description, file_path, dir_path, source_kind, source_root, link_type, scanned_at)
-             VALUES ('old-platform::/tmp/skill', 'old-platform', 'installed-skill', 'installed-skill', '', '/tmp/skill/SKILL.md', '/tmp/skill', 'direct', '/tmp/old-platform/skills', 'symlink', datetime('now'))",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        crate::storage::fixtures::insert(&pool, "skills", serde_json::json!({"id":"installed-skill","name":"installed-skill","description":"","file_path":"/tmp/skill/SKILL.md","canonical_path":"/tmp/skill/SKILL.md","is_central":false,"source":"local","scanned_at":chrono::Utc::now().to_rfc3339()})).await.unwrap();
+        crate::storage::fixtures::insert(&pool, "skill_installations", serde_json::json!({"skill_id":"installed-skill","agent_id":"old-platform","installed_path":"/tmp/old-platform/installed-skill","link_type":"symlink","symlink_target":"/tmp/skill","is_managed":true,"created_at":chrono::Utc::now().to_rfc3339()})).await.unwrap();
+        crate::storage::fixtures::insert(&pool, "agent_skill_observations", serde_json::json!({"row_id":"old-platform::/tmp/skill","agent_id":"old-platform","skill_id":"installed-skill","name":"installed-skill","description":"","file_path":"/tmp/skill/SKILL.md","dir_path":"/tmp/skill","source_kind":"direct","source_root":"/tmp/old-platform/skills","link_type":"symlink","scanned_at":chrono::Utc::now().to_rfc3339()})).await.unwrap();
 
         let updated = update_custom_agent_impl(
             &pool,
@@ -795,12 +823,17 @@ mod tests {
             .unwrap()
             .iter()
             .any(|installation| installation.agent_id == "new-platform"));
-        let observation_agent_id: String = sqlx::query_scalar(
-            "SELECT agent_id FROM agent_skill_observations WHERE skill_id = 'installed-skill'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let observation_agent_id: String = pool
+            .read(|d| {
+                Ok(d.table("agent_skill_observations")
+                    .values()
+                    .find(|r| r["skill_id"] == "installed-skill")
+                    .unwrap()["agent_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned())
+            })
+            .unwrap();
         assert_eq!(observation_agent_id, "new-platform");
     }
 

@@ -506,7 +506,9 @@ fn symlink_target_dir(path: &Path) -> Option<PathBuf> {
     // Resolve the full installation -> shared hub -> repository chain.
     // Keep the installation entry separate so the UI can show both locations.
     if let Ok(resolved) = std::fs::canonicalize(path) {
-        return Some(PathBuf::from(crate::path_utils::path_for_file_manager(&resolved)));
+        return Some(PathBuf::from(crate::path_utils::path_for_file_manager(
+            &resolved,
+        )));
     }
 
     let target = std::fs::read_link(path).ok()?;
@@ -1355,8 +1357,16 @@ async fn shared_agent_ids_for_skill(
     if is_central {
         let central = db::get_agent_by_id(pool, "central").await?;
         for agent in db::get_all_agents(pool).await? {
-            if agent.id != "central" && agent.is_enabled && (db::agent_supports_universal_agents_skills(&agent.id)
-                || central.as_ref().is_some_and(|central| paths_resolve_to_same_entry(Path::new(&agent.global_skills_dir), Path::new(&central.global_skills_dir)))) {
+            if agent.id != "central"
+                && agent.is_enabled
+                && (db::agent_supports_universal_agents_skills(&agent.id)
+                    || central.as_ref().is_some_and(|central| {
+                        paths_resolve_to_same_entry(
+                            Path::new(&agent.global_skills_dir),
+                            Path::new(&central.global_skills_dir),
+                        )
+                    }))
+            {
                 agent_ids.insert(agent.id);
             }
         }
@@ -1365,8 +1375,15 @@ async fn shared_agent_ids_for_skill(
     Ok(agent_ids.into_iter().collect())
 }
 
-async fn read_only_agent_ids_for_skill(pool: &DbPool, skill_id: &str, is_central: bool) -> Result<Vec<String>, String> {
-    let mut agent_ids: BTreeSet<String> = shared_agent_ids_for_skill(pool, skill_id, is_central).await?.into_iter().collect();
+async fn read_only_agent_ids_for_skill(
+    pool: &DbPool,
+    skill_id: &str,
+    is_central: bool,
+) -> Result<Vec<String>, String> {
+    let mut agent_ids: BTreeSet<String> = shared_agent_ids_for_skill(pool, skill_id, is_central)
+        .await?
+        .into_iter()
+        .collect();
     for installation in db::get_skill_installations(pool, skill_id).await? {
         agent_ids.remove(&installation.agent_id);
     }
@@ -1859,11 +1876,21 @@ pub(crate) async fn get_central_skills_impl(pool: &DbPool) -> Result<Vec<SkillWi
     // A relocated resource remains the primary DB record; expose its managed
     // central link as a view without moving that primary identity back again.
     for (id, installed_path) in db::managed_central_paths(pool).await? {
-        if skills.iter().any(|skill| skill.id == id) { continue; }
+        if skills.iter().any(|skill| skill.id == id) {
+            continue;
+        }
         if let Some(mut skill) = db::get_skill_by_id(pool, &id).await? {
             let path = PathBuf::from(installed_path);
-            if !path.join("SKILL.md").is_file() || !std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink()) { continue; }
-            if !skill.canonical_path.as_ref().is_some_and(|source| crate::path_utils::paths_resolve_to_same_entry(&path, Path::new(source))) { continue; }
+            if !path.join("SKILL.md").is_file()
+                || !std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink())
+            {
+                continue;
+            }
+            if !skill.canonical_path.as_ref().is_some_and(|source| {
+                crate::path_utils::paths_resolve_to_same_entry(&path, Path::new(source))
+            }) {
+                continue;
+            }
             skill.file_path = path.join("SKILL.md").to_string_lossy().into_owned();
             skill.canonical_path = Some(path.to_string_lossy().into_owned());
             skill.is_central = true;
@@ -1871,7 +1898,9 @@ pub(crate) async fn get_central_skills_impl(pool: &DbPool) -> Result<Vec<SkillWi
         }
     }
     let mut result = Vec::with_capacity(skills.len());
-    for skill in skills { result.push(skill_with_links(pool, skill).await?); }
+    for skill in skills {
+        result.push(skill_with_links(pool, skill).await?);
+    }
     Ok(result)
 }
 
@@ -1978,8 +2007,9 @@ pub async fn export_resource_skill_directory_list(
     }
 
     let exported_count = rows.len();
-    let mut csv =
-        String::from("Directory,Skill Count,Skills,Source Repositories,Source Paths,Local Path,GitHub Stars\n");
+    let mut csv = String::from(
+        "Directory,Skill Count,Skills,Source Repositories,Source Paths,Local Path,GitHub Stars\n",
+    );
     for (relative, mut grouped_skills) in rows {
         grouped_skills.sort_by(|left, right| left.name.cmp(&right.name));
         let skill_names = grouped_skills
@@ -2013,7 +2043,16 @@ pub async fn export_resource_skill_directory_list(
             csv_cell(&source_repos),
             csv_cell(&source_paths),
             csv_cell(local_path),
-            csv_cell(&grouped_skills.iter().filter_map(|skill| skill.github_stars).map(|stars| stars.to_string()).collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>().join("; "))
+            csv_cell(
+                &grouped_skills
+                    .iter()
+                    .filter_map(|skill| skill.github_stars)
+                    .map(|stars| stars.to_string())
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )
         ));
     }
 
@@ -2325,9 +2364,20 @@ async fn add_resource_skills_from_local_dir_impl(
     }
 
     let (import_kind, collection_name, candidates) = discover_local_skill_candidates(&source_dir)?;
-    let candidates=candidates.into_iter().filter(|candidate|input.selected_skill_ids.as_ref().is_none_or(|ids|ids.contains(&candidate.skill_id))).collect::<Vec<_>>();
-    if candidates.is_empty(){return Err("No importable skills were selected".into());}
-    let mut files_transaction=super::github_import::ImportDirectoryTransaction::new(&resource_root)?;
+    let candidates = candidates
+        .into_iter()
+        .filter(|candidate| {
+            input
+                .selected_skill_ids
+                .as_ref()
+                .is_none_or(|ids| ids.contains(&candidate.skill_id))
+        })
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return Err("No importable skills were selected".into());
+    }
+    let mut files_transaction =
+        super::github_import::ImportDirectoryTransaction::new(&resource_root)?;
     let mut skipped_skills = Vec::new();
 
     for candidate in &candidates {
@@ -2341,24 +2391,35 @@ async fn add_resource_skills_from_local_dir_impl(
             &candidate.relative_dir,
         )?;
         if target_dir.exists() && !input.overwrite {
-            skipped_skills.push(candidate.skill_id.clone());continue;
+            skipped_skills.push(candidate.skill_id.clone());
+            continue;
         }
-        let staged=files_transaction.root.join(format!("new-{}",candidate.skill_id));
-        copy_dir_all(&candidate.source_dir,&staged)?;
-        if parse_skill_md(&staged.join("SKILL.md")).is_none(){return Err("Invalid local SKILL.md; existing files were preserved".into());}
-        files_transaction.install(&staged,&target_dir,input.overwrite)?;
-
+        let staged = files_transaction
+            .root
+            .join(format!("new-{}", candidate.skill_id));
+        copy_dir_all(&candidate.source_dir, &staged)?;
+        if parse_skill_md(&staged.join("SKILL.md")).is_none() {
+            return Err("Invalid local SKILL.md; existing files were preserved".into());
+        }
+        files_transaction.install(&staged, &target_dir, input.overwrite)?;
     }
 
     if skipped_skills.len() < candidates.len() {
         let mut directory = resource_root.clone();
-        for segment in target_base_segments { directory.push(segment); }
+        for segment in target_base_segments {
+            directory.push(segment);
+        }
         if preserve_collection_folder {
-            if let Some(name) = collection_name.as_deref() { directory.push(name); }
+            if let Some(name) = collection_name.as_deref() {
+                directory.push(name);
+            }
         }
         for (index, (name, bytes)) in repository_docs::files(&source_dir)?.into_iter().enumerate() {
-            let staged = files_transaction.root.join(format!("repository-readme-{index}"));
-            std::fs::write(&staged, bytes).map_err(|e| format!("Failed to stage repository README: {e}"))?;
+            let staged = files_transaction
+                .root
+                .join(format!("repository-readme-{index}"));
+            std::fs::write(&staged, bytes)
+                .map_err(|e| format!("Failed to stage repository README: {e}"))?;
             files_transaction.install(&staged, &directory.join(name), true)?;
         }
     }
@@ -2424,19 +2485,40 @@ async fn add_resource_skills_from_local_dir_impl(
 }
 
 #[derive(Serialize)]
-#[serde(rename_all="camelCase")]
-pub struct LocalImportPreviewItem {skill_id:String,name:String,conflict:bool}
+#[serde(rename_all = "camelCase")]
+pub struct LocalImportPreviewItem {
+    skill_id: String,
+    name: String,
+    conflict: bool,
+}
 #[tauri::command]
-pub async fn preview_local_resource_skills(state:State<'_,AppState>,source_dir:String)->Result<Vec<LocalImportPreviewItem>,String>{
-    let source=PathBuf::from(source_dir).canonicalize().map_err(|e|e.to_string())?;
-    let root=resource_root_path(&state.db).await?;
-    if source.starts_with(&root){return Err("Local source is already in the library".into());}
-    let (_,collection,candidates)=discover_local_skill_candidates(&source)?;
-    let mut result=Vec::new();
+pub async fn preview_local_resource_skills(
+    state: State<'_, AppState>,
+    source_dir: String,
+) -> Result<Vec<LocalImportPreviewItem>, String> {
+    let source = PathBuf::from(source_dir)
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    let root = resource_root_path(&state.db).await?;
+    if source.starts_with(&root) {
+        return Err("Local source is already in the library".into());
+    }
+    let (_, collection, candidates) = discover_local_skill_candidates(&source)?;
+    let mut result = Vec::new();
     for candidate in candidates {
-        let info=parse_skill_md(&candidate.source_dir.join("SKILL.md")).ok_or("Invalid SKILL.md")?;
-        let target=resource_target_dir(&root,&["local".into()],collection.as_deref(),&candidate.relative_dir)?;
-        result.push(LocalImportPreviewItem{skill_id:candidate.skill_id,name:info.name,conflict:target.exists()});
+        let info =
+            parse_skill_md(&candidate.source_dir.join("SKILL.md")).ok_or("Invalid SKILL.md")?;
+        let target = resource_target_dir(
+            &root,
+            &["local".into()],
+            collection.as_deref(),
+            &candidate.relative_dir,
+        )?;
+        result.push(LocalImportPreviewItem {
+            skill_id: candidate.skill_id,
+            name: info.name,
+            conflict: target.exists(),
+        });
     }
     Ok(result)
 }
@@ -2489,7 +2571,9 @@ async fn sync_resource_library_skills(
     pool: &DbPool,
     resource_root: &Path,
 ) -> Result<Vec<super::scanner::ScannedSkill>, String> {
-    if db::has_pending_address_moves(pool).await? { return Err("addressRecovery".into()); }
+    if db::has_pending_address_moves(pool).await? {
+        return Err("addressRecovery".into());
+    }
 
     std::fs::create_dir_all(resource_root)
         .map_err(|e| format!("Failed to create Skill Resource Library directory: {}", e))?;
@@ -3220,11 +3304,17 @@ pub async fn delete_resource_skill_impl(
     let missing = matches!(std::fs::symlink_metadata(&requested), Err(error) if error.kind() == std::io::ErrorKind::NotFound);
     let delete_target = if missing {
         // A previous interrupted delete may have removed the directory before its SQL commit.
-        let parent = requested.parent().ok_or("Invalid resource directory")?.canonicalize().map_err(|e|e.to_string())?;
+        let parent = requested
+            .parent()
+            .ok_or("Invalid resource directory")?
+            .canonicalize()
+            .map_err(|e| e.to_string())?;
         let target = parent.join(requested.file_name().ok_or("Invalid resource directory")?);
         ensure_under_resource_root(&target, &resource_root)?;
         target
-    } else { validate_resource_delete_target(&requested, &resource_root)? };
+    } else {
+        validate_resource_delete_target(&requested, &resource_root)?
+    };
 
     let installations = db::get_skill_installations(pool, skill_id).await?;
     if !options.cascade_uninstall && !installations.is_empty() {
@@ -3246,7 +3336,9 @@ pub async fn delete_resource_skill_impl(
         }
     }
 
-    if !missing { remove_resource_skill_dir(&delete_target)?; }
+    if !missing {
+        remove_resource_skill_dir(&delete_target)?;
+    }
     db::delete_skill_owned_records(pool, skill_id, &skill.name).await?;
 
     Ok(DeleteResourceSkillResult {
@@ -3302,21 +3394,39 @@ pub async fn read_skill_content(
 }
 
 fn repository_readme_path(directory: &Path) -> Result<Option<PathBuf>, String> {
-    if !directory.exists() { return Ok(None); }
-    let mut paths = std::fs::read_dir(directory).map_err(|e| format!("Failed to inspect repository documentation: {e}"))?
-        .filter_map(Result::ok).filter(|entry| entry.file_name().to_string_lossy().eq_ignore_ascii_case("README.md"))
+    if !directory.exists() {
+        return Ok(None);
+    }
+    let mut paths = std::fs::read_dir(directory)
+        .map_err(|e| format!("Failed to inspect repository documentation: {e}"))?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case("README.md")
+        })
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
-        .map(|entry| entry.path()).collect::<Vec<_>>();
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
     paths.sort();
     Ok(paths.into_iter().next())
 }
 
 pub(crate) fn read_repository_readme_impl(directory: &Path) -> Result<Option<String>, String> {
-    repository_readme_path(directory)?.map(|path| std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read repository README: {e}"))).transpose()
+    repository_readme_path(directory)?
+        .map(|path| {
+            std::fs::read_to_string(path)
+                .map_err(|e| format!("Failed to read repository README: {e}"))
+        })
+        .transpose()
 }
 
-pub(crate) async fn repository_document_directory(pool: &DbPool, directory: String, skill_id: Option<String>) -> Result<PathBuf, String> {
+pub(crate) async fn repository_document_directory(
+    pool: &DbPool,
+    directory: String,
+    skill_id: Option<String>,
+) -> Result<PathBuf, String> {
     // Shared/platform views install skill links, so read their repository document
     // from the main resource library instead of requiring a second installed copy.
     if let Some(id) = skill_id {
@@ -3326,7 +3436,9 @@ pub(crate) async fn repository_document_directory(pool: &DbPool, directory: Stri
             if let Some(path) = skill.canonical_path {
                 let path = PathBuf::from(path);
                 let path = path.canonicalize().unwrap_or(path);
-                if let Some(repository) = repository_docs::group_directory(&root, &path) { return Ok(repository); }
+                if let Some(repository) = repository_docs::group_directory(&root, &path) {
+                    return Ok(repository);
+                }
             }
         }
     }
@@ -3334,13 +3446,21 @@ pub(crate) async fn repository_document_directory(pool: &DbPool, directory: Stri
 }
 
 #[tauri::command]
-pub async fn read_repository_readme(state: State<'_, AppState>, directory: String, skill_id: Option<String>) -> Result<Option<String>, String> {
+pub async fn read_repository_readme(
+    state: State<'_, AppState>,
+    directory: String,
+    skill_id: Option<String>,
+) -> Result<Option<String>, String> {
     let directory = repository_document_directory(&state.db, directory, skill_id).await?;
     read_repository_readme_impl(&directory)
 }
 
 #[tauri::command]
-pub async fn read_repository_documents(state: State<'_, AppState>, directory: String, skill_id: Option<String>) -> Result<Vec<repository_docs::RepositoryDocument>, String> {
+pub async fn read_repository_documents(
+    state: State<'_, AppState>,
+    directory: String,
+    skill_id: Option<String>,
+) -> Result<Vec<repository_docs::RepositoryDocument>, String> {
     let directory = repository_document_directory(&state.db, directory, skill_id).await?;
     repository_docs::read(&directory)
 }
@@ -3408,8 +3528,8 @@ mod tests {
     use super::*;
     use crate::commands::linker::create_symlink;
     use crate::db::{self, AgentSkillObservation, Skill, SkillInstallation};
+    use crate::storage::store::Store as SqlitePool;
     use chrono::Utc;
-    use sqlx::SqlitePool;
     use std::{fs, path::Path};
     use tempfile::TempDir;
 
@@ -3424,13 +3544,24 @@ mod tests {
         skill.file_path = path.to_string_lossy().into_owned();
         skill.canonical_path = Some(directory.path().to_string_lossy().into_owned());
         db::upsert_skill(&pool, &skill).await.unwrap();
-        db::upsert_skill_source(&pool, &db::SkillSource {
-            skill_id: skill.id.clone(), source_type: "github".into(), source_url: None,
-            source_author: Some("example".into()), source_repo: Some("example/repo".into()),
-            source_path: Some("SKILL.md".into()), updated_at: Utc::now().to_rfc3339(),
-        }).await.unwrap();
+        db::upsert_skill_source(
+            &pool,
+            &db::SkillSource {
+                skill_id: skill.id.clone(),
+                source_type: "github".into(),
+                source_url: None,
+                source_author: Some("example".into()),
+                source_repo: Some("example/repo".into()),
+                source_path: Some("SKILL.md".into()),
+                updated_at: Utc::now().to_rfc3339(),
+            },
+        )
+        .await
+        .unwrap();
         let checked_at = (Utc::now() + chrono::Duration::minutes(1)).to_rfc3339();
-        db::record_skill_check_times(&pool, &[skill.id.clone()], &checked_at).await.unwrap();
+        db::record_skill_check_times(&pool, &[skill.id.clone()], &checked_at)
+            .await
+            .unwrap();
         let result = skill_with_links(&pool, skill).await.unwrap();
         assert_eq!(result.updated_at, checked_at);
         assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), before);
@@ -3521,10 +3652,16 @@ mod tests {
     }
 
     async fn set_agent_dir(pool: &SqlitePool, agent_id: &str, dir: &Path) {
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = ?")
-            .bind(dir.to_string_lossy().into_owned())
-            .bind(agent_id)
-            .execute(pool)
+        (pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if id == &(agent_id).to_string() {
+                        row["global_skills_dir"] =
+                            serde_json::json!(dir.to_string_lossy().into_owned());
+                    }
+                }
+                Ok(())
+            })
             .await
             .unwrap();
     }
@@ -4012,17 +4149,7 @@ mod tests {
         .unwrap();
         // Full-disk scan writes this unmanaged row for the Central Skills agent.
         // Repair must not treat it as a leftover platform install in ~/.agents/skills.
-        sqlx::query(
-            "INSERT INTO skill_installations
-             (skill_id, agent_id, installed_path, link_type, symlink_target, is_managed, created_at)
-             VALUES (?, 'central', ?, 'symlink', ?, 0, ?)",
-        )
-        .bind("shared-skill")
-        .bind(central_skill_dir.to_string_lossy().into_owned())
-        .bind(resource_skill_dir.to_string_lossy().into_owned())
-        .bind(Utc::now().to_rfc3339())
-        .execute(&pool)
-        .await
+        crate::storage::fixtures::insert(&pool,"skill_installations",serde_json::json!({"skill_id":"shared-skill","agent_id":"central","installed_path":central_skill_dir.to_string_lossy().into_owned(),"link_type":"symlink","symlink_target":resource_skill_dir.to_string_lossy().into_owned(),"is_managed":false,"created_at":Utc::now().to_rfc3339()})).await
         .unwrap();
 
         let resources = get_resource_library_skills_impl(&pool).await.unwrap();
@@ -4096,17 +4223,7 @@ mod tests {
         )
         .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO skill_installations
-             (skill_id, agent_id, installed_path, link_type, symlink_target, is_managed, created_at)
-             VALUES (?, 'antigravity', ?, 'symlink', ?, 0, ?)",
-        )
-        .bind("shared-skill")
-        .bind(central_skill_dir.to_string_lossy().into_owned())
-        .bind(resource_skill_dir.to_string_lossy().into_owned())
-        .bind(Utc::now().to_rfc3339())
-        .execute(&pool)
-        .await
+        crate::storage::fixtures::insert(&pool,"skill_installations",serde_json::json!({"skill_id":"shared-skill","agent_id":"antigravity","installed_path":central_skill_dir.to_string_lossy().into_owned(),"link_type":"symlink","symlink_target":resource_skill_dir.to_string_lossy().into_owned(),"is_managed":false,"created_at":Utc::now().to_rfc3339()})).await
         .unwrap();
 
         get_resource_library_skills_impl(&pool).await.unwrap();
@@ -4159,17 +4276,7 @@ mod tests {
         )
         .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO skill_installations
-             (skill_id, agent_id, installed_path, link_type, symlink_target, is_managed, created_at)
-             VALUES (?, 'codex', ?, 'symlink', ?, 0, ?)",
-        )
-        .bind("legacy-skill")
-        .bind(central_link.to_string_lossy().into_owned())
-        .bind(resource_skill_dir.to_string_lossy().into_owned())
-        .bind(Utc::now().to_rfc3339())
-        .execute(&pool)
-        .await
+        crate::storage::fixtures::insert(&pool,"skill_installations",serde_json::json!({"skill_id":"legacy-skill","agent_id":"codex","installed_path":central_link.to_string_lossy().into_owned(),"link_type":"symlink","symlink_target":resource_skill_dir.to_string_lossy().into_owned(),"is_managed":false,"created_at":Utc::now().to_rfc3339()})).await
         .unwrap();
 
         db::delete_stale_skill_installations(&pool, "codex", &[])
@@ -4553,19 +4660,7 @@ mod tests {
         let pool = setup_test_db().await;
         let central_skill = make_skill("external-skill", "External Skill", true);
         db::upsert_skill(&pool, &central_skill).await.unwrap();
-        sqlx::query(
-            "INSERT INTO skill_installations
-             (skill_id, agent_id, installed_path, link_type, symlink_target, is_managed, created_at)
-             VALUES (?, ?, ?, ?, ?, 0, ?)",
-        )
-        .bind("external-skill")
-        .bind("claude-code")
-        .bind("/tmp/.claude/skills/external-skill")
-        .bind("symlink")
-        .bind("/tmp/outside/external-skill")
-        .bind("2026-01-01T00:00:00Z")
-        .execute(&pool)
-        .await
+        crate::storage::fixtures::insert(&pool,"skill_installations",serde_json::json!({"skill_id":"external-skill","agent_id":"claude-code","installed_path":"/tmp/.claude/skills/external-skill","link_type":"symlink","symlink_target":"/tmp/outside/external-skill","is_managed":false,"created_at":"2026-01-01T00:00:00Z"})).await
         .unwrap();
 
         let central_skills = get_central_skills_impl(&pool).await.unwrap();
@@ -4644,12 +4739,7 @@ mod tests {
         db::add_skill_to_collection(&pool, &collection.id, "delete-me")
             .await
             .unwrap();
-        sqlx::query(
-            "INSERT INTO skill_explanations (skill_id, explanation, lang, model, created_at, updated_at)
-             VALUES ('delete-me', 'cached', 'en', 'test-model', 'now', 'now')",
-        )
-        .execute(&pool)
-        .await
+        crate::storage::fixtures::insert(&pool,"skill_explanations",serde_json::json!({"skill_id":"delete-me","explanation":"cached","lang":"en","model":"test-model","created_at":"now","updated_at":"now"})).await
         .unwrap();
 
         let result = delete_central_skill_impl(
@@ -4669,18 +4759,16 @@ mod tests {
             .unwrap()
             .is_none());
 
-        let collection_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM collection_skills WHERE skill_id = 'delete-me'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        let explanation_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM skill_explanations WHERE skill_id = 'delete-me'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let collection_count: i64 = crate::storage::fixtures::count(
+            &pool,
+            "collection_skills",
+            Some(("skill_id", "delete-me")),
+        );
+        let explanation_count: i64 = crate::storage::fixtures::count(
+            &pool,
+            "skill_explanations",
+            Some(("skill_id", "delete-me")),
+        );
 
         assert_eq!(collection_count, 0);
         assert_eq!(explanation_count, 0);
@@ -4914,11 +5002,7 @@ mod tests {
         assert!(!skill_dir.exists());
         assert!(db::get_skill_by_id(&pool, "demo").await.unwrap().is_none());
         let source_count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM skill_sources WHERE skill_id = ?")
-                .bind("demo")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+            crate::storage::fixtures::count(&pool, "skill_sources", Some(("skill_id", "demo")));
         assert_eq!(source_count, 0);
     }
 
@@ -5263,12 +5347,17 @@ mod tests {
         let pool = setup_test_db().await;
         set_agent_dir(&pool, "central", &central_dir).await;
         set_agent_dir(&pool, "claude-code", &claude_dir).await;
-        sqlx::query(
-            "UPDATE agents SET is_enabled = 0 WHERE id != 'central' AND id != 'claude-code'",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        (&pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if id.as_str() != "central" && id.as_str() != "claude-code" {
+                        row["is_enabled"] = serde_json::json!(false);
+                    }
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
             .await
             .unwrap();
@@ -5805,9 +5894,15 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(read_repository_readme_impl(&resource_dir.join("local/starter-pack")).unwrap(), Some("# Local repository".into()));
+        assert_eq!(
+            read_repository_readme_impl(&resource_dir.join("local/starter-pack")).unwrap(),
+            Some("# Local repository".into())
+        );
         let documents = repository_docs::read(&resource_dir.join("local/starter-pack")).unwrap();
-        assert_eq!(documents.iter().map(|doc| doc.language).collect::<Vec<_>>(), vec!["default", "zh", "en"]);
+        assert_eq!(
+            documents.iter().map(|doc| doc.language).collect::<Vec<_>>(),
+            vec!["default", "zh", "en"]
+        );
         assert_eq!(result.import_kind, LocalResourceImportKind::Collection);
         assert_eq!(result.collection_name.as_deref(), Some("starter-pack"));
         assert_eq!(result.added_skills.len(), 2);
@@ -6033,7 +6128,8 @@ mod tests {
             let read_only_agents =
                 read_only_agent_ids_for_skill(pool, &skill.id, skill.is_central).await?;
             let (created_at, updated_at) = skill_filesystem_timestamps(&skill);
-            let shared_agents = shared_agent_ids_for_skill(pool, &skill.id, skill.is_central).await?;
+            let shared_agents =
+                shared_agent_ids_for_skill(pool, &skill.id, skill.is_central).await?;
             result.push(SkillWithLinks {
                 github_stars: None,
                 id: skill.id,
@@ -6149,13 +6245,18 @@ mod tests {
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(skill_dir.join("SKILL.md"), "# Shared Skill\n").unwrap();
 
-        sqlx::query(
-            "UPDATE agents SET global_skills_dir = ? WHERE id IN ('central', 'antigravity')",
-        )
-        .bind(central_root.to_string_lossy().to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+        (&pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if ["central", "antigravity"].contains(&id.as_str()) {
+                        row["global_skills_dir"] =
+                            serde_json::json!(central_root.to_string_lossy().to_string());
+                    }
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
 
         let skill = make_skill_with_path(
             "shared-skill",
@@ -6172,13 +6273,27 @@ mod tests {
 
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].id, "shared-skill");
-        db::upsert_skill_installation(&pool, &db::SkillInstallation {
-            skill_id: "shared-skill".into(), agent_id: "antigravity".into(),
-            installed_path: skill_dir.to_string_lossy().into_owned(), link_type: "copy".into(),
-            symlink_target: None, created_at: Utc::now().to_rfc3339(),
-        }).await.unwrap();
-        assert!(shared_agent_ids_for_skill(&pool, "shared-skill", true).await.unwrap().contains(&"antigravity".to_string()));
-        assert!(!read_only_agent_ids_for_skill(&pool, "shared-skill", true).await.unwrap().contains(&"antigravity".to_string()));
+        db::upsert_skill_installation(
+            &pool,
+            &db::SkillInstallation {
+                skill_id: "shared-skill".into(),
+                agent_id: "antigravity".into(),
+                installed_path: skill_dir.to_string_lossy().into_owned(),
+                link_type: "copy".into(),
+                symlink_target: None,
+                created_at: Utc::now().to_rfc3339(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(shared_agent_ids_for_skill(&pool, "shared-skill", true)
+            .await
+            .unwrap()
+            .contains(&"antigravity".to_string()));
+        assert!(!read_only_agent_ids_for_skill(&pool, "shared-skill", true)
+            .await
+            .unwrap()
+            .contains(&"antigravity".to_string()));
         assert_eq!(skills[0].link_type, "native");
         assert_eq!(skills[0].source_kind.as_deref(), Some("shared-central"));
         assert_eq!(skills[0].installation_source, "shared");
@@ -6198,13 +6313,18 @@ mod tests {
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(skill_dir.join("SKILL.md"), "# Canvas Design\n").unwrap();
 
-        sqlx::query(
-            "UPDATE agents SET global_skills_dir = ? WHERE id IN ('central', 'antigravity')",
-        )
-        .bind(central_root.to_string_lossy().to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+        (&pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if ["central", "antigravity"].contains(&id.as_str()) {
+                        row["global_skills_dir"] =
+                            serde_json::json!(central_root.to_string_lossy().to_string());
+                    }
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
 
         let skill = make_skill_with_path(
             "canvas-design",
@@ -6243,9 +6363,16 @@ mod tests {
         fs::write(resource_dir.join("SKILL.md"), "# Canvas Design\n").unwrap();
         create_symlink(&resource_dir, &central_link).unwrap();
 
-        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
-            .bind(central_root.to_string_lossy().to_string())
-            .execute(&pool)
+        (&pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if id.as_str() == "central" {
+                        row["global_skills_dir"] =
+                            serde_json::json!(central_root.to_string_lossy().to_string());
+                    }
+                }
+                Ok(())
+            })
             .await
             .unwrap();
 
@@ -6287,7 +6414,11 @@ mod tests {
         fs::create_dir_all(&central_root).unwrap();
         let central_link = central_root.join("frontend-design");
         create_symlink(&resource_dir, &central_link).unwrap();
-        let relative_target = PathBuf::from("..").join("..").join(".agents").join("skills").join("frontend-design");
+        let relative_target = PathBuf::from("..")
+            .join("..")
+            .join(".agents")
+            .join("skills")
+            .join("frontend-design");
         create_symlink(&relative_target, &platform_link).unwrap();
 
         let skill = make_skill_with_path(
@@ -6345,13 +6476,18 @@ mod tests {
         fs::write(resource_dir.join("SKILL.md"), "# Shared Skill\n").unwrap();
         create_symlink(&resource_dir, &skill_dir).unwrap();
 
-        sqlx::query(
-            "UPDATE agents SET global_skills_dir = ? WHERE id IN ('central', 'antigravity')",
-        )
-        .bind(central_root.to_string_lossy().to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+        (&pool)
+            .write(|data| {
+                for (id, row) in data.table_mut("agents") {
+                    if ["central", "antigravity"].contains(&id.as_str()) {
+                        row["global_skills_dir"] =
+                            serde_json::json!(central_root.to_string_lossy().to_string());
+                    }
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
 
         let skill = make_skill_with_path(
             "shared-skill",
