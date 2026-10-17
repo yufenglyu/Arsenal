@@ -1,7 +1,13 @@
 //! Repository notebook persistence. Short overview notes remain in folder_notes.
 use crate::{db::DbPool, AppState};
+pub use crate::db::notebooks::{schema, list, put};
+
+// Local integer IDs may differ after restore; stable UUIDs and source keys survive.
+pub async fn restore(pool: &DbPool, rows: &[Repository]) -> Result<(), String> {
+    let _guard = super::notebook::WRITE.lock().await;
+    crate::db::notebooks::restore(pool, rows).await
+}
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use std::collections::{BTreeMap, HashSet};
 use tauri::State;
 
@@ -39,16 +45,6 @@ pub async fn create_pool(path: &std::path::Path) -> Result<DbPool, String> {
     Ok(pool)
 }
 
-pub async fn schema(pool: &DbPool) -> Result<(), String> {
-    sqlx::query("CREATE TABLE IF NOT EXISTS repository_notebooks (id INTEGER PRIMARY KEY AUTOINCREMENT, source_key TEXT NOT NULL UNIQUE, repository_uid TEXT NOT NULL UNIQUE, data TEXT NOT NULL)")
-        .execute(pool).await.map_err(|_| "noteDatabase")?;
-    Ok(())
-}
-pub async fn list(pool: &DbPool) -> Result<Vec<Repository>, String> {
-    schema(pool).await?;
-    sqlx::query("SELECT data FROM repository_notebooks ORDER BY id").fetch_all(pool).await.map_err(|_| "noteDatabase")?
-        .into_iter().map(|r| serde_json::from_str(r.get("data")).map_err(|_| "noteDatabase".into())).collect()
-}
 pub async fn get(pool: &DbPool, id: i64) -> Result<Repository, String> {
     list(pool).await?.into_iter().find(|r| r.id == id).ok_or_else(|| "noteRepositoryMissing".into())
 }
@@ -68,39 +64,6 @@ pub fn validate(rows: &[Repository]) -> Result<(), String> {
     }
     Ok(())
 }
-pub async fn put(pool: &DbPool, row: &Repository) -> Result<(), String> {
-    schema(pool).await?;
-    let data = serde_json::to_string(row).map_err(|_| "noteDatabase")?;
-    sqlx::query("INSERT INTO repository_notebooks (id, source_key, repository_uid, data) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET source_key=excluded.source_key, repository_uid=excluded.repository_uid, data=excluded.data")
-        .bind(row.id).bind(&row.source_key).bind(&row.repository_uid).bind(data).execute(pool).await.map_err(|_| "noteDatabase")?;
-    Ok(())
-}
-
-// Local integer IDs may differ after restore; stable UUIDs and source keys survive.
-pub async fn restore(pool: &DbPool, rows: &[Repository]) -> Result<(), String> {
-    let _guard = super::notebook::WRITE.lock().await;
-    validate(rows)?;
-    schema(pool).await?;
-    let existing = list(pool).await?;
-    let mut merged = existing.clone();
-    for row in rows {
-        merged.retain(|r| r.source_key != row.source_key);
-        merged.push(row.clone());
-    }
-    validate(&merged)?;
-    let mut tx = pool.begin().await.map_err(|_| "noteDatabase")?;
-    for row in rows {
-        let mut row = row.clone();
-        row.id = if let Some(old) = existing.iter().find(|r| r.source_key == row.source_key) { old.id } else {
-            let max: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM repository_notebooks").fetch_one(&mut *tx).await.map_err(|_| "noteDatabase")?;
-            max + 1
-        };
-        sqlx::query("INSERT INTO repository_notebooks (id, source_key, repository_uid, data) VALUES (?, ?, ?, ?) ON CONFLICT(source_key) DO UPDATE SET repository_uid=excluded.repository_uid, data=excluded.data")
-            .bind(row.id).bind(&row.source_key).bind(&row.repository_uid).bind(serde_json::to_string(&row).map_err(|_| "noteDatabase")?)
-            .execute(&mut *tx).await.map_err(|_| "noteDatabase")?;
-    }
-    tx.commit().await.map_err(|_| "noteDatabase".into())
-}
 
 pub struct Category { pub id: String, pub name: String, pub parent_id: Option<String>, pub repository_ids: Vec<i64> }
 pub async fn categories(pool: &DbPool) -> Result<Vec<Category>, String> {
@@ -108,8 +71,7 @@ pub async fn categories(pool: &DbPool) -> Result<Vec<Category>, String> {
     let collections = crate::db::get_all_collections(pool).await?;
     let mut result = Vec::new();
     for c in collections {
-        let members: Vec<String> = sqlx::query_scalar("SELECT skill_id FROM collection_skills WHERE collection_id = ?")
-            .bind(&c.id).fetch_all(pool).await.map_err(|_| "noteDatabase")?;
+        let members = crate::db::collection_member_ids(pool, &c.id).await.map_err(|_| "noteDatabase")?;
         result.push(Category { id: c.id, name: c.name, parent_id: None,
             repository_ids: rows.iter().filter(|r| r.skill_ids.iter().any(|id| members.contains(id))).map(|r| r.id).collect() });
     }
@@ -132,16 +94,14 @@ async fn ensure_repository_notebook_impl(pool: &DbPool, directory: String, skill
     let root = crate::db::get_skill_resource_library_dir(pool).await?.canonicalize().map_err(|_| "noteRepositoryMissing")?;
     let relative = dir.strip_prefix(&root).map_err(|_| "noteRepositoryMissing")?;
     if relative.as_os_str().is_empty() { return Err("noteRepositoryMissing".into()); }
-    let source: Option<String> = sqlx::query_scalar("SELECT source_repo FROM skill_sources WHERE skill_id = ?")
-        .bind(&skill_id).fetch_optional(pool).await.map_err(|_| "noteDatabase")?.flatten();
+    let source = crate::db::get_skill_source(pool, &skill_id).await.map_err(|_| "noteDatabase")?.and_then(|source| source.source_repo);
     let full_name = source.clone().unwrap_or_else(|| relative.to_string_lossy().replace('\\', "/"));
     let key = if source.is_some() { format!("github:{}", full_name.to_lowercase()) } else { format!("local:{}", if cfg!(windows) { full_name.to_lowercase() } else { full_name.clone() }) };
     let mut row = match list(pool).await?.into_iter().find(|r| r.source_key == key || (source.is_none() && r.source_key.starts_with("local:") && r.skill_ids.contains(&skill_id))) {
         Some(row) => row,
         None => {
             let uid = uuid::Uuid::new_v4().to_string();
-            let id: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) + 1 FROM repository_notebooks")
-                .fetch_one(pool).await.map_err(|_| "noteDatabase")?;
+            let id = crate::db::notebooks::next_id(pool).await?;
             Repository { id, source_key: key.clone(), repository_uid: uid, full_name: full_name.clone(), url: String::new(), description: String::new(), tags: vec![], stars: None, skill_ids: vec![], notebook: String::new(), obsidian: None }
         }
     };

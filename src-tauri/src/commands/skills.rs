@@ -1854,16 +1854,14 @@ pub async fn get_central_skills(state: State<'_, AppState>) -> Result<Vec<SkillW
 }
 
 pub(crate) async fn get_central_skills_impl(pool: &DbPool) -> Result<Vec<SkillWithLinks>, String> {
-    use sqlx::Row;
     let _ = super::linker::reconcile_orphaned_central_skills(pool).await;
     let mut skills = db::get_central_skills(pool).await?;
     // A relocated resource remains the primary DB record; expose its managed
     // central link as a view without moving that primary identity back again.
-    for row in sqlx::query("SELECT skill_id,installed_path FROM skill_installations WHERE agent_id='central' AND is_managed=1").fetch_all(pool).await.map_err(|e|e.to_string())? {
-        let id: String = row.get("skill_id");
+    for (id, installed_path) in db::managed_central_paths(pool).await? {
         if skills.iter().any(|skill| skill.id == id) { continue; }
         if let Some(mut skill) = db::get_skill_by_id(pool, &id).await? {
-            let path = PathBuf::from(row.get::<String,_>("installed_path"));
+            let path = PathBuf::from(installed_path);
             if !path.join("SKILL.md").is_file() || !std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink()) { continue; }
             if !skill.canonical_path.as_ref().is_some_and(|source| crate::path_utils::paths_resolve_to_same_entry(&path, Path::new(source))) { continue; }
             skill.file_path = path.join("SKILL.md").to_string_lossy().into_owned();
@@ -2491,8 +2489,7 @@ async fn sync_resource_library_skills(
     pool: &DbPool,
     resource_root: &Path,
 ) -> Result<Vec<super::scanner::ScannedSkill>, String> {
-    let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_address_moves").fetch_one(pool).await.map_err(|e| e.to_string())?;
-    if pending != 0 { return Err("addressRecovery".into()); }
+    if db::has_pending_address_moves(pool).await? { return Err("addressRecovery".into()); }
 
     std::fs::create_dir_all(resource_root)
         .map_err(|e| format!("Failed to create Skill Resource Library directory: {}", e))?;

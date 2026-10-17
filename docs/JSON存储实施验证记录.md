@@ -81,3 +81,9 @@
 验证：`cargo test --lib --quiet` 为 545 passed、0 failed、6 ignored（其中 1 项为新增 opt-in 基准）；`cargo clippy --lib -- -D warnings` 通过。新增无数据库配置读写/重开/目录隔离测试。未修改生产存储格式。
 
 P1 尚未完成：命令模块中的直接 SQL、完整持久记录及事务接口仍需逐域收拢；现有调用通过过渡适配层仍使用 SQLite。P2–P7 尚未实施。
+
+第二步：新增 db/metadata.rs、db/explanations.rs、db/notebooks.rs，将标签/目录备注、解释缓存及笔记持久操作移出命令处理模块；托管中心路径、待恢复迁移判断、集合成员 ID 查询增加存储接口。笔记恢复锁留在业务入口，保留现有验证和事务；解释缓存保留空内容清理、模型信息和首次创建时间行为。
+
+验证：全量 Rust 545 passed、0 failed、6 ignored；标签/目录备注专项 3 passed；笔记专项 2 passed；clippy（lib，warnings as errors）通过。上述专项测试验证被迁移的入口，未增加重复实现的镜像测试。
+
+剩余 P1 工作：集合详情查询、导入/镜像/地址/备份/目录切换中的 SQL 和事务接口收拢；最终持久模型完善（含安装归属、恢复状态）。这是 P1 的中间提交，不表示 P1 完成，也不表示主程序已经使用 JSON。

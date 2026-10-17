@@ -64,7 +64,6 @@ impl Default for AppConfig {
     }
 }
 
-
 fn read(path: &Path) -> Result<AppConfig, String> {
     match fs::read(path) {
         Ok(bytes) => serde_json::from_slice(&bytes)
@@ -98,14 +97,12 @@ fn write(path: &Path, config: &AppConfig) -> Result<(), String> {
     Ok(())
 }
 
-
 pub fn load_path(path: &Path) -> Result<AppConfig, String> {
     let _guard = CONFIG_LOCK
         .lock()
         .map_err(|_| "Configuration lock failed")?;
     read(path)
 }
-
 
 pub fn update_path<T>(
     path: &Path,
@@ -119,7 +116,6 @@ pub fn update_path<T>(
     write(path, &config)?;
     Ok(result)
 }
-
 
 #[cfg(test)]
 mod tests {

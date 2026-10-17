@@ -1,3 +1,6 @@
+pub mod notebooks;
+pub mod explanations;
+pub mod metadata;
 use chrono::Utc;
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
@@ -38,25 +41,7 @@ pub const SKILL_RESOURCE_LIBRARY_DIR_SETTING_KEY: &str = "skill_resource_library
 
 // ─── Data Types ──────────────────────────────────────────────────────────────
 
-
-
-
-
-
-
-
-
-
-
-
-
 pub use crate::platforms::{agent_supports_universal_agents_skills, builtin_agents};
-
-
-
-
-
-
 
 // ─── Pool Creation ────────────────────────────────────────────────────────────
 
@@ -1892,6 +1877,23 @@ pub(crate) async fn save_github_stars_with_executor<'e>(executor: impl sqlx::Exe
 pub async fn get_github_stars(pool: &DbPool, repository: &str) -> Result<Option<i64>, String> {
     sqlx::query_scalar("SELECT stars FROM github_repository_stats WHERE repository = ?")
         .bind(repository).fetch_optional(pool).await.map_err(|e| e.to_string())
+}
+
+/// Preserve membership identities even if an old store contains an orphaned member.
+pub async fn collection_member_ids(pool: &DbPool, collection_id: &str) -> Result<Vec<String>, String> {
+    sqlx::query_scalar("SELECT skill_id FROM collection_skills WHERE collection_id = ?")
+        .bind(collection_id).fetch_all(pool).await.map_err(|e| e.to_string())
+}
+
+pub async fn managed_central_paths(pool: &DbPool) -> Result<Vec<(String, String)>, String> {
+    sqlx::query_as("SELECT skill_id,installed_path FROM skill_installations WHERE agent_id='central' AND is_managed=1")
+        .fetch_all(pool).await.map_err(|e| e.to_string())
+}
+
+pub async fn has_pending_address_moves(pool: &DbPool) -> Result<bool, String> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_address_moves")
+        .fetch_one(pool).await.map_err(|e| e.to_string())?;
+    Ok(count != 0)
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

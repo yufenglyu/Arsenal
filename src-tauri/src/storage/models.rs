@@ -139,3 +139,18 @@ pub struct SkillForAgent {
     pub source_path: Option<String>,
     pub created_at: Option<String>,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderNote {
+    pub id: String,
+    pub notes: String,
+    pub skill_ids: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct MetadataRow {
+    pub id: String,
+    pub notes: Option<String>,
+    pub tags: Vec<String>,
+}

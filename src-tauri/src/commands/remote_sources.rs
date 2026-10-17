@@ -1631,13 +1631,7 @@ async fn delete_cached_skill_explanation(
     skill_id: &str,
     lang: &str,
 ) -> Result<(), String> {
-    sqlx::query("DELETE FROM skill_explanations WHERE skill_id = ? AND lang = ?")
-        .bind(skill_id)
-        .bind(lang)
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    crate::db::explanations::delete(pool, skill_id, lang).await
 }
 
 async fn load_cached_skill_explanation(
@@ -1645,19 +1639,10 @@ async fn load_cached_skill_explanation(
     skill_id: &str,
     lang: &str,
 ) -> Result<Option<String>, String> {
-    use sqlx::Row;
-
-    let row =
-        sqlx::query("SELECT explanation FROM skill_explanations WHERE skill_id = ? AND lang = ?")
-            .bind(skill_id)
-            .bind(lang)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| e.to_string())?;
+    let row = crate::db::explanations::load(pool, skill_id, lang).await?;
 
     match row {
-        Some(row) => {
-            let explanation: String = row.get("explanation");
+        Some(explanation) => {
             if explanation_has_content(&explanation) {
                 Ok(Some(explanation))
             } else {
@@ -1682,26 +1667,7 @@ async fn cache_skill_explanation(
         return Err(ai_response_error(lang, false));
     }
 
-    let now = chrono::Utc::now().to_rfc3339();
-    sqlx::query(
-        "INSERT OR REPLACE INTO skill_explanations (skill_id, explanation, lang, model, created_at, updated_at)
-         VALUES (?, ?, ?, ?,
-            COALESCE((SELECT created_at FROM skill_explanations WHERE skill_id = ? AND lang = ?), ?),
-            ?)",
-    )
-    .bind(skill_id)
-    .bind(explanation)
-    .bind(lang)
-    .bind(model)
-    .bind(skill_id)
-    .bind(lang)
-    .bind(&now)
-    .bind(&now)
-    .execute(pool)
-    .await
-    .map_err(|e| format!("缓存解释失败: {}", e))?;
-
-    Ok(())
+    crate::db::explanations::save(pool, skill_id, lang, model, explanation).await
 }
 
 fn empty_explanation_error_info(lang: &str, saw_thinking_delta: bool) -> ExplanationErrorInfo {

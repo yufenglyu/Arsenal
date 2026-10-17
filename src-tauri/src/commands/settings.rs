@@ -93,7 +93,7 @@ pub async fn set_setting_impl(pool: &DbPool, key: &str, value: &str) -> Result<(
         return Err("Settings key cannot be empty".to_string());
     }
     if key == "ai_note_prompt" && db::get_setting(pool, key).await?.as_deref() != Some(value) {
-        sqlx::query("DELETE FROM skill_explanations").execute(pool).await.map_err(|e| e.to_string())?;
+        db::explanations::clear(pool).await?;
     }
     db::set_setting(pool, key, value).await
 }
