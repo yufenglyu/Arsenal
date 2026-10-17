@@ -11,3 +11,5 @@ mod durability_tests;
 
 #[cfg(test)]
 mod migrated_data_tests;
+
+mod table;

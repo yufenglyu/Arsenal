@@ -845,6 +845,7 @@ mod json_directory_tests {
             })
             .await
             .unwrap();
+        crate::storage::fixtures::shard_metadata(&store).await;
         std::fs::write(source.join("config.json"), b"{}").unwrap();
         let called = std::cell::Cell::new(false);
         update_app_data_dir_with_publish(&store, destination.to_str().unwrap(), |path| {

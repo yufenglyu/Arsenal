@@ -9,6 +9,8 @@ fn committed_child() {
     let root = std::path::PathBuf::from(root);
     let store = Store::open(&root).unwrap();
     tokio::runtime::Runtime::new().unwrap().block_on(store.write(|data| {
+        data.table_mut("skill_metadata").make_sharded();
+        data.table_mut("skill_metadata").insert("fixture".into(), json!({"notes":"acknowledged"}));
         data.table_mut("skills").insert("fixture".into(), json!({"id":"fixture"}));
         data.table_mut("collection_skills").insert("member".into(), json!({"skill_id":"fixture"}));
         Ok(())
@@ -36,6 +38,7 @@ fn acknowledged_commit_survives_process_kill() {
     let store = Store::open(directory.path()).unwrap();
     store.read(|data| {
         assert_eq!(data.table("skills")["fixture"]["id"], "fixture");
+        assert_eq!(data.table("skill_metadata")["fixture"]["notes"], "acknowledged");
         assert_eq!(data.table("collection_skills")["member"]["skill_id"], "fixture");
         Ok(())
     }).unwrap();

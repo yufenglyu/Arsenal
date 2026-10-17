@@ -120,6 +120,26 @@ async fn synthetic_dense_metadata() {
             }
             Ok(())
         }).await.unwrap();
+        let metadata_refs = || {
+            let manifest: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(directory.path().join("store/manifest.json")).unwrap(),
+            )
+            .unwrap();
+            if let Some(shards) = manifest["shards"]["skill_metadata"].as_object() {
+                shards
+                    .values()
+                    .map(|id| id.as_str().unwrap().to_owned())
+                    .collect::<std::collections::BTreeSet<_>>()
+            } else {
+                [manifest["tables"]["skill_metadata"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()]
+                .into_iter()
+                .collect()
+            }
+        };
+        let initial_refs = metadata_refs();
         let mut edits = Vec::new();
         for index in 0..20 {
             let start = Instant::now();
@@ -132,6 +152,35 @@ async fn synthetic_dense_metadata() {
             .await
             .unwrap();
             edits.push(start.elapsed().as_micros());
+        }
+        let new_refs: Vec<_> = metadata_refs().difference(&initial_refs).cloned().collect();
+        let edited_object_bytes: u64 = new_refs
+            .iter()
+            .map(|id| {
+                std::fs::metadata(
+                    directory
+                        .path()
+                        .join("store/objects")
+                        .join(format!("{id}.json")),
+                )
+                .unwrap()
+                .len()
+            })
+            .sum();
+        let equivalent_table_bytes = store
+            .read(|data| {
+                Ok(serde_json::to_vec(data.table("skill_metadata"))
+                    .unwrap()
+                    .len())
+            })
+            .unwrap();
+        assert_eq!(
+            new_refs.len(),
+            1,
+            "single-note edit must replace just one metadata object"
+        );
+        if count == 50_000 {
+            assert!(edited_object_bytes < equivalent_table_bytes as u64 / 100);
         }
         drop(store);
         let mut reopens = Vec::new();
@@ -158,9 +207,76 @@ async fn synthetic_dense_metadata() {
             reopens.push(start.elapsed().as_micros());
         }
         println!(
-            "STORAGE_DENSE count={count} edit_p95_us={} reopen_p95_us={}",
+            "STORAGE_DENSE count={count} edit_p95_us={} reopen_p95_us={} edited_object_bytes={edited_object_bytes} equivalent_table_bytes={equivalent_table_bytes}",
             p95(&mut edits),
             p95(&mut reopens)
         );
     }
+}
+
+#[tokio::test]
+#[ignore = "synthetic v1 upgrade benchmark; run without concurrent builds"]
+async fn synthetic_v1_dense_upgrade() {
+    use serde_json::json;
+    use sha2::{Digest, Sha256};
+    let directory = tempfile::tempdir().unwrap();
+    drop(crate::storage::store::Store::open(directory.path()).unwrap());
+    let root = directory.path().join("store");
+    let mut rows = std::collections::BTreeMap::new();
+    for i in 0..50_000 {
+        let id = format!("fixture-{i}");
+        let notes = "x".repeat(if i % 1000 == 0 { 64 * 1024 } else { 128 });
+        rows.insert(
+            id.clone(),
+            json!({"skill_id":id,"notes":notes,"tags":"[\"fixture\"]","updated_at":"2026-01-01"}),
+        );
+    }
+    let bytes = serde_json::to_vec(&rows).unwrap();
+    let id = format!("{:x}", Sha256::digest(&bytes));
+    // Construct exactly the legacy format in a disposable directory, before
+    // timing. Never open real application data for performance tests.
+    std::fs::write(root.join("objects").join(format!("{id}.json")), bytes).unwrap();
+    let manifest =
+        serde_json::to_vec(&json!({"version":1,"revision":1,"tables":{"skill_metadata":id}}))
+            .unwrap();
+    std::fs::write(root.join("manifest.json"), &manifest).unwrap();
+    std::fs::write(root.join("manifests/1.json"), &manifest).unwrap();
+    drop(rows);
+    let start = Instant::now();
+    let store = crate::storage::store::Store::open(directory.path()).unwrap();
+    let open_us = start.elapsed().as_micros();
+    assert_eq!(std::fs::read(root.join("manifest.json")).unwrap(), manifest);
+    let start = Instant::now();
+    db::upsert_skill_metadata(&store, "fixture-1", Some("converted"), &["fixture".into()])
+        .await
+        .unwrap();
+    let upgrade_us = start.elapsed().as_micros();
+    let start = Instant::now();
+    db::upsert_skill_metadata(
+        &store,
+        "fixture-1",
+        Some("incremental"),
+        &["fixture".into()],
+    )
+    .await
+    .unwrap();
+    let next_edit_us = start.elapsed().as_micros();
+    drop(store);
+    let store = crate::storage::store::Store::open(directory.path()).unwrap();
+    assert_eq!(
+        db::get_skill_metadata(&store, "fixture-1")
+            .await
+            .unwrap()
+            .unwrap()
+            .notes
+            .as_deref(),
+        Some("incremental")
+    );
+    assert_eq!(
+        store
+            .read(|data| Ok(data.table("skill_metadata").len()))
+            .unwrap(),
+        50_000
+    );
+    println!("STORAGE_UPGRADE count=50000 open_us={open_us} first_edit_us={upgrade_us} next_edit_us={next_edit_us}");
 }

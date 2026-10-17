@@ -1,4 +1,5 @@
 use super::store::{Data, Table};
+use super::table::{bucket, SHARDED_TABLE, SHARD_THRESHOLD};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -13,6 +14,28 @@ struct Manifest {
     version: u32,
     revision: u64,
     tables: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    shards: BTreeMap<String, BTreeMap<u8, String>>,
+}
+impl Manifest {
+    fn validate(&self) -> Result<(), String> {
+        if !matches!(self.version, 1 | 2) || (self.version == 1 && !self.shards.is_empty()) {
+            return Err("Unsupported JSON store version".into());
+        }
+        if self
+            .shards
+            .keys()
+            .any(|name| name != SHARDED_TABLE || self.tables.contains_key(name))
+        {
+            return Err("Invalid sharded table".into());
+        }
+        Ok(())
+    }
+    fn object_ids(&self) -> impl Iterator<Item = &String> {
+        self.tables
+            .values()
+            .chain(self.shards.values().flat_map(|shards| shards.values()))
+    }
 }
 fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -60,14 +83,12 @@ pub(super) fn load(root: &Path) -> Result<(Data, u64), String> {
     }
     let manifest: Manifest = serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    if manifest.version != 1 {
-        return Err("Unsupported JSON store version".into());
-    }
+    manifest.validate()?;
     // Validate every reference before forming paths. Shared immutable objects are
     // decoded once, then shared with the existing table-level copy-on-write.
     let mut objects = Vec::new();
     let mut total_bytes = 0u64;
-    for id in manifest.tables.values().collect::<BTreeSet<_>>() {
+    for id in manifest.object_ids().collect::<BTreeSet<_>>() {
         if id.len() != 64 || !id.bytes().all(|c| c.is_ascii_hexdigit()) {
             return Err("Invalid object identifier".into());
         }
@@ -85,7 +106,7 @@ pub(super) fn load(root: &Path) -> Result<(Data, u64), String> {
     } else {
         1
     };
-    let loaded = if workers <= 1 {
+    let mut loaded = if workers <= 1 {
         load_objects(root, &objects)?
     } else {
         // Balance by bytes, not table count: skills and installations dominate.
@@ -116,6 +137,31 @@ pub(super) fn load(root: &Path) -> Result<(Data, u64), String> {
         let rows = loaded.get(&id).ok_or("Missing loaded object")?.clone();
         data.refs.insert(name.clone(), id);
         data.tables.insert(name, rows);
+    }
+    let mut shard_objects = BTreeMap::new();
+    for (name, refs) in manifest.shards {
+        let mut table = Table::default();
+        table.make_sharded();
+        for (slot, id) in &refs {
+            if let Some(rows) = loaded.remove(id) {
+                shard_objects.insert(id.clone(), Arc::new(Arc::unwrap_or_clone(rows).into_rows()));
+            }
+            let rows = shard_objects.get(id).ok_or("Missing shard object")?;
+            if rows.keys().any(|key| bucket(key) != *slot) {
+                return Err("Row stored in incorrect shard".into());
+            }
+            table.buckets.insert(*slot, rows.clone());
+        }
+        table.refs = refs;
+        data.tables.insert(name, Arc::new(table));
+    }
+    drop(loaded);
+    // v1 stays on disk until the first metadata edit; convert its in-memory
+    // representation once, without rewriting data during open.
+    if let Some(table) = data.tables.get_mut(SHARDED_TABLE) {
+        if table.len() >= SHARD_THRESHOLD {
+            Arc::make_mut(table).make_sharded();
+        }
     }
     Ok((data, manifest.revision))
 }
@@ -161,35 +207,69 @@ fn save_prepared(
     before_publish: impl FnOnce() -> Result<(), String>,
 ) -> Result<(), String> {
     let staging = root.join("manifest.pending");
-    let tables = std::thread::scope(|scope| -> Result<BTreeMap<String, String>, String> {
+    let existing_objects = object_files(root)?;
+    let (tables, shards) = std::thread::scope(|scope| {
         let mut tables = BTreeMap::new();
+        let mut shards = BTreeMap::new();
         let mut scheduled = BTreeSet::new();
         let mut objects = std::collections::VecDeque::new();
         for (name, rows) in &data.tables {
-            if let Some(id) = data.refs.get(name) {
+            if let Some(id) = data
+                .refs
+                .get(name)
+                .filter(|id| existing_objects.contains_key(*id))
+            {
                 tables.insert(name.clone(), id.clone());
                 continue;
             }
-            let bytes = serde_json::to_vec(rows.as_ref()).map_err(|e| e.to_string())?;
-            let id = hash(&bytes);
-            // Identical tables share a content-addressed file. Only one worker
-            // may write that file; cap queued writers at two (plus the
-            // buffer currently being serialized on the calling thread).
-            if scheduled.insert(id.clone()) {
-                if objects.len() == 2 {
-                    let oldest: std::thread::ScopedJoinHandle<'_, Result<(), String>> =
-                        objects.pop_front().unwrap();
-                    oldest.join().map_err(|_| "Object writer panicked")??;
+            let mut pieces = Vec::new();
+            if rows.sharded {
+                let mut refs = rows.refs.clone();
+                // An in-memory table snapshot may outlive its disk history.
+                // Rebuild collected objects instead of publishing stale refs.
+                refs.retain(|_, id| existing_objects.contains_key(id));
+                for slot in rows.buckets.keys() {
+                    if !refs.contains_key(slot) {
+                        // Keep only one serialization buffer on the caller.
+                        pieces.push(Some(*slot));
+                    }
                 }
-                let object_id = id.clone();
-                objects.push_back(scope.spawn(move || write_object(root, &object_id, &bytes)));
+                shards.insert(name.clone(), refs);
+            } else {
+                pieces.push(None);
             }
-            tables.insert(name.clone(), id);
+            for slot in pieces {
+                let bytes = match slot {
+                    Some(slot) => serde_json::to_vec(rows.buckets[&slot].as_ref()),
+                    None => serde_json::to_vec(rows.as_ref()),
+                }
+                .map_err(|e| e.to_string())?;
+                let id = hash(&bytes);
+                // Equal-content objects are written once, including empty shards.
+                if scheduled.insert(id.clone()) {
+                    if objects.len() == 2 {
+                        let oldest: std::thread::ScopedJoinHandle<'_, Result<(), String>> =
+                            objects.pop_front().unwrap();
+                        oldest.join().map_err(|_| "Object writer panicked")??;
+                    }
+                    let object_id = id.clone();
+                    objects.push_back(scope.spawn(move || write_object(root, &object_id, &bytes)));
+                }
+                match slot {
+                    Some(slot) => {
+                        shards.get_mut(name).unwrap().insert(slot, id);
+                    }
+                    None => {
+                        tables.insert(name.clone(), id);
+                    }
+                }
+            }
         }
         let bytes = serde_json::to_vec_pretty(&Manifest {
-            version: 1,
+            version: if shards.is_empty() { 1 } else { 2 },
             revision,
             tables: tables.clone(),
+            shards: shards.clone(),
         })
         .map_err(|e| e.to_string())?;
         let history = root.join("manifests").join(format!("{revision}.json"));
@@ -208,7 +288,7 @@ fn save_prepared(
         manifest_results
             .1
             .map_err(|_| "Manifest writer panicked")??;
-        Ok(tables)
+        Ok::<_, String>((tables, shards))
     })?;
     #[cfg(unix)]
     for directory in [root.join("objects"), root.join("manifests")] {
@@ -225,13 +305,42 @@ fn save_prepared(
             .map_err(|e| format!("COMMIT_UNCERTAIN: {e}"))?;
     }
     data.refs = tables;
+    for (name, refs) in shards {
+        Arc::make_mut(
+            data.tables
+                .get_mut(&name)
+                .ok_or("Missing committed table")?,
+        )
+        .refs = refs;
+    }
+    data.dirty.clear();
     Ok(())
+}
+
+fn object_files(root: &Path) -> Result<BTreeMap<String, std::path::PathBuf>, String> {
+    // Directory enumeration supplies file types on Windows without a separate
+    // metadata call per shard. Still validate every history reference before
+    // deleting anything; unknown files and non-regular entries are not deleted.
+    let mut object_files = BTreeMap::new();
+    for entry in fs::read_dir(root.join("objects")).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        let id = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        if path.extension().and_then(|s| s.to_str()) == Some("json")
+            && id.len() == 64
+            && id.bytes().all(|b| b.is_ascii_hexdigit())
+            && entry.file_type().map_err(|e| e.to_string())?.is_file()
+        {
+            object_files.insert(id.to_owned(), path);
+        }
+    }
+    Ok(object_files)
 }
 
 // Only named, valid historical manifests are candidates. Unknown files stop cleanup.
 pub(super) fn collect(root: &Path, current: u64) -> Result<(), String> {
     let mut histories = Vec::new();
-    let mut checked_objects = BTreeSet::new();
+    let object_files = object_files(root)?;
     for entry in fs::read_dir(root.join("manifests")).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
@@ -246,14 +355,14 @@ pub(super) fn collect(root: &Path, current: u64) -> Result<(), String> {
         let manifest: Manifest =
             serde_json::from_slice(&fs::read(&path).map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;
-        if manifest.version != 1 || manifest.revision != revision || revision > current {
+        manifest.validate()?;
+        if manifest.revision != revision || revision > current {
             return Err("Unrecognized recovery history".into());
         }
-        if manifest.tables.values().any(|id| {
+        if manifest.object_ids().any(|id| {
             id.len() != 64
                 || !id.bytes().all(|b| b.is_ascii_hexdigit())
-                || (checked_objects.insert(id.clone())
-                    && !root.join("objects").join(format!("{id}.json")).is_file())
+                || !object_files.contains_key(id)
         }) {
             return Err("Invalid recovery object reference".into());
         }
@@ -265,19 +374,13 @@ pub(super) fn collect(root: &Path, current: u64) -> Result<(), String> {
     histories.sort_by_key(|h| std::cmp::Reverse(h.0));
     let mut live = std::collections::BTreeSet::new();
     for (_, _, m) in histories.iter().take(2) {
-        live.extend(m.tables.values().cloned());
+        live.extend(m.object_ids().cloned());
     }
     for (_, path, _) in histories.iter().skip(2) {
         fs::remove_file(path).map_err(|e| e.to_string())?;
     }
-    for entry in fs::read_dir(root.join("objects")).map_err(|e| e.to_string())? {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        let id = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        if path.extension().and_then(|s| s.to_str()) == Some("json")
-            && id.len() == 64
-            && id.bytes().all(|b| b.is_ascii_hexdigit())
-            && !live.contains(id)
-        {
+    for (id, path) in object_files {
+        if !live.contains(&id) {
             fs::remove_file(&path).map_err(|e| e.to_string())?;
         }
     }
@@ -420,7 +523,8 @@ mod tests {
         let _store = Store::open(&directory).unwrap();
         let root = directory.join("store");
         let (mut data, revision) = load(&root).unwrap();
-        for table in ["a", "b"] {
+        data.table_mut(SHARDED_TABLE).make_sharded();
+        for table in ["a", "b", SHARDED_TABLE] {
             data.table_mut(table)
                 .insert("x".into(), json!("unpublished"));
         }
@@ -441,7 +545,8 @@ mod tests {
         let store = Store::open(directory.path()).unwrap();
         store
             .write(|data| {
-                for table in ["a", "b"] {
+                data.table_mut(SHARDED_TABLE).make_sharded();
+                for table in ["a", "b", SHARDED_TABLE] {
                     data.table_mut(table).insert("x".into(), json!("committed"));
                 }
                 Ok(())
@@ -479,6 +584,7 @@ mod tests {
             .read(|data| {
                 assert_eq!(data.table("a")["x"], "committed");
                 assert_eq!(data.table("b")["x"], "committed");
+                assert_eq!(data.table(SHARDED_TABLE)["x"], "committed");
                 Ok(())
             })
             .unwrap();
@@ -497,5 +603,261 @@ mod tests {
                 .unwrap(),
             "retry"
         );
+    }
+    #[tokio::test]
+    async fn metadata_edit_writes_only_one_bucket_and_preserves_snapshots() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        store
+            .write(|data| {
+                data.table_mut(SHARDED_TABLE).make_sharded();
+                for i in 0..2048 {
+                    data.table_mut(SHARDED_TABLE)
+                        .insert(format!("key-{i}"), json!({"notes": "old"}));
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let root = dir.path().join("store");
+        let before: Manifest =
+            serde_json::from_slice(&fs::read(root.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(before.version, 2);
+        let snapshot = store.read(|data| Ok(data.clone())).unwrap();
+        let slot = bucket("key-1");
+        for note in ["first", "second", "third"] {
+            store
+                .write(|data| {
+                    data.table_mut(SHARDED_TABLE).get_mut("key-1").unwrap()["notes"] = json!(note);
+                    data.table_mut("related")
+                        .insert("version".into(), json!(note));
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+        let after: Manifest =
+            serde_json::from_slice(&fs::read(root.join("manifest.json")).unwrap()).unwrap();
+        for (id, old_ref) in &before.shards[SHARDED_TABLE] {
+            if *id == slot {
+                assert_ne!(old_ref, &after.shards[SHARDED_TABLE][id]);
+            } else {
+                assert_eq!(old_ref, &after.shards[SHARDED_TABLE][id]);
+            }
+        }
+        assert_eq!(snapshot.table(SHARDED_TABLE)["key-1"]["notes"], "old");
+        let old_id = &before.shards[SHARDED_TABLE][&slot];
+        assert!(!root.join("objects").join(format!("{old_id}.json")).exists());
+        drop(store);
+        let reopened = Store::open(dir.path()).unwrap();
+        reopened
+            .read(|data| {
+                assert_eq!(data.table(SHARDED_TABLE).len(), 2048);
+                assert_eq!(data.table(SHARDED_TABLE)["key-1"]["notes"], "third");
+                assert_eq!(data.table("related")["version"], "third");
+                let exported = serde_json::to_vec(data).unwrap();
+                let restored: Data = serde_json::from_slice(&exported).unwrap();
+                assert_eq!(serde_json::to_vec(&restored).unwrap(), exported);
+                Ok(())
+            })
+            .unwrap();
+        reopened
+            .write(|data| {
+                *data.table_mut(SHARDED_TABLE) = snapshot.table(SHARDED_TABLE).clone();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(reopened);
+        assert_eq!(
+            Store::open(dir.path())
+                .unwrap()
+                .read(|data| Ok(data.table(SHARDED_TABLE)["key-1"]["notes"].clone()))
+                .unwrap(),
+            "old"
+        );
+    }
+
+    #[tokio::test]
+    async fn v1_metadata_upgrades_only_when_edited_and_failed_upgrade_is_retryable() {
+        let dir = tempfile::tempdir().unwrap();
+        drop(Store::open(dir.path()).unwrap());
+        let root = dir.path().join("store");
+        let mut legacy = Data::default();
+        legacy.tables.insert(
+            SHARDED_TABLE.into(),
+            Arc::new(
+                serde_json::from_value(json!({"key": {"notes":"legacy", "tags":"[]"}})).unwrap(),
+            ),
+        );
+        for i in 0..SHARD_THRESHOLD {
+            Arc::make_mut(legacy.tables.get_mut(SHARDED_TABLE).unwrap())
+                .insert(format!("legacy-{i}"), json!({"notes":"legacy"}));
+        }
+        save(&root, &mut legacy, 1).unwrap();
+        let original = fs::read(root.join("manifest.json")).unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(fs::read(root.join("manifest.json")).unwrap(), original);
+        store
+            .write(|data| {
+                data.table_mut("other").insert("x".into(), json!(1));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let unchanged: Manifest =
+            serde_json::from_slice(&fs::read(root.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(unchanged.version, 1);
+        drop(store);
+        let (mut data, revision) = load(&root).unwrap();
+        data.table_mut(SHARDED_TABLE).get_mut("key").unwrap()["notes"] = json!("new");
+        assert!(save_prepared(&root, &mut data, revision + 1, || Err(
+            "fail conversion".into()
+        ))
+        .is_err());
+        assert_eq!(
+            load(&root).unwrap().0.table(SHARDED_TABLE)["key"]["notes"],
+            "legacy"
+        );
+        save(&root, &mut data, revision + 1).unwrap();
+        let upgraded: Manifest =
+            serde_json::from_slice(&fs::read(root.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(upgraded.version, 2);
+        assert!(!upgraded.tables.contains_key(SHARDED_TABLE));
+        assert_eq!(
+            load(&root).unwrap().0.table(SHARDED_TABLE)["key"]["notes"],
+            "new"
+        );
+    }
+
+    #[tokio::test]
+    async fn corrupt_missing_misrouted_and_conflicting_shards_fail_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        store
+            .write(|data| {
+                data.table_mut(SHARDED_TABLE).make_sharded();
+                data.table_mut(SHARDED_TABLE)
+                    .insert("key".into(), json!("note"));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(store);
+        let root = dir.path().join("store");
+        let manifest_path = root.join("manifest.json");
+        let original = fs::read(&manifest_path).unwrap();
+        let mut manifest: Manifest = serde_json::from_slice(&original).unwrap();
+        let slot = bucket("key");
+        let id = manifest.shards[SHARDED_TABLE][&slot].clone();
+        let path = root.join("objects").join(format!("{id}.json"));
+        let bytes = fs::read(&path).unwrap();
+        fs::write(&path, b"{}").unwrap();
+        assert!(load(&root).is_err());
+        fs::remove_file(&path).unwrap();
+        assert!(load(&root).is_err());
+        fs::write(&path, bytes).unwrap();
+        manifest
+            .shards
+            .get_mut(SHARDED_TABLE)
+            .unwrap()
+            .insert(slot.wrapping_add(1), id.clone());
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        assert!(load(&root).is_err());
+        manifest = serde_json::from_slice(&original).unwrap();
+        manifest.tables.insert(SHARDED_TABLE.into(), id);
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        assert!(load(&root).is_err());
+        manifest = serde_json::from_slice(&original).unwrap();
+        manifest.version = 1;
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        assert!(load(&root).is_err());
+    }
+
+    #[tokio::test]
+    async fn sharded_deletions_and_clear_persist_without_touching_old_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        store
+            .write(|data| {
+                data.table_mut(SHARDED_TABLE).make_sharded();
+                for i in 0..512 {
+                    data.table_mut(SHARDED_TABLE)
+                        .insert(i.to_string(), json!(i));
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let old = store.read(|data| Ok(data.clone())).unwrap();
+        store
+            .write(|data| {
+                data.table_mut(SHARDED_TABLE)
+                    .retain(|_, value| value.as_i64().unwrap() % 2 == 0);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(store);
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(
+            store
+                .read(|data| Ok(data.table(SHARDED_TABLE).len()))
+                .unwrap(),
+            256
+        );
+        store
+            .write(|data| {
+                data.table_mut(SHARDED_TABLE).clear();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(store);
+        assert!(Store::open(dir.path())
+            .unwrap()
+            .read(|data| Ok(data.table(SHARDED_TABLE).is_empty()))
+            .unwrap());
+        assert_eq!(old.table(SHARDED_TABLE).len(), 512);
+    }
+    #[tokio::test]
+    async fn sharded_failure_is_not_consumed_by_unrelated_commit() {
+        let store = Store::memory().unwrap();
+        store
+            .write(|data| {
+                data.table_mut(SHARDED_TABLE).make_sharded();
+                data.table_mut(SHARDED_TABLE)
+                    .insert("x".into(), json!("old"));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        store.fail_table_write(SHARDED_TABLE);
+        store
+            .write(|data| {
+                data.table_mut("other").insert("x".into(), json!("old"));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(store
+            .write(|data| {
+                data.table_mut(SHARDED_TABLE)
+                    .insert("x".into(), json!("new"));
+                data.table_mut("other").insert("x".into(), json!("new"));
+                Ok(())
+            })
+            .await
+            .is_err());
+        store
+            .read(|data| {
+                assert_eq!(data.table(SHARDED_TABLE)["x"], "old");
+                assert_eq!(data.table("other")["x"], "old");
+                Ok(())
+            })
+            .unwrap();
+        let (disk, _) = load(&store.directory().join("store")).unwrap();
+        assert_eq!(disk.table(SHARDED_TABLE)["x"], "old");
+        assert_eq!(disk.table("other")["x"], "old");
     }
 }

@@ -3064,6 +3064,8 @@ mod tests {
         .await
         .expect("skill");
 
+        crate::storage::fixtures::shard_metadata(&pool).await;
+        db::upsert_skill_metadata(&pool, "resource-demo", Some("Sharded backup note"), &["synthetic".into()]).await.unwrap();
         let json = export_app_backup_impl(&pool, BackupOptions::default())
             .await
             .expect("export");
@@ -3076,6 +3078,9 @@ mod tests {
         import_app_backup_impl(&pool, &json).await.expect("import");
 
         assert!(skill_dir.join("SKILL.md").exists());
+        let metadata = db::get_skill_metadata(&pool, "resource-demo").await.unwrap().unwrap();
+        assert_eq!(metadata.notes.as_deref(), Some("Sharded backup note"));
+        assert_eq!(serde_json::from_str::<Vec<String>>(&metadata.tags).unwrap(), vec!["synthetic"]);
         let restored = db::get_skill_by_id(&pool, "resource-demo")
             .await
             .expect("restored query")

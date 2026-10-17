@@ -1,18 +1,21 @@
 use super::persistence;
+pub use super::table::Table;
+use super::table::{SHARDED_TABLE, SHARD_THRESHOLD};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use serde_json::Value;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
     sync::{Arc, LazyLock, RwLock},
 };
 use tokio::sync::{Mutex, OwnedMutexGuard};
-pub type Table = BTreeMap<String, Value>;
 #[derive(Clone, Default)]
 pub struct Data {
     pub(super) tables: BTreeMap<String, Arc<Table>>,
     pub(super) refs: BTreeMap<String, String>,
+    pub(super) dirty: BTreeSet<String>,
 }
 impl Serialize for Data {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
@@ -40,20 +43,31 @@ impl<'de> Deserialize<'de> for Data {
             tables: View::deserialize(d)?
                 .tables
                 .into_iter()
-                .map(|(k, v)| (k, Arc::new(v)))
+                .map(|(k, mut v)| {
+                    if k == SHARDED_TABLE && v.len() >= SHARD_THRESHOLD {
+                        v.make_sharded();
+                    }
+                    (k, Arc::new(v))
+                })
                 .collect(),
             refs: BTreeMap::new(),
+            dirty: BTreeSet::new(),
         })
     }
 }
 impl Data {
     pub fn table(&self, name: &str) -> &Table {
-        static EMPTY: LazyLock<Table> = LazyLock::new(BTreeMap::new);
+        static EMPTY: LazyLock<Table> = LazyLock::new(Table::default);
         self.tables.get(name).map(Arc::as_ref).unwrap_or(&EMPTY)
     }
     pub fn table_mut(&mut self, name: &str) -> &mut Table {
         self.refs.remove(name);
-        Arc::make_mut(self.tables.entry(name.into()).or_default())
+        self.dirty.insert(name.into());
+        let table = Arc::make_mut(self.tables.entry(name.into()).or_default());
+        if name == SHARDED_TABLE && !table.sharded && table.len() >= SHARD_THRESHOLD {
+            table.make_sharded();
+        }
+        table
     }
 }
 struct Inner {
@@ -195,7 +209,7 @@ impl Transaction {
         {
             let mut failure = self.store.0.fail_table.lock().unwrap();
             if failure.as_ref().is_some_and(|name| {
-                self.data.tables.contains_key(name) && !self.data.refs.contains_key(name)
+                self.data.dirty.contains(name)
             }) {
                 failure.take();
                 return Err("Injected JSON table write failure".into());

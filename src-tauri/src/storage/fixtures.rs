@@ -94,3 +94,8 @@ pub async fn clear(pool: &Store, table: &str) {
     .await
     .unwrap();
 }
+
+/// Exercise v2 through the real store without requiring huge business fixtures.
+pub async fn shard_metadata(store: &Store) {
+    store.write(|data| { data.table_mut("skill_metadata").make_sharded(); Ok(()) }).await.unwrap();
+}
