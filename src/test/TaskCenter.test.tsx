@@ -7,7 +7,7 @@ import {useAppStatusStore} from "@/stores/appStatusStore";
 const task = (id: string, status: BackgroundTask["status"], kind: BackgroundTask["kind"] = "check"): BackgroundTask => ({id,key:id,label:id,kind,status,cancelRequested:false,createdAt:1,locks:[],steps:[{label:id,command:"test",args:{},status}]});
 function openCenter() {fireEvent.click(screen.getByRole("button",{name:/^任务 ·/}));}
 function selectTask(name: string) {fireEvent.click(within(screen.getByRole("complementary",{name:"任务列表"})).getByRole("button",{name:new RegExp(name)}));}
-const report = () => ({repositories:[{repository:"example/repo",added:[],modified:[{skillId:"changed",name:"Changed",version:"v1"}],deleted:[],unchanged:[{skillId:"same",name:"Same"}]}]});
+const report = () => ({repositories:[{repository:"example/repo",snapshotId:"snapshot-one",added:[],modified:[{skillId:"changed",name:"Changed",version:"v1"}],deleted:[],unchanged:[{skillId:"same",name:"Same"}]}]});
 beforeEach(() => {
   queue.setState({tasks:[task("running","running"),task("queued","queued"),task("done","success")]});
   updates.setState({open:false,centerView:null,preview:null,error:null,ignored:[],checkedAt:{},updateErrors:{},isChecking:false,checkingRepository:null,reportCheckedAt:null,reportGeneration:null});
@@ -50,15 +50,13 @@ it("cleans finished groups in this tab while preserving active batch children an
   fireEvent.click(screen.getByRole("button",{name:"清理已完成记录"}));
   expect(queue.getState().tasks.map(t=>t.id)).toEqual(["a","b","failed","import"]);
 });
-it("defaults to actionable changes and includes unchanged skills under All", () => {
+it("shows the complete repository inventory with selection at repository level", () => {
   updates.setState({preview:report()});render(<TaskCenter/>);openCenter();
-  expect(screen.queryByPlaceholderText("搜索技能或仓库...")).not.toBeInTheDocument();
-  expect(within(screen.getByLabelText("筛选技能明细")).getAllByRole("button").at(-1)).toHaveTextContent("全部 2");
-  expect(screen.getByRole("button",{name:"待处理 1"})).toHaveAttribute("aria-pressed","true");
-  expect(screen.getByText("Changed")).toBeInTheDocument();expect(screen.queryByText("Same")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button",{name:"全部 2"}));
-  expect(screen.getByText("Same")).toBeInTheDocument();expect(screen.getByRole("checkbox",{name:"Same"})).toBeDisabled();
+  expect(screen.getByText("Changed")).toBeInTheDocument();expect(screen.getByText("Same")).toBeInTheDocument();
+  expect(screen.getByRole("checkbox",{name:"example/repo"})).toBeInTheDocument();
+  expect(screen.queryByRole("checkbox",{name:"Changed"})).not.toBeInTheDocument();
 });
+
 it("keeps the chosen task when a report arrives", () => {
   render(<TaskCenter/>);openCenter();selectTask("running");act(()=>updates.setState({preview:report()}));
   expect(screen.getByRole("heading",{name:"running"})).toBeInTheDocument();expect(screen.getByText("Changed")).not.toBeVisible();
@@ -77,16 +75,16 @@ it("shows historical checks without arbitrary arguments", () => {
 });
 it("keeps interrupted AI tasks accessible without double-counting report failures", () => {
   queue.setState({tasks:[task("ai","interrupted","ai"),{...task("check","partial"),steps:[{label:"check",command:"preview_source_backed_resource_repository_updates",args:{repositories:["example/repo"]},status:"partial"}]}]});
-  updates.setState({checkedAt:{"example/repo":2},preview:{repositories:[{repository:"example/repo",added:[],modified:[],deleted:[],unchanged:[],error:"network unavailable"}]}});
+  updates.setState({checkedAt:{"example/repo":2},preview:{repositories:[{repository:"example/repo",snapshotId:"snapshot-one",added:[],modified:[],deleted:[],unchanged:[],error:"network unavailable"}]}});
   render(<TaskCenter/>);expect(screen.getByRole("button",{name:/^任务 ·/})).toHaveTextContent("待处理 2");openCenter();
   selectTask("ai");expect(screen.getByRole("button",{name:"重试"})).toBeInTheDocument();
 });
 it("preserves result choices across task and tab switches", () => {
   queue.setState({tasks:[task("import","running","import"),task("update","running","update")]});updates.setState({preview:report()});
-  render(<TaskCenter/>);openCenter();fireEvent.click(screen.getByRole("checkbox",{name:"Changed"}));
-  selectTask("update");selectTask("全仓库检查");expect(screen.getByRole("checkbox",{name:"Changed"})).toBeChecked();
+  render(<TaskCenter/>);openCenter();fireEvent.click(screen.getByRole("checkbox",{name:"example/repo"}));
+  selectTask("update");selectTask("全仓库检查");expect(screen.getByRole("checkbox",{name:"example/repo"})).toBeChecked();
   fireEvent.click(screen.getByRole("tab",{name:/技能导入/}));expect(screen.getByText("Changed")).not.toBeVisible();
-  fireEvent.click(screen.getByRole("tab",{name:/技能更新/}));expect(screen.getByRole("checkbox",{name:"Changed"})).toBeChecked();
+  fireEvent.click(screen.getByRole("tab",{name:/技能更新/}));expect(screen.getByRole("checkbox",{name:"example/repo"})).toBeChecked();
 });
 it("deletes failed records without changing running work", () => {
   queue.setState({tasks:[task("failed","failed"),task("running","running")]});render(<TaskCenter/>);openCenter();selectTask("failed");
@@ -96,10 +94,11 @@ it("allows deleting stopping orphan records", () => {
   queue.setState({tasks:[{...task("old import","running","import"),cancelRequested:true}]});render(<TaskCenter/>);openCenter();
   fireEvent.click(screen.getByRole("button",{name:"删除任务记录：old import"}));expect(queue.getState().tasks).toHaveLength(0);
 });
-it("dismisses failed repository results", () => {
+it("retains failed repositories for coverage and rechecking", () => {
   queue.setState({tasks:[]});updates.setState({preview:{repositories:[{repository:"failed/repo",added:[],modified:[],deleted:[],unchanged:[],error:"network unavailable"}]}});render(<TaskCenter/>);openCenter();
-  fireEvent.click(screen.getByRole("button",{name:"移除失败仓库结果：failed/repo"}));expect(updates.getState().preview?.repositories).toEqual([]);
+  expect(screen.getByRole("alert")).toBeInTheDocument();expect(screen.getByRole("button",{name:"同步整仓"})).toBeDisabled();
 });
+
 it("filters import task status without a skill search field", () => {
   queue.setState({tasks:[{...task("Repository import","success","import"),steps:[{label:"import",command:"import_github_repo_skills",args:{privateField:"never-show"},status:"success",result:{importedSkills:[{skillName:"Imported A"},{skillName:"Imported B"}],skippedSkills:["Skipped C"]}}]},task("update","running","update")]});
   render(<TaskCenter/>);openCenter();expect(screen.getByText("Imported A")).toBeInTheDocument();expect(screen.queryByText("never-show")).not.toBeInTheDocument();
@@ -107,9 +106,9 @@ it("filters import task status without a skill search field", () => {
   fireEvent.change(screen.getByRole("combobox",{name:"筛选任务状态"}),{target:{value:"active"}});expect(screen.queryByText("Imported B")).not.toBeInTheDocument();
 });
 it("requires confirmation before enqueueing source deletions", () => {
-  const enqueue=vi.spyOn(queue.getState(),"enqueue");updates.setState({preview:{repositories:[{repository:"example/repo",added:[],modified:[],deleted:[{skillId:"removed",name:"Removed"}],unchanged:[]}]}});
-  render(<TaskCenter/>);openCenter();fireEvent.click(screen.getByRole("checkbox",{name:"Removed"}));fireEvent.click(screen.getByRole("button",{name:"应用更新"}));
-  expect(screen.getByRole("dialog",{name:"确认处理来源已删除的技能"})).toBeInTheDocument();expect(enqueue).not.toHaveBeenCalled();fireEvent.click(screen.getByRole("button",{name:"取消"}));expect(enqueue).not.toHaveBeenCalled();enqueue.mockRestore();
+  const enqueue=vi.spyOn(queue.getState(),"enqueue");updates.setState({preview:{repositories:[{repository:"example/repo",snapshotId:"snapshot-one",added:[],modified:[],deleted:[{skillId:"removed",name:"Removed"}],unchanged:[]}]}});
+  render(<TaskCenter/>);openCenter();fireEvent.click(screen.getByRole("button",{name:"同步整仓"}));
+  expect(screen.getByRole("dialog",{name:"确认整仓镜像同步"})).toBeInTheDocument();expect(enqueue).not.toHaveBeenCalled();fireEvent.click(screen.getByRole("button",{name:"取消"}));expect(enqueue).not.toHaveBeenCalled();enqueue.mockRestore();
 });
 it("clears the live report but keeps unrelated import and update records", () => {
   queue.setState({tasks:[task("import","success","import"),task("update","running","update")]});updates.setState({preview:report()});render(<TaskCenter/>);openCenter();
@@ -133,8 +132,8 @@ it("keeps applying and retrying updates inside the current check report", () => 
     return id;
   });
   render(<TaskCenter/>);openCenter();
-  fireEvent.click(screen.getByRole("checkbox",{name:"Changed"}));
-  fireEvent.click(screen.getByRole("button",{name:"应用更新"}));
+  fireEvent.click(screen.getByRole("checkbox",{name:"example/repo"}));
+  fireEvent.click(screen.getByRole("button",{name:"同步所选仓库"}));fireEvent.click(screen.getByRole("button",{name:"确认同步"}));
   expect(queue.getState().tasks[0].parentReportGeneration).toBe("current-report");
   expect(within(screen.getByRole("complementary",{name:"任务列表"})).getAllByRole("button")).toHaveLength(2); // report + cleanup
   expect(screen.getByRole("tab",{name:/技能更新 1 运行中/})).toBeInTheDocument();
@@ -142,9 +141,9 @@ it("keeps applying and retrying updates inside the current check report", () => 
   expect(screen.getByRole("button",{name:"清空检查结果"})).toBeDisabled();
   act(() => {
     queue.setState(state => ({tasks:state.tasks.map(task => ({...task,status:"failed"}))}));
-    updates.setState({updateErrors:{"example/repo:changed:v1":"network unavailable"}});
+    updates.setState({updateErrors:{"mirror:snapshot-one":"network unavailable"}});
   });
-  fireEvent.click(screen.getByRole("button",{name:"重试"}));
+  fireEvent.click(screen.getByRole("button",{name:"重试整仓同步"}));fireEvent.click(screen.getByRole("button",{name:"确认同步"}));
   expect(queue.getState().tasks[1].parentReportGeneration).toBe("current-report");
   expect(within(screen.getByRole("complementary",{name:"任务列表"})).getAllByRole("button")).toHaveLength(2);
   fireEvent.click(screen.getByRole("button",{name:"停止"}));

@@ -428,6 +428,8 @@ export interface RepositorySyncPreviewItem {
 }
 
 export interface RepositorySyncPreview {
+  snapshotId?: string | null;
+  documentChanges?: {path:string;status:"added"|"modified"|"deleted"}[];
   repository: string;
   currentRef?: string | null;
   remoteRef?: string | null;
@@ -439,7 +441,13 @@ export interface RepositorySyncPreview {
   error?: string | null;
 }
 
+export interface RepositoryCoverage {
+  skillId: string; name: string; repository?: string | null;
+  status: "completed" | "failed" | "pending" | "excluded";
+  reason?: string | null;
+}
 export interface RepositorySyncPreviewReport {
+  coverage?: RepositoryCoverage[];
   repositories: RepositorySyncPreview[];
 }
 

@@ -1,0 +1,1044 @@
+//! Strict, immutable whole-repository synchronization through the existing task queue.
+use super::{
+    github_import as github, linker,
+    remote_sources::{
+        self, RepositorySyncPreview, RepositorySyncPreviewItem, RepositorySyncPreviewReport,
+    },
+    repository_docs, skills,
+};
+use crate::{
+    db::{self, DbPool},
+    path_utils::source_grouped_skill_dir,
+    AppState,
+};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use sqlx::Row;
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::{Path, PathBuf},
+};
+use tauri::State;
+
+// Also protects checks from observing an in-progress mirror. Task queue cancellation
+// is honored between repository steps; a started repository finishes its current write.
+pub(crate) static MIRROR_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+const MAX_SNAPSHOT_BYTES: usize = 128 * 1024 * 1024;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Coverage {
+    pub skill_id: String,
+    pub name: String,
+    pub repository: Option<String>,
+    pub status: String,
+    pub reason: Option<String>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+struct Snapshot {
+    version: u32,
+    repo: github::GitHubRepoRef,
+    contents: github::GitHubRepoSnapshot,
+    originals: Vec<(db::SkillSource, db::Skill)>,
+    installations: Vec<db::SkillInstallation>,
+}
+fn digest(bytes: &[u8]) -> String {
+    format!("sha256-v1:{:x}", Sha256::digest(bytes))
+}
+fn files_digest(files: &BTreeMap<String, Vec<u8>>) -> String {
+    let mut hash = Sha256::new();
+    for (name, bytes) in files {
+        hash.update((name.len() as u64).to_le_bytes());
+        hash.update(name.as_bytes());
+        hash.update((bytes.len() as u64).to_le_bytes());
+        hash.update(bytes);
+    }
+    format!("sha256-v1:{:x}", hash.finalize())
+}
+fn source_key(path: &str) -> String {
+    let path = path.trim_matches('/');
+    if path == "." {
+        "SKILL.md".into()
+    } else if path.to_ascii_lowercase().ends_with("skill.md") {
+        path.into()
+    } else {
+        format!("{path}/SKILL.md")
+    }
+}
+fn matching<'a>(group: &'a [(db::SkillSource, db::Skill)], path: &str) -> Option<&'a db::Skill> {
+    group
+        .iter()
+        .find(|(source, _)| {
+            source
+                .source_path
+                .as_deref()
+                .is_some_and(|p| source_key(p).eq_ignore_ascii_case(&source_key(path)))
+        })
+        .map(|(_, skill)| skill)
+}
+fn repo_directory(root: &Path, repo: &github::GitHubRepoRef) -> PathBuf {
+    source_grouped_skill_dir(
+        root,
+        Some(&repo.owner),
+        Some(&format!("{}/{}", repo.owner, repo.repo)),
+        None,
+        "placeholder",
+    )
+    .parent()
+    .unwrap()
+    .to_path_buf()
+}
+fn empty_report(repository: &str) -> RepositorySyncPreview {
+    RepositorySyncPreview {
+        repository: repository.into(),
+        snapshot_id: None,
+        document_changes: vec![],
+        current_ref: None,
+        remote_ref: None,
+        added: vec![],
+        modified: vec![],
+        deleted: vec![],
+        unchanged: vec![],
+        error: None,
+    }
+}
+fn validate_snapshot(snapshot: &Snapshot) -> Result<Vec<github::RemoteSkillCandidate>, String> {
+    if snapshot.version != 1 || !github::is_commit_ref(&snapshot.repo.branch) {
+        return Err("PREVIEW_EXPIRED".into());
+    }
+    let mut bytes = 0usize;
+    let mut paths = HashSet::new();
+    for (path, content) in &snapshot.contents.files {
+        bytes = bytes
+            .checked_add(content.len())
+            .ok_or("SNAPSHOT_TOO_LARGE")?;
+        if bytes > MAX_SNAPSHOT_BYTES {
+            return Err("SNAPSHOT_TOO_LARGE".into());
+        }
+        if path.contains('\\')
+            || !Path::new(path)
+                .components()
+                .all(|p| matches!(p, std::path::Component::Normal(_)))
+            || path.is_empty()
+            || path
+                .split('/')
+                .any(|p| p.contains(':') || p.ends_with(['.', ' ']))
+            || !paths.insert(path.to_lowercase())
+        {
+            return Err("UNSAFE_SNAPSHOT_PATH".into());
+        }
+    }
+    let candidates =
+        github::build_repo_skill_candidates_from_snapshot(&snapshot.repo, &snapshot.contents)?;
+    let mut targets = HashSet::new();
+    for candidate in &candidates {
+        if !targets.insert(candidate.skill_directory_name.to_lowercase()) {
+            return Err("Conflicting skill directories in repository".into());
+        }
+        github::mirror_skill_files(&snapshot.contents, &candidate.source_path)?;
+    }
+    Ok(candidates)
+}
+async fn preview(pool: &DbPool, snapshot: &Snapshot) -> Result<RepositorySyncPreview, String> {
+    let candidates = validate_snapshot(snapshot)?;
+    let mut report = empty_report(&format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo));
+    report.remote_ref = Some(snapshot.repo.branch.clone());
+    let mut matched = HashSet::new();
+    for candidate in candidates {
+        let remote = github::mirror_skill_files(&snapshot.contents, &candidate.source_path)?;
+        let mut item = RepositorySyncPreviewItem {
+            source_path: Some(candidate.source_path.clone()),
+            version: files_digest(&remote),
+            files: vec![],
+            skill_id: candidate.skill_id,
+            name: candidate.skill_name,
+        };
+        if let Some(skill) = matching(&snapshot.originals, &candidate.source_path) {
+            matched.insert(skill.id.clone());
+            item.skill_id = skill.id.clone();
+            let directory = Path::new(&skill.file_path)
+                .parent()
+                .ok_or("Invalid skill directory")?;
+            let local = if directory.exists() {
+                remote_sources::local_skill_files(directory)?
+            } else {
+                BTreeMap::new()
+            };
+            item.files = remote_sources::compare_files(&local, &remote);
+            let mut installation_changed = false;
+            for installation in snapshot
+                .installations
+                .iter()
+                .filter(|i| i.skill_id == skill.id)
+            {
+                let path = Path::new(&installation.installed_path);
+                if (installation.link_type == "copy"
+                    && (!path.exists() || remote_sources::local_skill_files(path)? != remote))
+                    || (installation.link_type != "copy"
+                        && !crate::path_utils::paths_resolve_to_same_entry(path, directory))
+                {
+                    installation_changed = true;
+                }
+            }
+            if item.files.is_empty() && !installation_changed {
+                report.unchanged.push(item);
+            } else {
+                report.modified.push(item);
+            }
+        } else {
+            item.files = remote_sources::compare_files(&BTreeMap::new(), &remote);
+            report.added.push(item);
+        }
+    }
+    for (_, skill) in &snapshot.originals {
+        if !matched.contains(&skill.id) {
+            report.deleted.push(RepositorySyncPreviewItem {
+                skill_id: skill.id.clone(),
+                name: skill.name.clone(),
+                source_path: None,
+                version: "deleted".into(),
+                files: vec![],
+            });
+        }
+    }
+    let root = db::get_skill_resource_library_dir(pool).await?;
+    report.document_changes = remote_sources::compare_files(
+        &repository_docs::files(&repo_directory(&root, &snapshot.repo))?,
+        &github::snapshot_readmes(&snapshot.contents),
+    );
+    Ok(report)
+}
+async fn persist_snapshot(pool: &DbPool, snapshot: &Snapshot) -> Result<String, String> {
+    let payload = serde_json::to_string(snapshot).map_err(|e| e.to_string())?;
+    let used: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(length(payload)),0) FROM repository_mirror_snapshots",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    if used as usize + payload.len() > 1024 * 1024 * 1024 {
+        return Err("SNAPSHOT_CACHE_FULL".into());
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    let repository = format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo).to_lowercase();
+    sqlx::query("INSERT INTO repository_mirror_snapshots(id, repository, payload, digest, created_at) VALUES(?,?,?,?,?)")
+        .bind(&id).bind(&repository).bind(&payload).bind(digest(payload.as_bytes())).bind(chrono::Utc::now().to_rfc3339())
+        .execute(pool).await.map_err(|e|e.to_string())?;
+    sqlx::query("INSERT OR IGNORE INTO repository_mirrors(repository) VALUES(?)")
+        .bind(repository)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(id)
+}
+pub async fn check(
+    pool: &DbPool,
+    repositories: Option<Vec<String>>,
+) -> Result<RepositorySyncPreviewReport, String> {
+    let _guard = MIRROR_LOCK.lock().await;
+    resume_interrupted(pool).await?;
+    linker::normalize_resource_backed_central_records_impl(pool).await?;
+    // Scan before freezing the denominator, including independent local skills.
+    skills::get_resource_library_skills_impl(pool).await?;
+    linker::normalize_resource_backed_central_records_impl(pool).await?;
+    let all = db::get_resource_library_skills(pool).await?;
+    let sources = db::get_all_skill_sources(pool).await?;
+    let mut groups = remote_sources::github_repo_source_groups(pool, false).await?;
+    for row in sqlx::query("SELECT repository FROM repository_mirrors")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        groups
+            .entry(row.get::<String, _>("repository"))
+            .or_default();
+    }
+    let scope = repositories.filter(|r| !r.is_empty()).map(|r| {
+        r.into_iter()
+            .map(|r| r.to_lowercase())
+            .collect::<HashSet<_>>()
+    });
+    let mut coverage = all
+        .iter()
+        .map(|skill| {
+            let source = sources.iter().find(|source| source.skill_id == skill.id);
+            let repository = source
+                .and_then(|s| s.source_repo.clone())
+                .map(|r| r.to_lowercase());
+            let reason = match source {
+                None => Some("local"),
+                Some(s) if matches!(s.source_type.as_str(), "local" | "manual") => Some("local"),
+                Some(s) if !matches!(s.source_type.as_str(), "github" | "skills-cli") => {
+                    Some("unsupported")
+                }
+                Some(_) if repository.is_none() => Some("missing_source"),
+                Some(_)
+                    if scope.as_ref().is_some_and(|scope| {
+                        !repository.as_ref().is_some_and(|r| scope.contains(r))
+                    }) =>
+                {
+                    Some("outside_scope")
+                }
+                _ => None,
+            };
+            Coverage {
+                skill_id: skill.id.clone(),
+                name: skill.name.clone(),
+                repository,
+                status: if reason.is_some() {
+                    "excluded"
+                } else {
+                    "pending"
+                }
+                .into(),
+                reason: reason.map(str::to_string),
+            }
+        })
+        .collect::<Vec<_>>();
+    let auth = github::github_direct_auth_from_settings(pool).await?;
+    let mut reports = Vec::new();
+    let mut groups = groups.into_iter().collect::<Vec<_>>();
+    groups.sort_by(|a, b| a.0.cmp(&b.0));
+    for (repository, originals) in groups {
+        if scope.as_ref().is_some_and(|s| !s.contains(&repository)) {
+            continue;
+        }
+        let result = async {
+            let display = originals
+                .first()
+                .and_then(|(source, _)| source.source_repo.as_deref())
+                .unwrap_or(&repository);
+            let repo = github::resolve_update_revision(display, auth.as_deref(), None).await?;
+            let contents = github::fetch_mirror_snapshot(&repo, auth.as_deref()).await?;
+            let mut installations = Vec::new();
+            for (_, skill) in &originals {
+                installations.extend(db::get_skill_installations(pool, &skill.id).await?);
+            }
+            let snapshot = Snapshot {
+                version: 1,
+                repo,
+                contents,
+                originals,
+                installations,
+            };
+            let mut report = preview(pool, &snapshot).await?;
+            let ids = snapshot
+                .originals
+                .iter()
+                .map(|(_, skill)| skill.id.clone())
+                .collect::<Vec<_>>();
+            db::record_skill_check_times(pool, &ids, &chrono::Utc::now().to_rfc3339()).await?;
+            report.snapshot_id = Some(persist_snapshot(pool, &snapshot).await?);
+            Ok::<_, String>(report)
+        }
+        .await;
+        for item in coverage
+            .iter_mut()
+            .filter(|c| c.repository.as_deref() == Some(&repository) && c.status == "pending")
+        {
+            item.status = if result.is_ok() {
+                "completed"
+            } else {
+                "failed"
+            }
+            .into();
+        }
+        reports.push(result.unwrap_or_else(|error| {
+            let mut report = empty_report(&repository);
+            report.error = Some(error);
+            report
+        }));
+    }
+    for item in coverage.iter_mut().filter(|c| c.status == "pending") {
+        item.status = "excluded".into();
+        item.reason = Some("missing_source".into());
+    }
+    Ok(RepositorySyncPreviewReport {
+        repositories: reports,
+        coverage,
+    })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrorError {
+    code: &'static str,
+}
+impl From<String> for MirrorError {
+    fn from(error: String) -> Self {
+        let code = [
+            "PREVIEW_EXPIRED",
+            "SNAPSHOT_UNAVAILABLE",
+            "LOCAL_IDENTITY_CHANGED",
+            "UNSAFE_TARGET",
+            "UNSAFE_INSTALL_TARGET",
+            "UNSAFE_SNAPSHOT_PATH",
+            "SNAPSHOT_CACHE_FULL",
+            "SNAPSHOT_TOO_LARGE",
+        ]
+        .into_iter()
+        .find(|code| error.starts_with(code))
+        .unwrap_or("WRITE_FAILED");
+        Self { code }
+    }
+}
+#[tauri::command]
+pub async fn apply_repository_snapshot(
+    state: State<'_, AppState>,
+    snapshot_id: String,
+) -> Result<(), MirrorError> {
+    apply(&state.db, &snapshot_id).await.map_err(Into::into)
+}
+pub(crate) async fn apply(pool: &DbPool, id: &str) -> Result<(), String> {
+    let _guard = MIRROR_LOCK.lock().await;
+    resume_interrupted(pool).await?;
+    let row = sqlx::query("SELECT payload,digest FROM repository_mirror_snapshots WHERE id=?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("PREVIEW_EXPIRED")?;
+    let payload: String = row.get("payload");
+    if digest(payload.as_bytes()) != row.get::<String, _>("digest") {
+        return Err("SNAPSHOT_UNAVAILABLE".into());
+    }
+    let snapshot: Snapshot = serde_json::from_str(&payload).map_err(|_| "SNAPSHOT_UNAVAILABLE")?;
+    let result = apply_contents(pool, id, &snapshot).await;
+    if result.is_err() {
+        sqlx::query("UPDATE repository_mirror_snapshots SET state='failed' WHERE id=?")
+            .bind(id)
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    result
+}
+async fn apply_contents(pool: &DbPool, id: &str, snapshot: &Snapshot) -> Result<(), String> {
+    linker::normalize_resource_backed_central_records_impl(pool).await?;
+    let candidates = validate_snapshot(snapshot)?;
+    let repository = format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo);
+    let root = db::get_skill_resource_library_dir(pool).await?;
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let mut current = remote_sources::github_repo_source_groups(pool, false)
+        .await?
+        .remove(&repository.to_lowercase())
+        .unwrap_or_default();
+    // Ownership must survive the check/apply gap. Content edits are intentionally overwritten.
+    for (source, original) in &snapshot.originals {
+        if let Some(now) = db::get_skill_by_id(pool, &original.id).await? {
+            let now_source = db::get_skill_source(pool, &original.id)
+                .await?
+                .ok_or("LOCAL_IDENTITY_CHANGED")?;
+            if now.canonical_path != original.canonical_path
+                || now_source.source_repo != source.source_repo
+                || now_source
+                    .source_path
+                    .as_deref()
+                    .map(source_key)
+                    .map(|p| p.to_lowercase())
+                    != source
+                        .source_path
+                        .as_deref()
+                        .map(source_key)
+                        .map(|p| p.to_lowercase())
+            {
+                return Err("LOCAL_IDENTITY_CHANGED".into());
+            }
+        }
+    }
+    let mut owned_targets = HashSet::new();
+    let mut owned_sources = HashSet::new();
+    for (source, skill) in &current {
+        let target = Path::new(
+            skill
+                .canonical_path
+                .as_deref()
+                .ok_or("LOCAL_IDENTITY_CHANGED")?,
+        );
+        ensure_owned_path(&root, target)?;
+        let key = target.to_string_lossy().to_lowercase();
+        if !owned_targets.insert(key)
+            || !owned_sources.insert(
+                source
+                    .source_path
+                    .as_deref()
+                    .map(source_key)
+                    .map(|p| p.to_lowercase()),
+            )
+        {
+            return Err("LOCAL_IDENTITY_CHANGED: duplicate ownership".into());
+        }
+    }
+    let mut selections = Vec::new();
+    let mut retained = HashSet::new();
+    for candidate in &candidates {
+        let existing = matching(&current, &candidate.source_path);
+        let target = existing
+            .and_then(|s| s.canonical_path.as_deref())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                repo_directory(&root, &snapshot.repo).join(&candidate.skill_directory_name)
+            });
+        ensure_owned_path(&root, &target)?;
+        if existing.is_none() && target.exists() {
+            return Err("LOCAL_IDENTITY_CHANGED: untracked target directory".into());
+        }
+        let remote = github::mirror_skill_files(&snapshot.contents, &candidate.source_path)?;
+        if let Some(skill) = existing {
+            retained.insert(skill.id.clone());
+        }
+        if existing.is_some()
+            && target.exists()
+            && remote_sources::local_skill_files(&target)? == remote
+            && current.iter().any(|(source, skill)| {
+                Some(skill.id.as_str()) == existing.map(|s| s.id.as_str())
+                    && source.source_path.as_deref()
+                        == Some(candidate.source_manifest_path.as_str())
+            })
+        {
+            continue;
+        }
+        selections.push(github::GitHubSkillImportSelection {
+            source_path: candidate.source_path.clone(),
+            resolution: github::DuplicateResolution::Overwrite,
+            renamed_skill_id: existing.map(|s| s.id.clone()),
+        });
+    }
+    save_recovery(pool, id, &current).await?;
+    sqlx::query("UPDATE repository_mirror_snapshots SET state='applying' WHERE id=?")
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    if !selections.is_empty() {
+        github::import_prepared_snapshot(
+            pool,
+            snapshot.repo.clone(),
+            &snapshot.contents,
+            selections,
+            None,
+            None,
+        )
+        .await?;
+    } else {
+        github::mirror_documents(pool, &snapshot.repo, &snapshot.contents).await?;
+    }
+    // Reload IDs assigned to newly imported skills. Every remote candidate must exist.
+    current = remote_sources::github_repo_source_groups(pool, false)
+        .await?
+        .remove(&repository.to_lowercase())
+        .unwrap_or_default();
+    for candidate in &candidates {
+        let skill = matching(&current, &candidate.source_path)
+            .ok_or("WRITE_FAILED: missing imported skill")?;
+        retained.insert(skill.id.clone());
+        let remote = github::mirror_skill_files(&snapshot.contents, &candidate.source_path)?;
+        if remote_sources::local_skill_files(
+            Path::new(&skill.file_path)
+                .parent()
+                .ok_or("Invalid skill path")?,
+        )? != remote
+        {
+            return Err("WRITE_FAILED: content verification failed".into());
+        }
+        linker::refresh_resource_installations_impl(pool, &skill.id).await?;
+        let now = chrono::Utc::now().to_rfc3339();
+        db::upsert_skill_source_sync(
+            pool,
+            &db::SkillSourceSync {
+                skill_id: skill.id.clone(),
+                sync_scope: "github-repository".into(),
+                remote_ref: Some(snapshot.repo.branch.clone()),
+                skill_fingerprint: Some(files_digest(&remote)),
+                last_checked_at: Some(now.clone()),
+                last_sync_at: Some(now.clone()),
+                sync_status: "synced".into(),
+                sync_error: None,
+                remote_deleted: false,
+                updated_at: now,
+            },
+        )
+        .await?;
+    }
+    for (_, skill) in current {
+        if !retained.contains(&skill.id) {
+            skills::delete_resource_skill_impl(
+                pool,
+                &skill.id,
+                skills::DeleteResourceSkillOptions {
+                    cascade_uninstall: true,
+                },
+            )
+            .await?;
+        }
+    }
+    if repository_docs::files(&repo_directory(&root, &snapshot.repo))?
+        != github::snapshot_readmes(&snapshot.contents)
+    {
+        return Err("WRITE_FAILED: repository document verification failed".into());
+    }
+    sqlx::query("UPDATE repository_mirror_snapshots SET state='applied' WHERE id=?")
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    sqlx::query("UPDATE repository_mirrors SET last_snapshot_id=? WHERE repository=?")
+        .bind(id)
+        .bind(repository.to_lowercase())
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+fn ensure_owned_path(root: &Path, target: &Path) -> Result<(), String> {
+    if std::fs::symlink_metadata(root).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err("UNSAFE_TARGET".into());
+    }
+    let relative = target.strip_prefix(root).map_err(|_| "UNSAFE_TARGET")?;
+    if relative.as_os_str().is_empty() {
+        return Err("UNSAFE_TARGET".into());
+    }
+    let mut path = root.to_path_buf();
+    for component in relative.components() {
+        if !matches!(component, std::path::Component::Normal(_)) {
+            return Err("UNSAFE_TARGET".into());
+        }
+        path.push(component);
+        if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err("UNSAFE_TARGET".into());
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn resume_interrupted(pool: &DbPool) -> Result<(), String> {
+    for row in sqlx::query("SELECT id,payload,digest FROM repository_mirror_snapshots WHERE state='applying' ORDER BY created_at").fetch_all(pool).await.map_err(|e|e.to_string())? {
+        let id:String=row.get("id"); let payload:String=row.get("payload");
+        if digest(payload.as_bytes()) != row.get::<String,_>("digest") {return Err("SNAPSHOT_UNAVAILABLE".into());}
+        let snapshot:Snapshot=serde_json::from_str(&payload).map_err(|_|"SNAPSHOT_UNAVAILABLE")?;
+        if let Err(error)=apply_contents(pool,&id,&snapshot).await {
+            sqlx::query("UPDATE repository_mirror_snapshots SET state='failed' WHERE id=?").bind(&id).execute(pool).await.map_err(|e|e.to_string())?;
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    async fn fixture() -> (tempfile::TempDir, DbPool, Snapshot) {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        db::init_database(&pool).await.unwrap();
+        sqlx::query("UPDATE agents SET is_enabled=0 WHERE id NOT IN ('central','claude-code')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        db::set_skill_resource_library_dir(&pool, &dir.path().join("library").to_string_lossy())
+            .await
+            .unwrap();
+        sqlx::query("UPDATE agents SET global_skills_dir=? WHERE id='central'")
+            .bind(dir.path().join("central").to_string_lossy().as_ref())
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE agents SET global_skills_dir=? WHERE id='claude-code'")
+            .bind(dir.path().join("platform").to_string_lossy().as_ref())
+            .execute(&pool)
+            .await
+            .unwrap();
+        let repo = github::GitHubRepoRef {
+            owner: "example".into(),
+            repo: "fixtures".into(),
+            branch: "a".repeat(40),
+            normalized_url: "https://github.com/example/fixtures".into(),
+            stars: None,
+        };
+        let contents = github::GitHubRepoSnapshot {
+            files: [
+                (
+                    "skills/one/SKILL.md".into(),
+                    b"---\nname: one\ndescription: first\n---\nremote".to_vec(),
+                ),
+                (
+                    "skills/two/SKILL.md".into(),
+                    b"---\nname: two\ndescription: second\n---\nremote".to_vec(),
+                ),
+                ("README.md".into(), b"remote docs".to_vec()),
+            ]
+            .into(),
+        };
+        (
+            dir,
+            pool,
+            Snapshot {
+                version: 1,
+                repo,
+                contents,
+                originals: vec![],
+                installations: vec![],
+            },
+        )
+    }
+    async fn capture(pool: &DbPool, mut snapshot: Snapshot) -> Snapshot {
+        linker::normalize_resource_backed_central_records_impl(pool)
+            .await
+            .unwrap();
+        snapshot.originals = remote_sources::github_repo_source_groups(pool, false)
+            .await
+            .unwrap()
+            .remove("example/fixtures")
+            .unwrap_or_default();
+        snapshot.installations.clear();
+        for (_, skill) in &snapshot.originals {
+            snapshot
+                .installations
+                .extend(db::get_skill_installations(pool, &skill.id).await.unwrap());
+        }
+        snapshot
+    }
+    #[tokio::test]
+    async fn mirror_imports_all_overwrites_edits_and_removes_extra_files_and_skills() {
+        let (_dir, pool, snapshot) = fixture().await;
+        // Simulate a previous selective import of only one remote skill.
+        github::import_prepared_snapshot(
+            &pool,
+            snapshot.repo.clone(),
+            &snapshot.contents,
+            vec![github::GitHubSkillImportSelection {
+                source_path: "skills/one/SKILL.md".into(),
+                resolution: github::DuplicateResolution::Overwrite,
+                renamed_skill_id: None,
+            }],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let snapshot = capture(&pool, snapshot).await;
+        let original = &snapshot.originals[0].1;
+        let path = Path::new(&original.file_path).parent().unwrap();
+        std::fs::write(path.join("SKILL.md"), "local edit").unwrap();
+        std::fs::write(path.join("local-only.txt"), "extra").unwrap();
+        let report = preview(&pool, &snapshot).await.unwrap();
+        assert_eq!(report.added.len(), 1);
+        assert_eq!(report.modified.len(), 1);
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        assert_eq!(
+            db::get_resource_library_skills(&pool).await.unwrap().len(),
+            2
+        );
+        assert!(!path.join("local-only.txt").exists());
+        assert_eq!(
+            std::fs::read(path.join("SKILL.md")).unwrap(),
+            snapshot.contents.files["skills/one/SKILL.md"]
+        );
+        // Retry the same immutable snapshot after a lost acknowledgement.
+        apply(&pool, &id).await.unwrap();
+        let mut empty = capture(&pool, snapshot).await;
+        empty.contents.files.clear();
+        let id = persist_snapshot(&pool, &empty).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        assert!(db::get_resource_library_skills(&pool)
+            .await
+            .unwrap()
+            .is_empty());
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repository_mirrors")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+        apply(&pool, &id).await.unwrap();
+    }
+    #[tokio::test]
+    async fn mirror_copy_installation_is_strict_and_deletion_uninstalls_it() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        linker::install_resource_skill_to_agent_impl(&pool, "one", "claude-code", "copy")
+            .await
+            .unwrap();
+        let snapshot = capture(&pool, snapshot).await;
+        let installed = Path::new(&snapshot.installations[0].installed_path);
+        std::fs::write(installed.join("extra.txt"), "user edit").unwrap();
+        assert_eq!(preview(&pool, &snapshot).await.unwrap().modified.len(), 1);
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        assert!(!installed.join("extra.txt").exists());
+        let mut removed = snapshot.clone();
+        removed.contents.files.remove("skills/one/SKILL.md");
+        let id = persist_snapshot(&pool, &removed).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        assert!(!installed.exists());
+        assert!(db::get_skill_installations(&pool, "one")
+            .await
+            .unwrap()
+            .is_empty());
+    }
+    #[tokio::test]
+    async fn corrupted_snapshot_cannot_write_and_documents_are_separate() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let mut next = capture(&pool, snapshot).await;
+        next.contents
+            .files
+            .insert("README.md".into(), b"new docs".to_vec());
+        let report = preview(&pool, &next).await.unwrap();
+        assert!(report.modified.is_empty());
+        assert_eq!(report.document_changes.len(), 1);
+        let id = persist_snapshot(&pool, &next).await.unwrap();
+        sqlx::query("UPDATE repository_mirror_snapshots SET digest='bad' WHERE id=?")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(apply(&pool, &id).await.unwrap_err(), "SNAPSHOT_UNAVAILABLE");
+        let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
+        assert_eq!(
+            std::fs::read(repo_directory(&root, &next.repo).join("README.md")).unwrap(),
+            b"remote docs"
+        );
+    }
+    #[tokio::test]
+    async fn interrupted_import_swaps_are_restored_before_retry() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let snapshot = capture(&pool, snapshot).await;
+        let target = Path::new(&snapshot.originals[0].1.file_path)
+            .parent()
+            .unwrap();
+        let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
+        let mut transaction = github::ImportDirectoryTransaction::new(&root).unwrap();
+        let staged = transaction.root.join("new");
+        std::fs::create_dir(&staged).unwrap();
+        std::fs::write(staged.join("SKILL.md"), "incomplete").unwrap();
+        transaction.install(&staged, target, true).unwrap();
+        std::mem::forget(transaction);
+        github::recover_import_transactions(&pool).await.unwrap();
+        assert_ne!(
+            std::fs::read(target.join("SKILL.md")).unwrap(),
+            b"incomplete"
+        );
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        sqlx::query("UPDATE repository_mirror_snapshots SET state='applying' WHERE id=?")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        resume_interrupted(&pool).await.unwrap();
+        let state: String =
+            sqlx::query_scalar("SELECT state FROM repository_mirror_snapshots WHERE id=?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(state, "applied");
+    }
+    #[tokio::test]
+    async fn root_skill_keeps_nested_resources_and_case_only_rename_keeps_identity() {
+        let (_dir, pool, mut snapshot) = fixture().await;
+        snapshot.contents.files.insert(
+            "SKILL.md".into(),
+            b"---\nname: root\ndescription: root\n---\nroot".to_vec(),
+        );
+        snapshot
+            .contents
+            .files
+            .insert("references/guide.md".into(), b"guide".to_vec());
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let snapshot = capture(&pool, snapshot).await;
+        let root = matching(&snapshot.originals, "SKILL.md").unwrap();
+        assert!(Path::new(&root.file_path)
+            .parent()
+            .unwrap()
+            .join("references/guide.md")
+            .is_file());
+        let original = matching(&snapshot.originals, "skills/one/SKILL.md")
+            .unwrap()
+            .clone();
+        let mut next = snapshot;
+        let bytes = next.contents.files.remove("skills/one/SKILL.md").unwrap();
+        next.contents
+            .files
+            .insert("skills/ONE/SKILL.md".into(), bytes);
+        let id = persist_snapshot(&pool, &next).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let updated = db::get_skill_by_id(&pool, &original.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.canonical_path, original.canonical_path);
+        assert_eq!(
+            db::get_skill_source(&pool, &original.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .source_path
+                .as_deref(),
+            Some("skills/ONE/SKILL.md")
+        );
+    }
+    #[tokio::test]
+    async fn local_git_and_empty_directories_are_not_exempt_from_mirroring() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let snapshot = capture(&pool, snapshot).await;
+        let target = Path::new(&snapshot.originals[0].1.file_path)
+            .parent()
+            .unwrap();
+        std::fs::create_dir(target.join("empty")).unwrap();
+        std::fs::create_dir(target.join(".git")).unwrap();
+        std::fs::write(target.join(".git/local"), b"extra").unwrap();
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        assert!(!target.join("empty").exists());
+        assert!(!target.join(".git").exists());
+    }
+    #[tokio::test]
+    async fn duplicate_skill_names_in_different_plugins_are_both_imported() {
+        let (_dir, pool, mut snapshot) = fixture().await;
+        snapshot.contents.files.clear();
+        for plugin in ["a", "b"] {
+            snapshot.contents.files.insert(
+                format!("plugins/{plugin}/skills/shared/SKILL.md"),
+                format!("---\nname: shared\ndescription: {plugin}\n---\n{plugin}").into_bytes(),
+            );
+        }
+        let report = preview(&pool, &snapshot).await.unwrap();
+        assert_eq!(report.added.len(), 2);
+        assert_ne!(report.added[0].skill_id, report.added[1].skill_id);
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        assert_eq!(
+            db::get_resource_library_skills(&pool).await.unwrap().len(),
+            2
+        );
+    }
+    #[tokio::test]
+    async fn central_links_survive_updates_and_are_removed_with_remote_deletion() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let link = linker::add_resource_skill_to_central_impl(&pool, "one")
+            .await
+            .unwrap();
+        let mut next = capture(&pool, snapshot).await;
+        next.contents
+            .files
+            .insert("skills/one/extra.txt".into(), b"new".to_vec());
+        let id = persist_snapshot(&pool, &next).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        assert_eq!(
+            std::fs::read(Path::new(&link.central_path).join("extra.txt")).unwrap(),
+            b"new"
+        );
+        next = capture(&pool, next).await;
+        next.contents
+            .files
+            .retain(|path, _| !path.starts_with("skills/one/"));
+        let id = persist_snapshot(&pool, &next).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        assert!(std::fs::symlink_metadata(&link.central_path).is_err());
+    }
+    #[test]
+    fn rejects_case_collisions_and_escaping_paths() {
+        let contents = github::GitHubRepoSnapshot {
+            files: [("../outside".into(), vec![])].into(),
+        };
+        let snapshot = Snapshot {
+            version: 1,
+            repo: github::GitHubRepoRef {
+                owner: "example".into(),
+                repo: "fixtures".into(),
+                branch: "a".repeat(40),
+                normalized_url: String::new(),
+                stars: None,
+            },
+            contents,
+            originals: vec![],
+            installations: vec![],
+        };
+        assert!(validate_snapshot(&snapshot).is_err());
+        let mut snapshot = snapshot;
+        snapshot.contents.files =
+            [("README.md".into(), vec![]), ("readme.md".into(), vec![])].into();
+        assert!(validate_snapshot(&snapshot).is_err());
+    }
+}
+
+async fn save_recovery(
+    pool: &DbPool,
+    id: &str,
+    group: &[(db::SkillSource, db::Skill)],
+) -> Result<(), String> {
+    let exists: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM repository_mirror_recovery WHERE snapshot_id=?")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    if exists > 0 {
+        return Ok(());
+    }
+    let mut items = Vec::new();
+    for (source, skill) in group {
+        let path = Path::new(&skill.file_path)
+            .parent()
+            .ok_or("Invalid skill directory")?;
+        let files = if path.exists() {
+            remote_sources::local_skill_files(path)?
+        } else {
+            BTreeMap::new()
+        };
+        let installations = db::get_skill_installations(pool, &skill.id).await?;
+        let mut copies = Vec::new();
+        for installation in &installations {
+            if installation.link_type == "copy" && Path::new(&installation.installed_path).exists()
+            {
+                copies.push(serde_json::json!({"installation":installation,"files":remote_sources::local_skill_files(Path::new(&installation.installed_path))?}));
+            }
+        }
+        let metadata=sqlx::query("SELECT notes,tags FROM skill_metadata WHERE skill_id=?").bind(&skill.id).fetch_optional(pool).await.map_err(|e|e.to_string())?.map(|r|serde_json::json!({"notes":r.get::<Option<String>,_>("notes"),"tags":r.get::<String,_>("tags")}));
+        let collections: Vec<String> =
+            sqlx::query_scalar("SELECT collection_id FROM collection_skills WHERE skill_id=?")
+                .bind(&skill.id)
+                .fetch_all(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+        items.push(serde_json::json!({"source":source,"skill":skill,"files":files,"installations":installations,"copies":copies,"metadata":metadata,"collections":collections}));
+    }
+    let payload = serde_json::to_string(&items).map_err(|e| e.to_string())?;
+    sqlx::query("INSERT INTO repository_mirror_recovery(snapshot_id,payload) VALUES(?,?)")
+        .bind(id)
+        .bind(payload)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Released reports no longer authorize writes. Never evict an unfinished mirror or recovery data.
+#[tauri::command]
+pub async fn release_repository_snapshots(
+    state: State<'_, AppState>,
+    snapshot_ids: Vec<String>,
+) -> Result<(), MirrorError> {
+    let _guard = MIRROR_LOCK.lock().await;
+    for id in snapshot_ids {
+        sqlx::query("DELETE FROM repository_mirror_snapshots WHERE id=? AND state <> 'applying'")
+            .bind(id)
+            .execute(&state.db)
+            .await
+            .map_err(|_| MirrorError {
+                code: "WRITE_FAILED",
+            })?;
+    }
+    Ok(())
+}

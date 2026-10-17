@@ -15,3 +15,5 @@ pub(crate) mod repository_docs;
 
 pub mod notebook;
 pub mod notebook_repository;
+
+pub mod repository_mirror;

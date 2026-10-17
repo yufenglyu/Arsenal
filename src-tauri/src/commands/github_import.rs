@@ -126,7 +126,7 @@ struct SkillFrontmatter {
     description: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RemoteSkillCandidate {
     pub(crate) source_path: String,
     pub(crate) source_manifest_path: String,
@@ -138,9 +138,9 @@ pub(crate) struct RemoteSkillCandidate {
     pub(crate) download_url: String,
 }
 
-#[derive(Debug, Clone, Default)]
-struct GitHubRepoSnapshot {
-    files: HashMap<String, Vec<u8>>,
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub(crate) struct GitHubRepoSnapshot {
+    pub(crate) files: HashMap<String, Vec<u8>>,
 }
 
 const GITHUB_PAT_SETTING_KEY: &str = "github_pat";
@@ -387,6 +387,7 @@ async fn import_github_repo_skills_cancellable(
     app: Option<&AppHandle>,
     operation: Option<&super::github_cancellation::Operation>,
 ) -> Result<GitHubRepoImportResult, String> {
+    let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
     emit_github_import_progress(
         app,
         GitHubImportProgressPayload {
@@ -417,7 +418,15 @@ async fn import_github_repo_skills_cancellable(
     } else {
         prepare.await?
     };
-    let candidates = build_repo_skill_candidates_from_snapshot(&repo, &snapshot)?;
+    import_prepared_snapshot(pool, repo, &snapshot, selections, app, operation).await
+}
+
+pub(crate) async fn import_prepared_snapshot(
+    pool: &DbPool, repo: GitHubRepoRef, snapshot: &GitHubRepoSnapshot,
+    selections: Vec<GitHubSkillImportSelection>, app: Option<&AppHandle>,
+    operation: Option<&super::github_cancellation::Operation>,
+) -> Result<GitHubRepoImportResult, String> {
+    let candidates = build_repo_skill_candidates_from_snapshot(&repo, snapshot)?;
     if candidates.is_empty() {
         return Err(
             "No importable skills found in this repository. Supported layouts are repo-root skill directories, a skills/ or skill-package/ directory, or plugin skills under plugins/*/skills/."
@@ -536,7 +545,7 @@ async fn import_github_repo_skills_cancellable(
     }
 
     for op in &mut staging_ops {
-        op.source_files = collect_snapshot_source_files(&snapshot, &op.candidate.source_path)?;
+        op.source_files = collect_snapshot_source_files(snapshot, &op.candidate.source_path)?;
     }
 
     let total_files = staging_ops
@@ -585,7 +594,7 @@ async fn import_github_repo_skills_cancellable(
         );
         let staged_dir = files_transaction.root.join(format!("new-{index}"));
         write_snapshot_source_to_target(
-            &snapshot,
+            snapshot,
             &op.source_files,
             &staged_dir,
             &op.candidate.source_path,
@@ -664,14 +673,17 @@ async fn import_github_repo_skills_cancellable(
         let repository_dir = source_grouped_skill_dir(&resource_root, Some(&repo.owner),
             Some(&format!("{}/{}", repo.owner, repo.repo)), None, "placeholder")
             .parent().ok_or("Repository directory is missing")?.to_path_buf();
-        stage_repository_readme(&snapshot, &repository_dir, &mut files_transaction)?;
+        stage_repository_readme(snapshot, &repository_dir, &mut files_transaction)?;
     }
 
+    sqlx::query("INSERT INTO import_transaction_receipts(id) VALUES(?)")
+        .bind(files_transaction.root.to_string_lossy().as_ref())
+        .execute(&mut *database_transaction).await.map_err(|e|e.to_string())?;
     database_transaction
         .commit()
         .await
         .map_err(|e| e.to_string())?;
-    files_transaction.commit();
+    files_transaction.commit()?;
 
     emit_github_import_progress(
         app,
@@ -739,14 +751,16 @@ impl ImportDirectoryTransaction {
                     );
                 }
                 let previous = self.root.join(format!("old-{}", self.swaps.len()));
-                std::fs::rename(target, &previous)
-                    .map_err(|e| format!("Failed to preserve previous skill directory: {e}"))?;
                 Some(previous)
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.to_string()),
         };
-        self.swaps.push((target.to_path_buf(), previous));
+        self.swaps.push((target.to_path_buf(), previous.clone()));
+        self.save_journal()?;
+        if let Some(previous) = previous {
+            std::fs::rename(target, &previous).map_err(|e| format!("Failed to preserve previous skill directory: {e}"))?;
+        }
         std::fs::rename(staged, target).map_err(|e| format!("Failed to install staged skill: {e}"))
     }
 
@@ -754,8 +768,9 @@ impl ImportDirectoryTransaction {
         match std::fs::symlink_metadata(target) {
             Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
                 let previous = self.root.join(format!("old-{}", self.swaps.len()));
+                self.swaps.push((target.to_path_buf(), Some(previous.clone())));
+                self.save_journal()?;
                 std::fs::rename(target, &previous).map_err(|e| e.to_string())?;
-                self.swaps.push((target.to_path_buf(), Some(previous)));
                 Ok(())
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -763,8 +778,18 @@ impl ImportDirectoryTransaction {
         }
     }
 
-    pub(crate) fn commit(&mut self) {
+    fn save_journal(&self) -> Result<(), String> {
+        // Append one immutable entry before each rename; never truncate an earlier journal.
+        let path = self.root.join(format!("swap-{}.json", self.swaps.len() - 1));
+        let bytes = serde_json::to_vec(self.swaps.last().ok_or("Empty transaction")?).map_err(|e|e.to_string())?;
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(|e|e.to_string())?;
+        file.write_all(&bytes).and_then(|_|file.sync_all()).map_err(|e|e.to_string())
+    }
+    pub(crate) fn commit(&mut self) -> Result<(), String> {
         self.committed = true;
+        // Database imports additionally commit a receipt in the same SQL transaction.
+        std::fs::File::create(self.root.join("committed")).and_then(|file|file.sync_all()).map_err(|e|e.to_string())
     }
 }
 
@@ -773,6 +798,8 @@ impl Drop for ImportDirectoryTransaction {
         let mut restored = true;
         if !self.committed {
             for (target, previous) in self.swaps.iter().rev() {
+                // A journal may precede a rename that never happened.
+                if previous.as_ref().is_some_and(|old| !old.exists()) { continue; }
                 let removal = if target.is_dir() { std::fs::remove_dir_all(target) } else if target.exists() { std::fs::remove_file(target) } else { Ok(()) };
                 if removal.is_err() {
                     restored = false;
@@ -786,7 +813,7 @@ impl Drop for ImportDirectoryTransaction {
             }
         }
         // Never erase recovery copies if the OS prevents rollback.
-        if restored {
+        if restored && !self.committed {
             let _ = std::fs::remove_dir_all(&self.root);
         }
     }
@@ -844,14 +871,12 @@ async fn resolve_import_skill_id(
         occupied_ids.insert(existing.id.clone());
         return Ok(existing.id);
     }
-    let Some(existing) = db::get_skill_by_id(pool, &candidate.skill_id).await? else {
+    let existing = db::get_skill_by_id(pool, &candidate.skill_id).await?;
+    if existing.is_none() && !occupied_ids.contains(&candidate.skill_id) {
         occupied_ids.insert(candidate.skill_id.clone());
         return Ok(candidate.skill_id.clone());
-    };
-
-    let existing_same_path = existing
-        .canonical_path
-        .as_deref()
+    }
+    let existing_same_path = existing.as_ref().and_then(|skill|skill.canonical_path.as_deref())
         .is_some_and(|path| paths_resolve_to_same_entry(Path::new(path), target_dir));
     if existing_same_path {
         occupied_ids.insert(candidate.skill_id.clone());
@@ -981,7 +1006,7 @@ async fn apply_repository_metadata(pool: &DbPool, repository: &str, repo: &GitHu
     db::save_github_stars_with_executor(&mut *database, &source_key, stars).await?;
     db::save_github_stars_with_executor(&mut *database, &format!("{}/{}", repo.owner, repo.repo), stars).await?;
     database.commit().await.map_err(|e| e.to_string())?;
-    transaction.commit();
+    transaction.commit()?;
     Ok(())
 }
 
@@ -1209,10 +1234,12 @@ pub(crate) async fn fetch_repo_skill_manifest_paths(
     Ok(paths)
 }
 
+#[cfg(test)]
 pub(crate) async fn fetch_repo_preview_files(repo: &GitHubRepoRef, auth: Option<&str>) -> Result<(Vec<RemoteSkillCandidate>, HashMap<String, std::collections::BTreeMap<String, Vec<u8>>>), String> {
     fetch_repo_preview_files_scoped(repo, auth, None).await
 }
 
+#[cfg(test)]
 pub(crate) async fn fetch_repo_preview_files_scoped(repo: &GitHubRepoRef, auth: Option<&str>, keys: Option<&HashSet<String>>) -> Result<(Vec<RemoteSkillCandidate>, HashMap<String, std::collections::BTreeMap<String, Vec<u8>>>), String> {
     let client = github_client()?;
     let snapshot = download_repo_snapshot(&client, repo, auth).await?;
@@ -1237,7 +1264,7 @@ pub(crate) async fn fetch_repo_preview_files_scoped(repo: &GitHubRepoRef, auth: 
     Ok((candidates, contents))
 }
 
-fn build_repo_skill_candidates_from_snapshot(
+pub(crate) fn build_repo_skill_candidates_from_snapshot(
     repo: &GitHubRepoRef,
     snapshot: &GitHubRepoSnapshot,
 ) -> Result<Vec<RemoteSkillCandidate>, String> {
@@ -1295,6 +1322,16 @@ fn build_repo_skill_candidates_from_snapshot(
         });
     }
 
+    let mut counts = HashMap::<String,usize>::new();
+    for candidate in &candidates { *counts.entry(candidate.skill_directory_name.to_lowercase()).or_default() += 1; }
+    for candidate in &mut candidates {
+        if counts[&candidate.skill_directory_name.to_lowercase()] > 1 {
+            use sha2::{Digest, Sha256};
+            let hash = format!("{:x}",Sha256::digest(candidate.source_path.as_bytes()));
+            candidate.skill_directory_name = format!("{}-{}",candidate.skill_directory_name,&hash[..12]);
+            candidate.skill_id = sanitize_skill_id(&candidate.skill_directory_name)?;
+        }
+    }
     Ok(candidates)
 }
 
@@ -1418,7 +1455,7 @@ where F: Fn(String) -> Fut,
     let roots = paths.iter().filter_map(|(path, _)| classify_skill_manifest_path(path))
         .map(|manifest| snapshot_source_directory(&manifest.source_path)).collect::<HashSet<_>>();
     let selected = paths.iter().filter(|(path, _)| repository_docs::language(path).is_some() || roots.iter().any(|root| {
-        if root.is_empty() { !path.contains('/') } else { path.starts_with(&format!("{root}/")) }
+        if root.is_empty() { true } else { path.starts_with(&format!("{root}/")) }
     })).collect::<Vec<_>>();
     let selected_bytes = selected.iter().map(|(_, size)| *size).sum::<u64>();
     // Keep one archive for large skill collections, avoiding per-file HTTP overhead.
@@ -1434,7 +1471,7 @@ where F: Fn(String) -> Fut,
     Ok(Some(GitHubRepoSnapshot { files }))
 }
 
-fn snapshot_readmes(snapshot: &GitHubRepoSnapshot) -> std::collections::BTreeMap<String, Vec<u8>> {
+pub(crate) fn snapshot_readmes(snapshot: &GitHubRepoSnapshot) -> std::collections::BTreeMap<String, Vec<u8>> {
     let mut entries = snapshot.files.iter().filter(|(path, _)| repository_docs::language(path).is_some()).collect::<Vec<_>>();
     entries.sort_by_key(|(path, _)| *path);
     let mut names = HashSet::new();
@@ -1451,6 +1488,8 @@ fn stage_repository_readme(snapshot: &GitHubRepoSnapshot, directory: &Path, tran
         if !names.contains(&path.file_name().unwrap().to_string_lossy().to_lowercase()) { transaction.remove_file(&path)?; }
     }
     for (index, (name, bytes)) in documents.iter().enumerate() {
+        if std::fs::symlink_metadata(directory.join(name)).is_ok_and(|m|m.is_file() && !m.file_type().is_symlink())
+            && std::fs::read(directory.join(name)).is_ok_and(|existing|existing==*bytes) {continue;}
         let staged = transaction.root.join(format!("repository-readme-{index}"));
         std::fs::write(&staged, bytes).map_err(|e| format!("Failed to stage repository README: {e}"))?;
         transaction.install(&staged, &directory.join(name), true)?;
@@ -1463,7 +1502,7 @@ type SnapshotKey = (String, String, String, Option<String>);
 static SNAPSHOTS: tokio::sync::Mutex<Vec<(SnapshotKey, SnapshotCell)>> = tokio::sync::Mutex::const_new(Vec::new());
 const SNAPSHOT_CACHE_BYTES: usize = 512 * 1024 * 1024;
 
-fn is_commit_ref(reference: &str) -> bool {
+pub(crate) fn is_commit_ref(reference: &str) -> bool {
     reference.len() == 40 && reference.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
@@ -1652,14 +1691,14 @@ fn collect_snapshot_source_files(
     source_path: &str,
 ) -> Result<Vec<SnapshotSourceFile>, String> {
     let source_directory = snapshot_source_directory(source_path);
+    let nested_skill_roots = snapshot.files.keys().filter_map(|path| classify_skill_manifest_path(path))
+        .map(|manifest| snapshot_source_directory(&manifest.source_path)).filter(|root| !root.is_empty()).collect::<HashSet<_>>();
     let mut files = snapshot
         .files
         .iter()
         .filter_map(|(path, bytes)| {
             let relative_path = if source_directory.is_empty() {
-                if path.contains('/') {
-                    return None;
-                }
+                if nested_skill_roots.iter().any(|root| path.starts_with(&format!("{root}/"))) { return None; }
                 path.clone()
             } else {
                 let prefix = format!("{}/", source_directory);
@@ -2437,7 +2476,7 @@ mod tests {
         {
             let mut transaction = ImportDirectoryTransaction::new(&library).unwrap();
             stage_repository_readme(&snapshot, &directory, &mut transaction).unwrap();
-            transaction.commit();
+            transaction.commit().unwrap();
         }
         assert_eq!(std::fs::read(&target).unwrap(), b"new");
         let empty = GitHubRepoSnapshot { files: HashMap::new() };
@@ -2449,7 +2488,7 @@ mod tests {
         assert_eq!(std::fs::read(&target).unwrap(), b"new");
         let mut transaction = ImportDirectoryTransaction::new(&library).unwrap();
         stage_repository_readme(&empty, &directory, &mut transaction).unwrap();
-        transaction.commit();
+        transaction.commit().unwrap();
         assert!(!target.exists());
     }
 
@@ -3026,7 +3065,7 @@ mod tests {
     }
 
     #[test]
-    fn committed_swap_keeps_complete_new_skill_and_removes_recovery_copy() {
+    fn committed_swap_keeps_new_skill_and_preserves_recovery_copy() {
         let temp = tempdir().unwrap();
         let library = temp.path().join("library");
         let existing = library.join("demo");
@@ -3041,7 +3080,7 @@ mod tests {
             std::fs::write(staged.join("SKILL.md"), "new").unwrap();
             std::fs::write(staged.join("asset.txt"), "asset").unwrap();
             transaction.install(&staged, &existing, true).unwrap();
-            transaction.commit();
+            transaction.commit().unwrap();
         }
         assert_eq!(
             std::fs::read_to_string(existing.join("SKILL.md")).unwrap(),
@@ -3051,7 +3090,8 @@ mod tests {
             std::fs::read_to_string(existing.join("asset.txt")).unwrap(),
             "asset"
         );
-        assert!(!staging_root.exists());
+        assert_eq!(std::fs::read(staging_root.join("old-0/SKILL.md")).unwrap(), b"old");
+        assert!(staging_root.join("committed").exists());
     }
 
     #[test]
@@ -4093,4 +4133,97 @@ metadata: {"openclaw":{"requires":{"bins":["python3"]},"env":["PEXELS_API_KEY"]}
         }
     }
 
+}
+
+/// Mirror checks download once; application consumes these exact persisted bytes.
+pub(crate) async fn fetch_mirror_snapshot(repo: &GitHubRepoRef, auth: Option<&str>) -> Result<GitHubRepoSnapshot, String> {
+    if !is_commit_ref(&repo.branch) { return Err("SNAPSHOT_UNAVAILABLE: immutable commit required".into()); }
+    let client = github_client()?;
+    let tree = fetch_repository_tree(&client, repo, auth).await?;
+    if tree["truncated"].as_bool() != Some(false) { return Err("SNAPSHOT_UNAVAILABLE: incomplete repository tree".into()); }
+    let entries = tree["tree"].as_array().ok_or("SNAPSHOT_UNAVAILABLE: missing tree")?;
+    let snapshot = (*download_repo_snapshot(&client, repo, auth).await?).clone();
+    let candidates = build_repo_skill_candidates_from_snapshot(repo, &snapshot)?;
+    let roots = entries.iter().filter_map(|entry| entry["path"].as_str().and_then(classify_skill_manifest_path))
+        .map(|manifest| snapshot_source_directory(&manifest.source_path)).collect::<HashSet<_>>();
+    // Verify the complete expected manifest set and every managed resource against
+    // the immutable tree before interpreting any missing local content as deletion.
+    for entry in entries {
+        let path = entry["path"].as_str().ok_or("SNAPSHOT_UNAVAILABLE: missing path")?;
+        let selected = repository_docs::language(path).is_some() || roots.iter().any(|root| if root.is_empty() { true } else { path.starts_with(&format!("{root}/")) });
+        if !selected || entry["type"] == "tree" { continue; }
+        if entry["type"] != "blob" || !matches!(entry["mode"].as_str(), Some("100644" | "100755")) {return Err("UNSAFE_SNAPSHOT_PATH: unsupported managed file type".into());}
+        let expected = entry["size"].as_u64().ok_or("SNAPSHOT_UNAVAILABLE: missing size")?;
+        if snapshot.files.get(path).is_none_or(|bytes| bytes.len() as u64 != expected) { return Err("SNAPSHOT_UNAVAILABLE: incomplete managed files".into()); }
+    }
+    // Persist only managed skill bytes and shared documents, never unrelated repo artifacts.
+    let mut files = snapshot.files.iter().filter(|(path,_)|repository_docs::language(path).is_some()).map(|(path,bytes)|(path.clone(),bytes.clone())).collect::<HashMap<_,_>>();
+    for candidate in candidates {
+        for file in collect_snapshot_source_files(&snapshot, &candidate.source_path)? {
+            files.insert(file.repo_path.clone(), snapshot.files[&file.repo_path].clone());
+        }
+    }
+    Ok(GitHubRepoSnapshot {files})
+}
+
+pub(crate) fn mirror_skill_files(snapshot: &GitHubRepoSnapshot, source: &str) -> Result<std::collections::BTreeMap<String, Vec<u8>>, String> {
+    collect_snapshot_source_files(snapshot, source)?.into_iter().map(|file| {
+        let name = if file.relative_path.eq_ignore_ascii_case("skill.md") { "SKILL.md".into() } else { file.relative_path };
+        Ok((name, snapshot.files.get(&file.repo_path).ok_or("SNAPSHOT_UNAVAILABLE: incomplete file list")?.clone()))
+    }).collect()
+}
+pub(crate) async fn mirror_documents(pool: &DbPool, repo: &GitHubRepoRef, snapshot: &GitHubRepoSnapshot) -> Result<(), String> {
+    let root = skill_resource_library_root(pool).await?;
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let target = source_grouped_skill_dir(&root, Some(&repo.owner), Some(&format!("{}/{}",repo.owner,repo.repo)), None, "placeholder");
+    if repository_docs::files(target.parent().ok_or("Invalid repository directory")?)? == snapshot_readmes(snapshot) {return Ok(());}
+    let mut transaction = ImportDirectoryTransaction::new(&root)?;
+    std::fs::create_dir_all(target.parent().ok_or("Invalid repository directory")?).map_err(|e| e.to_string())?;
+    stage_repository_readme(snapshot, target.parent().ok_or("Invalid repository directory")?, &mut transaction)?;
+    transaction.commit()?;
+    Ok(())
+}
+
+/// Recover interrupted swaps before scanning, so a temporary missing SKILL.md cannot erase identity.
+pub(crate) async fn recover_import_transactions(pool: &DbPool) -> Result<(), String> {
+    let library = db::get_skill_resource_library_dir(pool).await?;
+    let Some(parent) = library.parent().filter(|p| p.exists()) else { return Ok(()); };
+    let installs = sqlx::query("SELECT installed_path FROM skill_installations").fetch_all(pool).await.map_err(|e|e.to_string())?;
+    let allowed = installs.into_iter().map(|r| PathBuf::from(r.get::<String,_>("installed_path"))).collect::<HashSet<_>>();
+    for entry in std::fs::read_dir(parent).map_err(|e|e.to_string())? {
+        let entry = entry.map_err(|e|e.to_string())?;
+        if !entry.file_name().to_string_lossy().starts_with(".skillshub-import-") || !entry.file_type().map_err(|e|e.to_string())?.is_dir() { continue; }
+        let root = entry.path();
+        if root.join("committed").exists() || root.join("recovered").exists() { continue; }
+        let committed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM import_transaction_receipts WHERE id=?").bind(root.to_string_lossy().as_ref()).fetch_one(pool).await.map_err(|e|e.to_string())?;
+        if committed > 0 { std::fs::write(root.join("committed"), b"").map_err(|e|e.to_string())?; continue; }
+        let mut swaps = Vec::new();
+        for file in std::fs::read_dir(&root).map_err(|e|e.to_string())? {
+            let file = file.map_err(|e|e.to_string())?;
+            let name = file.file_name().to_string_lossy().into_owned();
+            if !name.starts_with("swap-") || !name.ends_with(".json") { continue; }
+            let index: usize = name[5..name.len()-5].parse().map_err(|_|"Invalid recovery journal")?;
+            let (target, old): (PathBuf, Option<PathBuf>) = serde_json::from_slice(&std::fs::read(file.path()).map_err(|e|e.to_string())?).map_err(|_|"Invalid recovery journal")?;
+            if (!target.starts_with(&library) && !allowed.contains(&target)) || target == library
+                || target.components().any(|part|matches!(part,Component::ParentDir))
+                || old.as_ref().is_some_and(|old| old.parent()!=Some(root.as_path())) { return Err("Unsafe recovery journal".into()); }
+            let mut ancestor = target.parent();
+            while let Some(path) = ancestor {
+                if std::fs::symlink_metadata(path).is_ok_and(|m|m.file_type().is_symlink()) { return Err("Unsafe recovery target".into()); }
+                if path == parent { break; } ancestor = path.parent();
+            }
+            swaps.push((index,target,old));
+        }
+        swaps.sort_by_key(|(index,_,_)|std::cmp::Reverse(*index));
+        for (_,target,old) in swaps {
+            if old.as_ref().is_some_and(|old|!old.exists()) {continue;}
+            if let Ok(meta) = std::fs::symlink_metadata(&target) {
+                if meta.file_type().is_symlink() { return Err("Unsafe recovery target".into()); }
+                if meta.is_dir() {std::fs::remove_dir_all(&target)} else {std::fs::remove_file(&target)}.map_err(|e|e.to_string())?;
+            }
+            if let Some(old) = old {std::fs::rename(old,target).map_err(|e|e.to_string())?;}
+        }
+        std::fs::write(root.join("recovered"),b"").map_err(|e|e.to_string())?;
+    }
+    Ok(())
 }

@@ -13,10 +13,11 @@ it("counts only the latest attempt and groups related failures", () => {
   expect(activityAttention(tasks,null,{},null).attention.map(t => t.id)).toEqual(["latest","other"]);
   expect(activityGroups(tasks)).toHaveLength(2);
 });
-it("does not count an active replacement as another pending deletion", () => {
-  const preview = {repositories:[{repository:"example/repo",added:[{skillId:"new",name:"New",sourcePath:"new/SKILL.md",version:"v2"}],modified:[],deleted:[{skillId:"old",name:"Old",version:"v1"}],unchanged:[]}]};
-  expect(pendingUpdateCount(preview,[],[])).toBe(1);
-  expect(pendingUpdateCount(preview,[],[task("replace","running","example/repo:old:v1:replace:example/repo:new:v2")])).toBe(0);
+it("does not count an active whole-repository mirror as another pending update",()=>{
+ const preview={repositories:[{repository:"example/repo",snapshotId:"snap",added:[{skillId:"new",name:"New"}],modified:[],deleted:[{skillId:"old",name:"Old"}],unchanged:[]}]};
+ const active:BackgroundTask={id:"mirror",key:"mirror:snap",kind:"update",label:"Mirror",status:"running",createdAt:1,cancelRequested:false,locks:[],steps:[]};
+ expect(pendingUpdateCount(preview,[],[active])).toBe(0);
+ expect(pendingUpdateCount(preview,[],[])).toBe(1);
 });
 it("counts a failed check once even when the global error and task coexist", () => {
   const failed = {...task("check","failed"),kind:"check" as const,steps:[{command:"preview_source_backed_resource_repository_updates",args:{},label:"check"}]};

@@ -6,6 +6,7 @@ import type {RepositorySyncPreviewReport} from "@/types";
 export type ActivityView = "pending" | "active" | "history";
 export const needsAttention = (task: BackgroundTask) => ["failed", "partial", "interrupted", "awaiting_input"].includes(task.status);
 export function pendingUpdateCount(preview: RepositorySyncPreviewReport | null, ignored: string[], tasks: BackgroundTask[]) {
+  if (preview?.repositories.some(repo => repo.snapshotId)) return preview.repositories.filter(repo => (repo.error || repo.added.length || repo.modified.length || repo.deleted.length || repo.documentChanges?.length) && !tasks.some(task => task.key === `mirror:${repo.snapshotId}` && isTaskActive(task))).length;
   return repositoryUpdateRows(preview?.repositories ?? [], {}).filter(row => row.category !== "unchanged" && row.category !== "updated" && !ignored.includes(row.key) &&
     !tasks.some(task => (task.key === row.key || task.key.startsWith(`${row.pairKey}:replace:`)) && isTaskActive(task))).length + (preview?.repositories.filter(repo => repo.error).length ?? 0);
 }

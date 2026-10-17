@@ -5,12 +5,12 @@ export const updateItemKey = (repo:string,item:RepositorySyncPreviewItem) => `${
 export function repositoryUpdateRows(repositories:RepositorySyncPreview[], pairs:Record<string,string>) {
   return repositories.flatMap(repo => {
     if (repo.error) return [];
-    const candidates=repo.deleted.length ? repo.added.filter(item=>item.sourcePath && item.version) : [];
+    const candidates: RepositorySyncPreviewItem[] = [];
     return updateCategories.flatMap(category => (repo[category] ?? [])
       .filter(item=>category!=="added" || !candidates.includes(item))
       .map(item=>{
         const pairKey=updateItemKey(repo.repository,item);
-        const replacement=category==="deleted" ? candidates.find(candidate=>updateItemKey(repo.repository,candidate)===pairs[pairKey]) ?? (repo.deleted.length===1 && candidates.length===1 ? candidates[0] : undefined) : undefined;
+        const replacement=category==="deleted" ? candidates.find(candidate=>updateItemKey(repo.repository,candidate)===pairs[pairKey]) ?? undefined : undefined;
         return {repo:repo.repository,error:repo.error,item,category,pairKey,replacement,
           candidates:category==="deleted" ? candidates : [],
           key:replacement ? `${pairKey}:replace:${updateItemKey(repo.repository,replacement)}` : pairKey};

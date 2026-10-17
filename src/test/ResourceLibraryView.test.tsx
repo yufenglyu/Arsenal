@@ -608,9 +608,9 @@ describe("ResourceLibraryView delete", () => {
     expect(mockSyncSourceBackedSkills).not.toHaveBeenCalled();
     vi.mocked(invoke).mockResolvedValue(undefined);
     fireEvent.click(screen.getByRole("button", {name: /任务/}));
-    fireEvent.click(await screen.findByRole("checkbox", {name:"resource-demo"}));
-    fireEvent.click(await screen.findByRole("button", { name: "应用更新" }));
-    await waitFor(()=>expect(invoke).toHaveBeenCalledWith("apply_repository_update_item",expect.objectContaining({repository:"owner/repo",skillId:"resource-demo",action:"modified"})));
+    // Legacy fixture reports must be rechecked before a strict repository write.
+    expect(await screen.findByRole("button", {name:"同步整仓"})).toBeDisabled();
+    expect(invoke).not.toHaveBeenCalledWith("apply_repository_update_item", expect.anything());
 
   });
 

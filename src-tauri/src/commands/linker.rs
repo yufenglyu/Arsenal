@@ -3786,3 +3786,65 @@ mod tests {
         );
     }
 }
+
+/// Strict mirror refreshes only recorded targets; copy edits intentionally follow the source.
+pub(crate) async fn refresh_resource_installations_impl(pool: &DbPool, skill_id: &str) -> Result<(), String> {
+    let source = resource_source_dir_for_skill(pool, skill_id).await?;
+    let expected = super::remote_sources::local_skill_files(&source)?;
+    for record in db::get_skill_installations(pool, skill_id).await? {
+        let target = install_target_for_agent_id(pool, &record.agent_id).await?;
+        let path = PathBuf::from(&record.installed_path);
+        let relative = path.strip_prefix(&target.skills_dir).map_err(|_| "UNSAFE_INSTALL_TARGET")?;
+        if relative.as_os_str().is_empty() || !relative.components().all(|part| matches!(part, Component::Normal(_))) {
+            return Err("UNSAFE_INSTALL_TARGET".into());
+        }
+        let mut ancestor = target.skills_dir.clone();
+        for part in relative.parent().unwrap_or(Path::new("")).components() {
+            ancestor.push(part);
+            if std::fs::symlink_metadata(&ancestor).is_ok_and(|m|m.file_type().is_symlink()) { return Err("UNSAFE_INSTALL_TARGET".into()); }
+        }
+        if record.link_type == "copy" {
+            if std::fs::symlink_metadata(&path).is_ok_and(|m|m.file_type().is_symlink()) { return Err("UNSAFE_INSTALL_TARGET".into()); }
+            if path.exists() && super::remote_sources::local_skill_files(&path)? == expected { continue; }
+            let root = db::get_skill_resource_library_dir(pool).await?;
+            let mut transaction = super::github_import::ImportDirectoryTransaction::new(&root)?;
+            let staged = transaction.root.join("installation");
+            copy_dir_all(&source, &staged)?;
+            transaction.install(&staged, &path, true)?;
+            if super::remote_sources::local_skill_files(&path)? != expected { return Err("WRITE_FAILED: installation verification failed".into()); }
+            transaction.commit()?;
+        } else if !crate::path_utils::paths_resolve_to_same_entry(&path, &source) {
+            // Existing linker validates and repairs recorded links, including central.
+            if record.agent_id == "central" { add_resource_skill_to_central_impl(pool, skill_id).await?; }
+            else { install_resource_skill_to_agent_impl(pool, skill_id, &record.agent_id, "symlink").await?; }
+            if !crate::path_utils::paths_resolve_to_same_entry(&path, &source) { return Err("WRITE_FAILED: installation link verification failed".into()); }
+        }
+    }
+    Ok(())
+}
+
+/// The central scanner may make a resource-backed link the canonical DB row.
+/// Before mirroring, restore the primary resource identity and record the hosted link.
+/// Standalone central directories and links outside the resource library are untouched.
+pub(crate) async fn normalize_resource_backed_central_records_impl(pool:&DbPool)->Result<(),String>{
+    let root=resolved_path(&db::get_skill_resource_library_dir(pool).await?);
+    let Some(central)=db::get_agent_by_id(pool,"central").await? else {return Ok(());};
+    let central_root=resolved_path(Path::new(&central.global_skills_dir));
+    for mut skill in db::get_central_skills(pool).await? {
+        let Some(path)=skill.canonical_path.as_deref().map(PathBuf::from) else {continue;};
+        if !resolved_symlink_entry(&path).starts_with(&central_root)
+            || !std::fs::symlink_metadata(&path).is_ok_and(|m|m.file_type().is_symlink()) {continue;}
+        let resource=resolved_path(&path);
+        if resource==root || !resource.starts_with(&root) {continue;}
+        db::upsert_skill_installation(pool,&SkillInstallation{skill_id:skill.id.clone(),agent_id:"central".into(),installed_path:path_to_string(&path),link_type:"symlink".into(),symlink_target:Some(path_to_string(&resource)),created_at:chrono::Utc::now().to_rfc3339()}).await?;
+        skill.canonical_path=Some(path_to_string(&resource));
+        skill.file_path=path_to_string(&resource.join("SKILL.md"));
+        skill.is_central=false;
+        // Generic upsert deliberately preserves central records; this verified
+        // normalization is the explicit transition back to the primary library.
+        sqlx::query("UPDATE skills SET canonical_path=?, file_path=?, is_central=0 WHERE id=? AND is_central=1")
+            .bind(&skill.canonical_path).bind(&skill.file_path).bind(&skill.id)
+            .execute(pool).await.map_err(|e|e.to_string())?;
+    }
+    Ok(())
+}

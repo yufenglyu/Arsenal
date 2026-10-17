@@ -1,3 +1,4 @@
+import {invoke, isTauriRuntime} from "@/lib/tauri";
 import { useRepositoryDocumentStore } from "./repositoryDocumentStore";
 import {activityAttention, pendingUpdateCount} from "@/lib/activityCenter";
 import {
@@ -22,7 +23,7 @@ import type {
 
 export function hasRepositoryChanges(item: RepositorySyncPreview): boolean {
   return (
-    item.added.length > 0 || item.modified.length > 0 || item.deleted.length > 0
+    item.added.length > 0 || item.modified.length > 0 || item.deleted.length > 0 || (item.documentChanges?.length ?? 0) > 0
   );
 }
 
@@ -131,6 +132,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
           set((state) => ({
             preview: state.preview ? {
               ...state.preview,
+              coverage: mergeCoverage(state.preview.coverage, report.coverage),
               repositories: state.preview.repositories.map(item => {
                 if (!requested.includes(item.repository.toLowerCase())) return item;
                 const replacement = report.repositories.find(repo => repo.repository.toLowerCase() === item.repository.toLowerCase());
@@ -164,6 +166,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
         if (previewRequest) return previewRequest;
         if (get().checkingRepository) return Promise.resolve();
         if (!repositories?.length) {
+          releaseSnapshots(get().preview?.repositories ?? []);
           useTaskQueueStore.getState().clearCheckHistory();
           set({preview: null, checkedAt: {}, reportCheckedAt: null, updateErrors: {},
             reportGeneration: crypto.randomUUID(), repositories: null, applied: false,
@@ -213,6 +216,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
       clearCheckResults: () => {
         if (get().isChecking || get().checkingRepository || useTaskQueueStore.getState().tasks.some(task =>
           isTaskActive(task) && (task.parentReportGeneration === get().reportGeneration || task.steps.some(step => step.command === "preview_source_backed_resource_repository_updates")))) return;
+        releaseSnapshots(get().preview?.repositories ?? []);
         const generation = get().reportGeneration;
         for (const task of useTaskQueueStore.getState().tasks) {
           if (generation && task.parentReportGeneration === generation) useTaskQueueStore.getState().remove(task.id);
@@ -387,7 +391,8 @@ registerTaskResult(
     const rawReport = result as RepositorySyncPreviewReport;
     if (!rawReport?.repositories) return;
     const scope = Array.isArray(step.args.repositories) ? new Set((step.args.repositories as string[]).map(repo => repo.toLowerCase())) : null;
-    const report = {repositories:rawReport.repositories.filter(repo => !scope || scope.has(repo.repository.toLowerCase()))};
+    releaseSnapshots((useRepositorySyncStore.getState().preview?.repositories ?? []).filter(old => rawReport.repositories.some(next=>next.repository.toLowerCase()===old.repository.toLowerCase() && next.snapshotId!==old.snapshotId)));
+    const report = {...rawReport, repositories:rawReport.repositories.filter(repo => !scope || scope.has(repo.repository.toLowerCase()))};
     useRepositorySyncStore.setState((state) => ({
       updateErrors: Object.fromEntries(Object.entries(state.updateErrors).filter(([key]) =>
         !report.repositories.some(repo => !repo.error && key.startsWith(`${repo.repository.toLowerCase()}:`)))),
@@ -395,6 +400,8 @@ registerTaskResult(
       preview:
         step.args.repositories && state.preview
           ? {
+              ...state.preview,
+              coverage: mergeCoverage(state.preview.coverage, report.coverage),
               repositories: [
                 ...state.preview.repositories.map(
                   (repo) =>
@@ -418,3 +425,34 @@ registerTaskResult(
     }));
   },
 );
+
+function mergeCoverage(previous: RepositorySyncPreviewReport["coverage"], incoming: RepositorySyncPreviewReport["coverage"]) {
+  if (!previous) return incoming;
+  // A partial recheck changes outcomes, never the frozen denominator.
+  return previous.map(item => incoming?.find(next => next.skillId === item.skillId && next.reason !== "outside_scope") ?? item);
+}
+registerTaskResult("apply_repository_snapshot", async step => {
+  useRepositorySyncStore.setState(state => {
+    if (!state.preview) return {};
+    const preview = {...state.preview, repositories:state.preview.repositories.map(repo => repo.snapshotId === step.args.snapshotId
+      ? {...repo, updated:[...(repo.updated ?? []), ...repo.added, ...repo.modified, ...repo.deleted], added:[], modified:[], deleted:[], documentChanges:[]}
+      : repo)};
+    const updateErrors = {...state.updateErrors};
+    delete updateErrors[`mirror:${step.args.snapshotId}`];
+    return {preview, updateErrors, applied:preview.repositories.every(repo => !repo.error && !hasRepositoryChanges(repo))};
+  });
+  useRepositoryDocumentStore.getState().invalidate();
+});
+registerTaskFailure("apply_repository_snapshot", step => {
+  useRepositorySyncStore.setState(state => ({updateErrors:{...state.updateErrors,[`mirror:${step.args.snapshotId}`]:step.error ?? i18n.t("workflow.operationFailed")}}));
+});
+registerTaskCompletion("apply_repository_snapshot", async () => {
+  await Promise.all([useResourceLibraryStore.getState().loadResourceLibrary(),useCentralSkillsStore.getState().loadCentralSkills()]);
+});
+
+function releaseSnapshots(repositories: RepositorySyncPreview[]) {
+  if (!isTauriRuntime()) return;
+  const tasks = useTaskQueueStore.getState().tasks;
+  const snapshotIds = repositories.flatMap(repo => repo.snapshotId && !tasks.some(task => isTaskActive(task) && task.steps.some(step=>step.args.snapshotId===repo.snapshotId)) ? [repo.snapshotId] : []);
+  if (snapshotIds.length) void invoke("release_repository_snapshots", {snapshotIds}).catch(()=>{/* A retained cache is safe; never fail a check because cleanup failed. */});
+}

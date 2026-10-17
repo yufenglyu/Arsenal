@@ -341,8 +341,9 @@ pub struct SkillSourceUpdateReport {
     pub items: Vec<SkillSourceUpdateItem>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepositoryFileChange { pub path: String, pub status: String }
+#[cfg(test)]
 fn content_version(files: &std::collections::BTreeMap<String, Vec<u8>>) -> String {
     let mut hash = 0xcbf29ce484222325u64;
     for (path, bytes) in files {
@@ -352,21 +353,25 @@ fn content_version(files: &std::collections::BTreeMap<String, Vec<u8>>) -> Strin
     }
     format!("{hash:016x}")
 }
-fn local_skill_files(root: &Path) -> Result<std::collections::BTreeMap<String,Vec<u8>>,String> {
+pub(crate) fn local_skill_files(root: &Path) -> Result<std::collections::BTreeMap<String,Vec<u8>>,String> {
     fn visit(root:&Path,dir:&Path,out:&mut std::collections::BTreeMap<String,Vec<u8>>) -> Result<(),String> {
         for entry in std::fs::read_dir(dir).map_err(|e|e.to_string())? {
             let entry=entry.map_err(|e|e.to_string())?;let path=entry.path();
             let kind=entry.file_type().map_err(|e|e.to_string())?;
             if kind.is_symlink() {return Err("Cannot compare a symlink inside a skill directory".into());}
-            if entry.file_name()==".git" {continue;}
-            if kind.is_dir() {visit(root,&path,out)?;} else if kind.is_file() {
+            if kind.is_dir() {
+                visit(root,&path,out)?;
+                if std::fs::read_dir(&path).map_err(|e|e.to_string())?.next().is_none() {
+                    out.insert(format!("{}/",path.strip_prefix(root).map_err(|e|e.to_string())?.to_string_lossy().replace('\\',"/")),Vec::new());
+                }
+            } else if kind.is_file() {
                 out.insert(path.strip_prefix(root).map_err(|e|e.to_string())?.to_string_lossy().replace('\\',"/"),std::fs::read(&path).map_err(|e|e.to_string())?);
             }
         } Ok(())
     }
     let mut files=std::collections::BTreeMap::new();visit(root,root,&mut files)?;Ok(files)
 }
-fn compare_files(local:&std::collections::BTreeMap<String,Vec<u8>>,remote:&std::collections::BTreeMap<String,Vec<u8>>)->Vec<RepositoryFileChange>{
+pub(crate) fn compare_files(local:&std::collections::BTreeMap<String,Vec<u8>>,remote:&std::collections::BTreeMap<String,Vec<u8>>)->Vec<RepositoryFileChange>{
     let paths=local.keys().chain(remote.keys()).collect::<std::collections::BTreeSet<_>>();
     paths.into_iter().filter_map(|path|{
         let status=match(local.get(path),remote.get(path)){(None,Some(_))=>"added",(Some(_),None)=>"deleted",(Some(a),Some(b)) if a!=b=>"modified",_=>return None};
@@ -374,7 +379,7 @@ fn compare_files(local:&std::collections::BTreeMap<String,Vec<u8>>,remote:&std::
     }).collect()
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositorySyncPreviewItem {
     pub source_path: Option<String>,
@@ -384,9 +389,13 @@ pub struct RepositorySyncPreviewItem {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositorySyncPreview {
+    #[serde(default)]
+    pub snapshot_id: Option<String>,
+    #[serde(default)]
+    pub document_changes: Vec<RepositoryFileChange>,
     pub repository: String,
     pub current_ref: Option<String>,
     pub remote_ref: Option<String>,
@@ -397,9 +406,11 @@ pub struct RepositorySyncPreview {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositorySyncPreviewReport {
+    #[serde(default)]
+    pub coverage: Vec<super::repository_mirror::Coverage>,
     pub repositories: Vec<RepositorySyncPreview>,
 }
 
@@ -444,7 +455,8 @@ pub async fn update_source_backed_resource_skills(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<SkillSourceUpdateReport, String> {
-    update_source_backed_skills_impl(&state.db, false, Some(&app), false, false, None).await
+    let _ = (app, state);
+    Err("PREVIEW_EXPIRED: check again and apply the complete repository snapshot".into())
 }
 
 #[tauri::command]
@@ -453,19 +465,11 @@ pub async fn sync_source_backed_resource_skills(
     state: State<'_, AppState>,
     options: Option<RepositorySyncApplyOptions>,
 ) -> Result<SkillSourceUpdateReport, String> {
-    let options = options.unwrap_or_default();
-    update_source_backed_skills_impl(
-        &state.db,
-        false,
-        Some(&app),
-        options.include_added,
-        options.remove_deleted,
-        options.repositories,
-    )
-    .await
+    let _ = (app, state, options);
+    Err("PREVIEW_EXPIRED: check again and apply the complete repository snapshot".into())
 }
 
-async fn github_repo_source_groups(
+pub(crate) async fn github_repo_source_groups(
     pool: &db::DbPool,
     is_central: bool,
 ) -> Result<HashMap<String, Vec<(db::SkillSource, db::Skill)>>, String> {
@@ -510,6 +514,7 @@ fn normalized_github_repository_key(repo: &str) -> String {
     repo.trim().trim_matches('/').to_ascii_lowercase()
 }
 
+#[cfg(test)]
 fn preview_item_from_skill(skill: &db::Skill) -> RepositorySyncPreviewItem {
     RepositorySyncPreviewItem {
         skill_id: skill.id.clone(),
@@ -518,6 +523,7 @@ fn preview_item_from_skill(skill: &db::Skill) -> RepositorySyncPreviewItem {
     }
 }
 
+#[cfg(test)]
 fn preview_item_from_candidate(
     candidate: &github_import::RemoteSkillCandidate,
 ) -> RepositorySyncPreviewItem {
@@ -589,6 +595,7 @@ fn normalized_repository_filter(repositories: Option<Vec<String>>) -> Option<Has
     }
 }
 
+#[cfg(test)]
 async fn preview_github_repo_group(
     pool: &db::DbPool,
     repo: &str,
@@ -598,6 +605,7 @@ async fn preview_github_repo_group(
     preview_github_repo_group_scoped(pool, repo, group, auth, None, None).await
 }
 
+#[cfg(test)]
 async fn preview_github_repo_group_scoped(
     pool: &db::DbPool,
     repo: &str,
@@ -638,6 +646,7 @@ async fn preview_github_repo_group_scoped(
             Ok(repo_ref) => repo_ref,
             Err(error) => {
                 return RepositorySyncPreview {
+                    snapshot_id: None, document_changes: Vec::new(),
                     repository: repo.to_string(),
                     current_ref,
                     remote_ref: None,
@@ -668,6 +677,7 @@ async fn preview_github_repo_group_scoped(
         Ok(result) => result,
         Err(error) => {
             return RepositorySyncPreview {
+                    snapshot_id: None, document_changes: Vec::new(),
                 repository: repo.to_string(),
                 current_ref,
                 remote_ref: Some(remote_ref),
@@ -756,6 +766,7 @@ async fn preview_github_repo_group_scoped(
     unchanged.sort_by(|left, right| left.skill_id.cmp(&right.skill_id));
 
     RepositorySyncPreview {
+        snapshot_id: None, document_changes: Vec::new(),
         repository: repo.to_string(),
         current_ref,
         remote_ref: Some(remote_ref),
@@ -772,20 +783,7 @@ pub async fn preview_source_backed_resource_repository_updates(
     state: State<'_, AppState>,
     repositories: Option<Vec<String>>,
 ) -> Result<RepositorySyncPreviewReport, String> {
-    let auth = github_import::github_direct_auth_from_settings(&state.db).await?;
-    let groups = github_repo_source_groups(&state.db, false).await?;
-    let filter = normalized_repository_filter(repositories);
-    static CHECK_LIMIT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(5);
-    let jobs=groups.into_iter().filter(|(repo,_)|filter.as_ref().is_none_or(|filter|filter.contains(&repo.to_ascii_lowercase())));
-    let mut repositories = futures_util::stream::iter(jobs).map(|(repo,group)| {
-        let pool=&state.db;let auth=auth.as_deref();
-        async move {
-            let _permit=CHECK_LIMIT.acquire().await.expect("check semaphore");
-            preview_github_repo_group(pool,github_repository_display_name(&repo,&group),&group,auth).await
-        }
-    }).buffer_unordered(5).collect::<Vec<_>>().await;
-    repositories.sort_by(|left, right| left.repository.cmp(&right.repository));
-    Ok(RepositorySyncPreviewReport { repositories })
+    super::repository_mirror::check(&state.db, repositories).await
 }
 
 async fn update_source_backed_skills_impl(
@@ -1247,7 +1245,8 @@ pub async fn update_source_backed_resource_skill(
     state: State<'_, AppState>,
     skill_id: String,
 ) -> Result<String, String> {
-    update_source_backed_skill_impl(&state.db, &skill_id, false).await
+    let _ = (state, skill_id);
+    Err("PREVIEW_EXPIRED: check again and apply the complete repository snapshot".into())
 }
 
 async fn update_source_backed_skill_impl(
@@ -2555,12 +2554,14 @@ mod ai_response_tests {
     }
 }
 
+#[cfg(test)]
 fn replacement_candidate<'a>(preview: &'a RepositorySyncPreview, skill_id: Option<&str>, version: Option<&str>) -> Result<&'a RepositorySyncPreviewItem,String> {
     let (Some(skill_id),Some(version))=(skill_id,version) else {return Err("Choose a replacement skill".into());};
     preview.added.iter().find(|item| item.skill_id == skill_id && !version.is_empty() && item.version == version && item.source_path.is_some())
         .ok_or_else(|| "Preview changed; check again before applying".into())
 }
 
+#[cfg(test)]
 fn already_applied(preview: &RepositorySyncPreview, action: &str, skill_id: &str, version: &str) -> bool {
     matches!(action, "added" | "modified") && !version.is_empty() && preview.error.is_none() &&
         preview.unchanged.iter().any(|item| item.skill_id == skill_id && item.version == version)
@@ -2569,9 +2570,11 @@ fn already_applied(preview: &RepositorySyncPreview, action: &str, skill_id: &str
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Keep the established Tauri IPC argument names compatible.
 pub async fn apply_repository_update_item(state:State<'_,AppState>, repository:String, skill_id:String, version:String, action:String, replacement_skill_id:Option<String>, replacement_version:Option<String>, batch_id:Option<String>) -> Result<(),String> {
-    apply_repository_update_item_impl(&state.db, repository, skill_id, version, action, replacement_skill_id, replacement_version, batch_id).await
+    let _ = (state, repository, skill_id, version, action, replacement_skill_id, replacement_version, batch_id);
+    Err("PREVIEW_EXPIRED: check again and apply the complete repository snapshot".into())
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)] // Mirrors the IPC boundary for preview revalidation.
 async fn apply_repository_update_item_impl(pool: &db::DbPool, repository:String, skill_id:String, version:String, action:String, replacement_skill_id:Option<String>, replacement_version:Option<String>, batch_id:Option<String>) -> Result<(),String> {
     static APPLY_LIMIT:tokio::sync::Semaphore=tokio::sync::Semaphore::const_new(2);
@@ -2671,7 +2674,7 @@ mod repository_file_tests {
 
     #[test]
     fn repeated_apply_requires_an_exact_unchanged_content_version() {
-        let preview = RepositorySyncPreview {repository:"example/repo".into(),current_ref:None,remote_ref:None,added:vec![],modified:vec![],deleted:vec![],error:None,
+        let preview = RepositorySyncPreview {snapshot_id:None,document_changes:vec![],repository:"example/repo".into(),current_ref:None,remote_ref:None,added:vec![],modified:vec![],deleted:vec![],error:None,
             unchanged:vec![RepositorySyncPreviewItem {source_path:None,version:"v1".into(),files:vec![],skill_id:"skill".into(),name:"Skill".into()}]};
         assert!(already_applied(&preview,"modified","skill","v1"));
         assert!(!already_applied(&preview,"modified","skill","v2"));

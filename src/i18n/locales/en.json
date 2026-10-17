@@ -1201,7 +1201,16 @@
       "missing": "The file or remote resource no longer exists.",
       "conflict": "The target already exists. Resolve the conflict again.",
       "other": "Operation failed. Check settings and the target, then retry.",
-      "invalidRepository": "Enter a GitHub repository as owner/repo or https://github.com/owner/repo."
+      "invalidRepository": "Enter a GitHub repository as owner/repo or https://github.com/owner/repo.",
+      "PREVIEW_EXPIRED": "The check snapshot expired. Check the repository again.",
+      "SNAPSHOT_UNAVAILABLE": "The check snapshot is missing or damaged. Check again.",
+      "LOCAL_IDENTITY_CHANGED": "Skill ownership or location changed. Check again before mirroring.",
+      "UNSAFE_TARGET": "The library target cannot be safely written.",
+      "UNSAFE_INSTALL_TARGET": "The installation target changed and cannot be safely synchronized.",
+      "UNSAFE_SNAPSHOT_PATH": "The remote snapshot contains unsupported or conflicting paths.",
+      "SNAPSHOT_CACHE_FULL": "Check snapshot storage has reached its capacity limit.",
+      "SNAPSHOT_TOO_LARGE": "Repository skill content exceeds the snapshot size limit.",
+      "WRITE_FAILED": "Repository mirroring did not complete. Fix the target or file lock, then retry the same snapshot."
     },
     "operationFailed": "Operation failed. Please retry.",
     "clearFilter": "Clear filters",
@@ -1395,7 +1404,32 @@
     "selectedCompact": "{{count}} selected",
     "moreActions": "More actions",
     "replaceDeletedHint": "Keep tags, notes and associations. Original files remain if replacement fails.",
-    "checkAllCompact": "Check all"
+    "checkAllCompact": "Check all",
+    "mirror": {
+      "title": "Repository mirroring",
+      "hint": "Mirror all remote skills, including skills not previously imported. Local edits and extra files will be overwritten or removed.",
+      "apply": "Mirror repository",
+      "retry": "Retry repository",
+      "applySelected": "Mirror selected repositories",
+      "confirmTitle": "Confirm repository mirroring",
+      "confirmHint": "Apply the checked remote commit, import all skills, overwrite local edits, remove deleted skills and extra files, and refresh managed installations.",
+      "confirm": "Confirm mirror",
+      "documents": "Repository documents",
+      "details": "Skill details ({{count}})",
+      "expired": "This legacy report cannot be applied. Check again.",
+      "local": "Local skill",
+      "coverage": "Local at check {{total}} · Included {{included}} · Excluded {{excluded}} · Checked {{completed}} · Failed {{failed}} · Pending {{pending}} · Remote additions {{added}}",
+      "coverageStatus": {
+        "completed": "Checked",
+        "failed": "Check failed",
+        "pending": "Pending",
+        "local": "Independent local skill",
+        "unsupported": "Unsupported source",
+        "missing_source": "Missing source",
+        "outside_scope": "Outside scope"
+      },
+      "libraryChanged": "The library has changed. Counts above describe the original check; check again to refresh."
+    }
   },
   "g": {
     "obsidian": {

@@ -2393,7 +2393,7 @@ async fn add_resource_skills_from_local_dir_impl(
         added_skills.push(skill_with_links(pool, skill).await?);
     }
 
-    files_transaction.commit();
+    files_transaction.commit()?;
     Ok(AddLocalResourceSkillsResult {
         source_dir: source_dir.to_string_lossy().into_owned(),
         import_kind,
@@ -3194,8 +3194,15 @@ pub async fn delete_resource_skill_impl(
         .await?
         .canonicalize()
         .map_err(|e| format!("Failed to resolve Skill Resource Library root: {}", e))?;
-    let delete_target =
-        validate_resource_delete_target(&resource_delete_dir(&skill), &resource_root)?;
+    let requested = resource_delete_dir(&skill);
+    let missing = matches!(std::fs::symlink_metadata(&requested), Err(error) if error.kind() == std::io::ErrorKind::NotFound);
+    let delete_target = if missing {
+        // A previous interrupted delete may have removed the directory before its SQL commit.
+        let parent = requested.parent().ok_or("Invalid resource directory")?.canonicalize().map_err(|e|e.to_string())?;
+        let target = parent.join(requested.file_name().ok_or("Invalid resource directory")?);
+        ensure_under_resource_root(&target, &resource_root)?;
+        target
+    } else { validate_resource_delete_target(&requested, &resource_root)? };
 
     let installations = db::get_skill_installations(pool, skill_id).await?;
     if !options.cascade_uninstall && !installations.is_empty() {
@@ -3217,7 +3224,7 @@ pub async fn delete_resource_skill_impl(
         }
     }
 
-    remove_resource_skill_dir(&delete_target)?;
+    if !missing { remove_resource_skill_dir(&delete_target)?; }
     db::delete_skill_owned_records(pool, skill_id, &skill.name).await?;
 
     Ok(DeleteResourceSkillResult {

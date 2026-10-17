@@ -84,6 +84,9 @@ pub fn run() {
                     .expect("Failed to initialize database schema")
             });
 
+            tauri::async_runtime::block_on(async {
+                commands::github_import::recover_import_transactions(&pool).await
+            }).map_err(std::io::Error::other)?;
             app.manage(AppState { db: pool });
             #[cfg(all(windows, not(debug_assertions)))]
             if app.config().identifier == "com.iamzhihuix.skillsmanage" {
@@ -121,6 +124,8 @@ pub fn run() {
             protocol::register_skillshub_protocol,
             protocol::take_protocol_registration_error,
             commands::remote_sources::apply_repository_update_item,
+            commands::repository_mirror::apply_repository_snapshot,
+            commands::repository_mirror::release_repository_snapshots,
             commands::github_import::refresh_repository_stars,
             commands::github_import::refresh_repository,
             commands::skills::preview_local_resource_skills,

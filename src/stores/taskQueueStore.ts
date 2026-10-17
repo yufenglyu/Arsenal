@@ -95,6 +95,8 @@ export function taskErrorMessage(
   error: unknown,
   kind: TaskKind = "check",
 ): string {
+  const code = error && typeof error === "object" && "code" in error ? String(error.code) : null;
+  if (code && ["PREVIEW_EXPIRED","SNAPSHOT_UNAVAILABLE","LOCAL_IDENTITY_CHANGED","UNSAFE_TARGET","UNSAFE_INSTALL_TARGET","UNSAFE_SNAPSHOT_PATH","SNAPSHOT_CACHE_FULL","SNAPSHOT_TOO_LARGE","WRITE_FAILED"].includes(code)) return i18n.t(`workflow.errors.${code}`);
   const text = error instanceof Error ? error.message : String(error);
   // Background tasks already store safe, translated errors. Preserve them when
   // a dialog or a check wrapper handles that same error a second time.
@@ -103,6 +105,8 @@ export function taskErrorMessage(
     return text;
   }
   const message = text.toLowerCase();
+  if (/preview_expired|local_identity_changed/.test(message)) return i18n.t("workflow.errors.stale");
+  if (/snapshot_unavailable/.test(message)) return i18n.t("workflow.errors.remoteVersionChanged");
   if (/invalid github repository url|only https:\/\/ github|only github\.com|repository url (must|is missing)|enter a github repository/.test(message)) return i18n.t("workflow.errors.invalidRepository");
   if (/no importable skills/.test(message)) return i18n.t("workflow.noImportableSkills");
   if (message.includes("preview changed: item category changed")) return i18n.t("workflow.errors.categoryChanged");

@@ -142,6 +142,16 @@ pub async fn create_pool(db_path: &str) -> Result<DbPool, String> {
 
 /// Initialize all database tables (idempotent) without seeding built-in agents.
 pub async fn init_schema(pool: &DbPool) -> Result<(), String> {
+    sqlx::query("CREATE TABLE IF NOT EXISTS repository_mirror_recovery (snapshot_id TEXT PRIMARY KEY, payload TEXT NOT NULL)").execute(pool).await.map_err(|e|e.to_string())?;
+    sqlx::query("CREATE TABLE IF NOT EXISTS import_transaction_receipts (id TEXT PRIMARY KEY)").execute(pool).await.map_err(|e| e.to_string())?;
+    sqlx::query("CREATE TABLE IF NOT EXISTS repository_mirror_snapshots (
+        id TEXT PRIMARY KEY, repository TEXT NOT NULL, payload TEXT NOT NULL,
+        digest TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'checked', created_at TEXT NOT NULL
+    )").execute(pool).await.map_err(|e| e.to_string())?;
+    sqlx::query("CREATE TABLE IF NOT EXISTS repository_mirrors (
+        repository TEXT PRIMARY KEY, last_snapshot_id TEXT
+    )").execute(pool).await.map_err(|e| e.to_string())?;
+
     // Enable WAL mode (no-op for in-memory databases)
     sqlx::query("PRAGMA journal_mode=WAL")
         .execute(pool)
@@ -1138,42 +1148,43 @@ pub async fn delete_skill_owned_records(
     skill_id: &str,
     _skill_name: &str,
 ) -> Result<(), String> {
+    let mut transaction = pool.begin().await.map_err(|e|e.to_string())?;
     sqlx::query("DELETE FROM skill_installations WHERE skill_id = ?")
         .bind(skill_id)
-        .execute(pool)
+        .execute(&mut *transaction)
         .await
         .map_err(|e| e.to_string())?;
     sqlx::query("DELETE FROM collection_skills WHERE skill_id = ?")
         .bind(skill_id)
-        .execute(pool)
+        .execute(&mut *transaction)
         .await
         .map_err(|e| e.to_string())?;
     sqlx::query("DELETE FROM skill_explanations WHERE skill_id = ?")
         .bind(skill_id)
-        .execute(pool)
+        .execute(&mut *transaction)
         .await
         .map_err(|e| e.to_string())?;
     sqlx::query("DELETE FROM skill_source_syncs WHERE skill_id = ?")
         .bind(skill_id)
-        .execute(pool)
+        .execute(&mut *transaction)
         .await
         .map_err(|e| e.to_string())?;
     sqlx::query("DELETE FROM skill_sources WHERE skill_id = ?")
         .bind(skill_id)
-        .execute(pool)
+        .execute(&mut *transaction)
         .await
         .map_err(|e| e.to_string())?;
     sqlx::query("DELETE FROM skill_metadata WHERE skill_id = ?")
         .bind(skill_id)
-        .execute(pool)
+        .execute(&mut *transaction)
         .await
         .map_err(|e| e.to_string())?;
     sqlx::query("DELETE FROM skills WHERE id = ?")
         .bind(skill_id)
-        .execute(pool)
+        .execute(&mut *transaction)
         .await
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    transaction.commit().await.map_err(|e|e.to_string())
 }
 
 // ─── Skill Installations ──────────────────────────────────────────────────────

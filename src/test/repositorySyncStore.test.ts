@@ -230,3 +230,12 @@ it("dismisses only failed repository results and preserves valid changes", () =>
   useRepositorySyncStore.getState().dismissFailedCheck("FAILED/repo");
   expect(useRepositorySyncStore.getState().preview?.repositories).toEqual([repo]);
 });
+
+it("keeps the frozen coverage denominator when a repository is rechecked", async () => {
+  queue.setState({tasks:[]});
+  const old:RepositorySyncPreviewReport={coverage:[{skillId:"one",name:"One",repository:"a/repo",status:"failed"},{skillId:"two",name:"Two",repository:"b/repo",status:"completed"}],repositories:[{repository:"a/repo",added:[],modified:[],deleted:[],unchanged:[],error:"network"},{repository:"b/repo",added:[],modified:[],deleted:[],unchanged:[]}]};
+  useRepositorySyncStore.setState({preview:old,isChecking:false,checkingRepository:null,reportGeneration:"coverage-report"});
+  vi.spyOn(useResourceLibraryStore.getState(),"previewRepositorySync").mockResolvedValue({coverage:[{skillId:"one",name:"One",repository:"a/repo",status:"completed"},{skillId:"three",name:"New local",status:"excluded",reason:"local"}],repositories:[{...old.repositories[0],error:null,snapshotId:"new"}]});
+  await useRepositorySyncStore.getState().recheckRepository("a/repo");
+  expect(useRepositorySyncStore.getState().preview?.coverage).toEqual([{...old.coverage![0],status:"completed"},old.coverage![1]]);
+});

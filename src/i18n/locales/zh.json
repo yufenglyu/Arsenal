@@ -1201,7 +1201,16 @@
       "missing": "文件或远程资源不存在",
       "conflict": "目标已存在，请重新处理冲突",
       "other": "操作失败，请检查配置与目标状态后重试",
-      "invalidRepository": "请输入 owner/repo 或 https://github.com/owner/repo 格式的 GitHub 仓库地址"
+      "invalidRepository": "请输入 owner/repo 或 https://github.com/owner/repo 格式的 GitHub 仓库地址",
+      "PREVIEW_EXPIRED": "检查快照已过期，请重新检查仓库。",
+      "SNAPSHOT_UNAVAILABLE": "检查快照缺失或损坏，请重新检查仓库。",
+      "LOCAL_IDENTITY_CHANGED": "技能来源或存储位置已改变，请重新检查后同步。",
+      "UNSAFE_TARGET": "资源库目标路径无法安全写入。",
+      "UNSAFE_INSTALL_TARGET": "安装目标已改变，无法安全同步。",
+      "UNSAFE_SNAPSHOT_PATH": "远端包含不支持或冲突的路径，未执行同步。",
+      "SNAPSHOT_CACHE_FULL": "检查快照存储已达到容量限制。",
+      "SNAPSHOT_TOO_LARGE": "仓库技能内容超过快照容量限制。",
+      "WRITE_FAILED": "整仓同步未完成；修复目标路径或文件占用后重试同一快照。"
     },
     "operationFailed": "操作失败，请重试",
     "clearFilter": "清除筛选",
@@ -1395,7 +1404,32 @@
     "selectedCompact": "已选 {{count}} 项",
     "moreActions": "更多操作",
     "replaceDeletedHint": "保留标签、备注及关联，失败保留旧文件。",
-    "checkAllCompact": "检查全部"
+    "checkAllCompact": "检查全部",
+    "mirror": {
+      "title": "整仓同步",
+      "hint": "以远端为准同步全部技能，包括未导入技能；本地修改和额外文件将被覆盖或移除。",
+      "apply": "同步整仓",
+      "retry": "重试整仓同步",
+      "applySelected": "同步所选仓库",
+      "confirmTitle": "确认整仓镜像同步",
+      "confirmHint": "将应用检查时的远端版本，导入全部技能，覆盖本地修改，移除远端已删除的技能和本地额外文件，并同步托管安装副本。",
+      "confirm": "确认同步",
+      "documents": "仓库文档变更",
+      "details": "技能明细（{{count}}）",
+      "expired": "旧检查结果无法用于整仓同步，请重新检查。",
+      "local": "本地技能",
+      "coverage": "检查时本地 {{total}} · 纳入 {{included}} · 未纳入 {{excluded}} · 完成 {{completed}} · 失败 {{failed}} · 未完成 {{pending}} · 远端新增 {{added}}",
+      "coverageStatus": {
+        "completed": "已检查",
+        "failed": "检查失败",
+        "pending": "未完成",
+        "local": "独立本地技能",
+        "unsupported": "不支持的来源",
+        "missing_source": "来源缺失",
+        "outside_scope": "本次范围外"
+      },
+      "libraryChanged": "资源库已变化；以上数量仍是检查时的记录，可重新检查。"
+    }
   },
   "g": {
     "obsidian": {
