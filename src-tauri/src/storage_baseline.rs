@@ -40,7 +40,10 @@ async fn synthetic_json_baseline() {
                 tx.data_mut().table_mut("collection_skills").insert(db::key2(&collection.id,&skill.id),serde_json::json!({"collection_id":collection.id,"skill_id":skill.id,"added_at":"2026-01-01"}));
             }
         }
+        let prepare_us = seed_start.elapsed().as_micros();
+        let commit_start = Instant::now();
         tx.commit().await.unwrap();
+        let commit_us = commit_start.elapsed().as_micros();
         let seed_ms = seed_start.elapsed().as_millis();
         let mut lookup = Vec::new();
         let mut platform = Vec::new();
@@ -98,7 +101,7 @@ async fn synthetic_json_baseline() {
             .is_some());
         let reopen_us = start.elapsed().as_micros();
         drop(reopened);
-        println!("STORAGE_BASELINE count={count} seed_batch_ms={seed_ms} lookup_p95_us={} platform_p95_us={} collection_p95_us={} edit_p95_us={} reopen_first_read_us={reopen_us} retained_object_bytes={bytes}", p95(&mut lookup), p95(&mut platform), p95(&mut members), p95(&mut edits));
+        println!("STORAGE_BASELINE count={count} seed_batch_ms={seed_ms} prepare_us={prepare_us} commit_us={commit_us} lookup_p95_us={} platform_p95_us={} collection_p95_us={} edit_p95_us={} reopen_first_read_us={reopen_us} retained_object_bytes={bytes}", p95(&mut lookup), p95(&mut platform), p95(&mut members), p95(&mut edits));
     }
 }
 
@@ -153,6 +156,10 @@ async fn synthetic_dense_metadata() {
             .unwrap();
             edits.push(start.elapsed().as_micros());
         }
+        let edit_min_us = *edits.iter().min().unwrap();
+        let edit_max_us = *edits.iter().max().unwrap();
+        edits.sort_unstable();
+        let edit_median_us = edits[edits.len() / 2];
         let new_refs: Vec<_> = metadata_refs().difference(&initial_refs).cloned().collect();
         let edited_object_bytes: u64 = new_refs
             .iter()
@@ -207,7 +214,7 @@ async fn synthetic_dense_metadata() {
             reopens.push(start.elapsed().as_micros());
         }
         println!(
-            "STORAGE_DENSE count={count} edit_p95_us={} reopen_p95_us={} edited_object_bytes={edited_object_bytes} equivalent_table_bytes={equivalent_table_bytes}",
+            "STORAGE_DENSE count={count} edit_p95_us={} reopen_p95_us={} edited_object_bytes={edited_object_bytes} equivalent_table_bytes={equivalent_table_bytes} edit_min_us={edit_min_us} edit_median_us={edit_median_us} edit_max_us={edit_max_us}",
             p95(&mut edits),
             p95(&mut reopens)
         );
@@ -347,6 +354,70 @@ async fn synthetic_selected_batch_tags() {
         assert!(removed.iter().all(|m| m.tags.is_empty()));
         println!(
             "STORAGE_BATCH count={count} add_us={add_us} noop_us={noop_us} remove_us={remove_us}"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "small save distribution; run without concurrent builds"]
+async fn synthetic_small_save_distribution() {
+    use sha2::{Digest, Sha256};
+    for count in [1usize, 1_000] {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::storage::store::Store::open(directory.path()).unwrap();
+        store
+            .write(|d| {
+                for i in 0..count {
+                    let id = format!("fixture-{i}");
+                    d.table_mut("skill_metadata").insert(
+                        id.clone(),
+                        serde_json::json!({
+                    "skill_id":id,"notes":"x".repeat(if i % 1000 == 0 {64 * 1024} else {128}),
+                    "tags":"[\"fixture\"]","updated_at":"2026-01-01"}),
+                    );
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let mut cpu = Vec::new();
+        let mut saves = Vec::new();
+        for i in 0..100 {
+            // Independent encoding/hash probe: no filesystem or durability work.
+            let start = Instant::now();
+            store
+                .read(|d| {
+                    let bytes = serde_json::to_vec(d.table("skill_metadata")).unwrap();
+                    std::hint::black_box(Sha256::digest(&bytes));
+                    Ok(())
+                })
+                .unwrap();
+            cpu.push(start.elapsed().as_micros());
+            let start = Instant::now();
+            db::upsert_skill_metadata(
+                &store,
+                "fixture-0",
+                Some(&format!("{}-{i}", "x".repeat(64 * 1024))),
+                &["fixture".into()],
+            )
+            .await
+            .unwrap();
+            saves.push(start.elapsed().as_micros());
+        }
+        saves.sort_unstable();
+        cpu.sort_unstable();
+        println!("STORAGE_SMALL count={count} save_min_us={} save_median_us={} save_p95_us={} save_max_us={} encode_hash_median_us={} encode_hash_p95_us={}",
+            saves[0], saves[50], saves[94], saves[99], cpu[50], cpu[94]);
+        drop(store);
+        let reopened = crate::storage::store::Store::open(directory.path()).unwrap();
+        assert_eq!(
+            db::get_skill_metadata(&reopened, "fixture-0")
+                .await
+                .unwrap()
+                .unwrap()
+                .notes
+                .unwrap(),
+            format!("{}-99", "x".repeat(64 * 1024))
         );
     }
 }

@@ -196,6 +196,14 @@ fn write_object(root: &Path, id: &str, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+// Encoding is independent of publication. Keep duplicate-object scheduling on
+// the caller so equal-content tables never race on the same pending file.
+fn encode_table(rows: &Table) -> Result<(Vec<u8>, String), String> {
+    let bytes = serde_json::to_vec(rows).map_err(|e| e.to_string())?;
+    let id = hash(&bytes);
+    Ok((bytes, id))
+}
+
 pub(super) fn save(root: &Path, data: &mut Data, revision: u64) -> Result<(), String> {
     save_prepared(root, data, revision, || Ok(()))
 }
@@ -213,6 +221,27 @@ fn save_prepared(
         let mut shards = BTreeMap::new();
         let mut scheduled = BTreeSet::new();
         let mut objects = std::collections::VecDeque::new();
+        // Only multiple dirty, large flat tables benefit from parallel CPU work.
+        // Small saves and sharded metadata retain the existing pipeline. At most
+        // two encoders and two object writers are in flight, regardless of size.
+        let large: Vec<_> = data
+            .tables
+            .iter()
+            .filter(|(name, rows)| {
+                !rows.sharded
+                    && rows.len() >= SHARD_THRESHOLD
+                    && !data
+                        .refs
+                        .get(*name)
+                        .is_some_and(|id| existing_objects.contains_key(id))
+            })
+            .collect();
+        let parallel = large.len() >= 2;
+        let mut large = large.into_iter().filter(|_| parallel);
+        let mut encoders = std::collections::VecDeque::new();
+        for (name, rows) in large.by_ref().take(2) {
+            encoders.push_back((name, scope.spawn(move || encode_table(rows))));
+        }
         for (name, rows) in &data.tables {
             if let Some(id) = data
                 .refs
@@ -239,12 +268,22 @@ fn save_prepared(
                 pieces.push(None);
             }
             for slot in pieces {
-                let bytes = match slot {
-                    Some(slot) => serde_json::to_vec(rows.buckets[&slot].as_ref()),
-                    None => serde_json::to_vec(rows.as_ref()),
-                }
-                .map_err(|e| e.to_string())?;
-                let id = hash(&bytes);
+                let (bytes, id) =
+                    if slot.is_none() && encoders.front().is_some_and(|(next, _)| *next == name) {
+                        let (_, encoder) = encoders.pop_front().unwrap();
+                        let encoded = encoder.join().map_err(|_| "Object encoder panicked")??;
+                        if let Some((next, rows)) = large.next() {
+                            encoders.push_back((next, scope.spawn(move || encode_table(rows))));
+                        }
+                        encoded
+                    } else if let Some(slot) = slot {
+                        let bytes = serde_json::to_vec(rows.buckets[&slot].as_ref())
+                            .map_err(|e| e.to_string())?;
+                        let id = hash(&bytes);
+                        (bytes, id)
+                    } else {
+                        encode_table(rows)?
+                    };
                 // Equal-content objects are written once, including empty shards.
                 if scheduled.insert(id.clone()) {
                     if objects.len() == 2 {
@@ -392,6 +431,61 @@ mod tests {
     use super::*;
     use crate::storage::store::Store;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn parallel_large_encoding_deduplicates_and_keeps_atomic_publication() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        store
+            .write(|d| {
+                d.table_mut("old").insert("key".into(), json!("old"));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(store);
+        let root = dir.path().join("store");
+        let (mut data, revision) = load(&root).unwrap();
+        let old_manifest = fs::read(root.join("manifest.json")).unwrap();
+        // More than two candidates exercises replenishment. The first two have
+        // identical content and must never write the same pending path in parallel.
+        for name in ["a", "b", "c", "d", "e"] {
+            let table = data.table_mut(name);
+            for i in 0..SHARD_THRESHOLD {
+                table.insert(
+                    format!("key-{i}"),
+                    json!({"value":i,"group":if name == "b" {"a"} else {name}}),
+                );
+            }
+        }
+        data.table_mut("small")
+            .insert("key".into(), json!("also atomic"));
+        let expected = serde_json::to_value(&data).unwrap();
+        let e_id = encode_table(data.table("e")).unwrap().1;
+        let blocked = root.join("objects").join(format!("{e_id}.pending"));
+        fs::create_dir(&blocked).unwrap();
+        assert!(save(&root, &mut data, revision + 1).is_err());
+        assert_eq!(fs::read(root.join("manifest.json")).unwrap(), old_manifest);
+        assert!(load(&root).unwrap().0.table("a").is_empty());
+        fs::remove_dir(blocked).unwrap();
+        assert!(save_prepared(&root, &mut data, revision + 1, || Err(
+            "before publish".into()
+        ))
+        .is_err());
+        assert_eq!(fs::read(root.join("manifest.json")).unwrap(), old_manifest);
+        save(&root, &mut data, revision + 1).unwrap();
+        let (loaded, _) = load(&root).unwrap();
+        assert_eq!(serde_json::to_value(&loaded).unwrap(), expected);
+        assert_eq!(loaded.refs["a"], loaded.refs["b"]);
+        assert_eq!(
+            fs::read(root.join("manifests").join(format!("{revision}.json"))).unwrap(),
+            old_manifest
+        );
+        // An unchanged large table is reused, not scheduled as a new encoder job.
+        data.table_mut("small").insert("key".into(), json!("next"));
+        save(&root, &mut data, revision + 2).unwrap();
+        assert_eq!(load(&root).unwrap().0.refs["a"], loaded.refs["a"]);
+    }
 
     #[tokio::test]
     async fn prepared_commit_is_invisible_until_publish_and_retryable() {
