@@ -6,6 +6,9 @@ pub mod path_utils;
 pub mod platforms;
 pub mod platform_icons;
 
+#[cfg(test)]
+mod storage_baseline;
+
 use db::DbPool;
 use std::fs;
 use std::path::Path;
