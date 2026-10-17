@@ -280,3 +280,73 @@ async fn synthetic_v1_dense_upgrade() {
     );
     println!("STORAGE_UPGRADE count=50000 open_us={open_us} first_edit_us={upgrade_us} next_edit_us={next_edit_us}");
 }
+
+#[tokio::test]
+#[ignore = "synthetic selected batch tags; run without concurrent builds"]
+async fn synthetic_selected_batch_tags() {
+    for count in [1_000usize, 10_000, 50_000] {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::storage::store::Store::open(directory.path()).unwrap();
+        store
+            .write(|d| {
+                for i in 0..count {
+                    let id = format!("fixture-{i}");
+                    db::put(
+                        d,
+                        "skills",
+                        id.clone(),
+                        &db::Skill {
+                            id,
+                            name: format!("Skill {i}"),
+                            description: None,
+                            file_path: format!("/synthetic/{i}/SKILL.md"),
+                            canonical_path: None,
+                            is_central: true,
+                            source: None,
+                            content: None,
+                            scanned_at: "2026-01-01".into(),
+                        },
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let selected: Vec<_> = (0..count)
+            .step_by(2)
+            .map(|i| format!("fixture-{i}"))
+            .collect();
+        let start = Instant::now();
+        let changed = db::metadata::change_tag(&store, "batch", Some(selected.clone()), false)
+            .await
+            .unwrap();
+        let add_us = start.elapsed().as_micros();
+        assert_eq!(changed.len(), count / 2);
+        let start = Instant::now();
+        let unchanged = db::metadata::change_tag(&store, "BATCH", Some(selected.clone()), false)
+            .await
+            .unwrap();
+        let noop_us = start.elapsed().as_micros();
+        assert!(unchanged.is_empty());
+        drop(store);
+        let store = crate::storage::store::Store::open(directory.path()).unwrap();
+        assert_eq!(
+            store.read(|d| Ok(d.table("skill_metadata").len())).unwrap(),
+            count / 2
+        );
+        assert!(db::get_skill_metadata(&store, "fixture-1")
+            .await
+            .unwrap()
+            .is_none());
+        let start = Instant::now();
+        let removed = db::metadata::change_tag(&store, "BATCH", Some(selected), true)
+            .await
+            .unwrap();
+        let remove_us = start.elapsed().as_micros();
+        assert_eq!(removed.len(), count / 2);
+        assert!(removed.iter().all(|m| m.tags.is_empty()));
+        println!(
+            "STORAGE_BATCH count={count} add_us={add_us} noop_us={noop_us} remove_us={remove_us}"
+        );
+    }
+}

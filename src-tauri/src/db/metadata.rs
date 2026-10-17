@@ -18,30 +18,31 @@ pub async fn change_tag(
     if tag.is_empty() || tag.chars().count() > 100 {
         return Err("Invalid tag".into());
     }
+    let selected = skill_ids.map(|ids| ids.into_iter().collect::<std::collections::HashSet<_>>());
+    let normalized_tag = tag.to_lowercase();
     pool.write(|d| {
         let ids: Vec<String> = d.table("skills").keys().cloned().collect();
         let mut changed = Vec::new();
         for id in ids {
-            if skill_ids.as_ref().is_some_and(|ids| !ids.contains(&id)) {
+            if selected.as_ref().is_some_and(|ids| !ids.contains(&id)) {
                 continue;
             }
             let old = d
                 .table("skill_metadata")
                 .get(&id)
-                .cloned()
-                .map(serde_json::from_value::<SkillMetadata>)
+                .map(<SkillMetadata as serde::Deserialize>::deserialize)
                 .transpose()
                 .map_err(|e| e.to_string())?;
             let mut tags: Vec<String> = old
                 .as_ref()
                 .and_then(|m| serde_json::from_str(&m.tags).ok())
                 .unwrap_or_default();
-            let has = tags.iter().any(|t| t.to_lowercase() == tag.to_lowercase());
+            let has = tags.iter().any(|t| t.to_lowercase() == normalized_tag);
             if has != remove {
                 continue;
             }
             if remove {
-                tags.retain(|t| t.to_lowercase() != tag.to_lowercase());
+                tags.retain(|t| t.to_lowercase() != normalized_tag);
             } else {
                 tags.push(tag.into());
             }

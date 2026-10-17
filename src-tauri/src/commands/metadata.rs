@@ -41,6 +41,58 @@ pub async fn rename_skill_tag(
 mod tests {
     use super::*;
     #[tokio::test]
+    async fn selected_tag_batch_preserves_order_scope_and_atomic_failure() {
+        let pool = crate::db::AppStore::memory().unwrap();
+        pool.write(|d| {
+            for id in ["c", "a", "b"] {
+                d.table_mut("skills")
+                    .insert(id.into(), serde_json::json!({"id":id}));
+                d.table_mut("skill_metadata").insert(
+                    id.into(),
+                    serde_json::json!({
+                    "skill_id":id,"notes":"memo","tags":"[]","updated_at":""}),
+                );
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        crate::storage::fixtures::shard_metadata(&pool).await;
+        let selection = Some(vec!["c".into(), "a".into(), "a".into(), "missing".into()]);
+        pool.fail_table_write("skill_metadata");
+        assert!(change_tag(&pool, " Tag ", selection.clone(), false)
+            .await
+            .is_err());
+        assert!(pool
+            .read(|d| Ok(d
+                .table("skill_metadata")
+                .values()
+                .all(|r| r["tags"] == "[]")))
+            .unwrap());
+        let changed = change_tag(&pool, " Tag ", selection.clone(), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            changed.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["a", "c"]
+        );
+        assert!(changed
+            .iter()
+            .all(|m| m.notes.as_deref() == Some("memo") && m.tags == ["Tag"]));
+        assert!(change_tag(&pool, "TAG", selection, false)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(change_tag(&pool, "Tag", Some(vec![]), true)
+            .await
+            .unwrap()
+            .is_empty());
+        let removed = change_tag(&pool, "tag", None, true).await.unwrap();
+        assert_eq!(removed.len(), 2);
+        assert!(removed.iter().all(|m| m.tags.is_empty()));
+    }
+
+    #[tokio::test]
     async fn rename_requires_merge_confirmation_and_preserves_notes() {
         let pool = crate::db::AppStore::memory().unwrap();
         for (id, tags) in [

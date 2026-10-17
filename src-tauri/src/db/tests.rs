@@ -4,6 +4,108 @@ mod tests {
     use crate::path_utils::resolve_home_dir;
     use tempfile::tempdir;
 
+    #[tokio::test]
+    async fn borrowed_queries_preserve_fields_and_validation() {
+        use serde_json::{json, Value};
+        let pool = AppStore::memory().unwrap();
+        let mut skill = make_skill("query-fixture", "Unicode 名称", true);
+        skill.content = Some("large body".repeat(8192));
+        skill.description = Some("description".into());
+        let skill_value = serde_json::to_value(&skill).unwrap();
+        let install = json!({"skill_id":skill.id,"agent_id":"platform","installed_path":"/synthetic/install",
+            "link_type":"symlink","symlink_target":"/synthetic/source","created_at":"2026-01-01","is_managed":true});
+        pool.write(|d| {
+            d.table_mut("skills")
+                .insert(skill.id.clone(), skill_value.clone());
+            d.table_mut("skill_installations")
+                .insert("installation".into(), install.clone());
+            d.table_mut("skill_sources").insert(
+                skill.id.clone(),
+                json!({"source_url":"https://example.invalid/repo"}),
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let result = get_skills_for_agent(&pool, "platform").await.unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, skill.id);
+        assert_eq!(result[0].row_id, skill.id);
+        assert_eq!(result[0].name, skill.name);
+        assert_eq!(result[0].description, skill.description);
+        assert_eq!(result[0].file_path, skill.file_path);
+        assert_eq!(result[0].source, skill.source);
+        assert!(result[0].is_central);
+        assert_eq!(result[0].dir_path, "/synthetic/install");
+        assert_eq!(
+            result[0].symlink_target.as_deref(),
+            Some("/synthetic/source")
+        );
+        assert_eq!(
+            result[0].source_url.as_deref(),
+            Some("https://example.invalid/repo")
+        );
+        assert_eq!(
+            serde_json::to_value(get_skill_by_id(&pool, &skill.id).await.unwrap().unwrap()).unwrap(),
+            skill_value
+        );
+        assert!(get_skills_for_agent(&pool, "other")
+            .await
+            .unwrap()
+            .is_empty());
+        // Borrowed projections must keep the owned DTO's validation, even for
+        // fields omitted from the result. Include missing, null, and wrong types.
+        for (table, key, original) in [
+            ("skills", skill.id.as_str(), skill_value),
+            ("skill_installations", "installation", install),
+        ] {
+            for field in original
+                .as_object()
+                .unwrap()
+                .keys()
+                .filter(|k| k.as_str() != "is_managed")
+            {
+                for replacement in [None, Some(Value::Null), Some(json!(42))] {
+                    let mut mutated = original.clone();
+                    match replacement {
+                        Some(value) => {
+                            mutated[field] = value;
+                        }
+                        None => {
+                            mutated.as_object_mut().unwrap().remove(field);
+                        }
+                    }
+                    // Filtering/join keys intentionally exclude a row before decoding.
+                    if ["id", "skill_id", "agent_id"].contains(&field.as_str()) {
+                        continue;
+                    }
+                    let accepted = if table == "skills" {
+                        serde_json::from_value::<Skill>(mutated.clone()).is_ok()
+                    } else {
+                        serde_json::from_value::<SkillInstallation>(mutated.clone()).is_ok()
+                    };
+                    pool.write(|d| {
+                        d.table_mut(table).insert(key.into(), mutated);
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+                    assert_eq!(
+                        get_skills_for_agent(&pool, "platform").await.is_ok(),
+                        accepted,
+                        "{table}.{field}"
+                    );
+                }
+            }
+            pool.write(|d| {
+                d.table_mut(table).insert(key.into(), original);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        }
+    }
+
     /// Create an in-memory SQLite pool and initialize the schema.
     async fn setup_test_db() -> AppStore {
         let pool = AppStore::connect(":memory:")

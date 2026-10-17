@@ -183,7 +183,29 @@ impl Serialize for Table {
 impl<'de> Deserialize<'de> for Table {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Ok(Self {
-            flat: Rows::deserialize(deserializer)?,
+            flat: {
+                // JSON objects are emitted in key order. Bulk BTreeMap construction
+                // avoids a tree search/rebalance per decoded row. Collect also
+                // preserves the legacy last-value-wins behavior for duplicate keys.
+                struct RowsVisitor;
+                impl<'de> serde::de::Visitor<'de> for RowsVisitor {
+                    type Value = Rows;
+                    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        f.write_str("a table object")
+                    }
+                    fn visit_map<A: serde::de::MapAccess<'de>>(
+                        self,
+                        mut map: A,
+                    ) -> Result<Rows, A::Error> {
+                        let mut rows = Vec::new();
+                        while let Some(row) = map.next_entry::<String, Value>()? {
+                            rows.push(row);
+                        }
+                        Ok(rows.into_iter().collect())
+                    }
+                }
+                deserializer.deserialize_map(RowsVisitor)?
+            },
             ..Self::default()
         })
     }
@@ -193,6 +215,25 @@ impl<'de> Deserialize<'de> for Table {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn bulk_decode_preserves_legacy_map_semantics_and_errors() {
+        for input in [
+            r#"{}"#,
+            r#"{"z":1,"a":2,"z":3,"b":null}"#,
+            r#"{"unicode-汉字":{"nested":[1,true,"\n"]},"a":null}"#,
+        ] {
+            let table: Table = serde_json::from_str(input).unwrap();
+            let expected: Rows = serde_json::from_str(input).unwrap();
+            assert_eq!(
+                serde_json::to_vec(&table).unwrap(),
+                serde_json::to_vec(&expected).unwrap()
+            );
+        }
+        for input in ["[]", "null", r#"{"x":1"#, r#"{"x":1} trailing"#] {
+            assert!(serde_json::from_str::<Table>(input).is_err());
+        }
+    }
 
     #[test]
     fn sharded_map_preserves_order_mutations_snapshots_and_logical_json() {

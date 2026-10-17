@@ -7,7 +7,7 @@ pub mod repository;
 use crate::path_utils::{app_data_dir, expand_home_path, path_to_string};
 use crate::storage::store::Data;
 use chrono::Utc;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{collections::HashSet, path::Path};
 use uuid::Uuid;
@@ -24,8 +24,7 @@ pub fn key2(a: &str, b: &str) -> String {
 pub fn rows<T: DeserializeOwned>(d: &Data, t: &str) -> Result<Vec<T>, String> {
     d.table(t)
         .values()
-        .cloned()
-        .map(|v| serde_json::from_value(v).map_err(|e| e.to_string()))
+        .map(|v| T::deserialize(v).map_err(|e| e.to_string()))
         .collect()
 }
 pub fn put<T: Serialize>(d: &mut Data, t: &str, key: String, row: &T) -> Result<(), String> {
@@ -36,8 +35,7 @@ pub fn put<T: Serialize>(d: &mut Data, t: &str, key: String, row: &T) -> Result<
 fn one<T: DeserializeOwned>(d: &Data, t: &str, k: &str) -> Result<Option<T>, String> {
     d.table(t)
         .get(k)
-        .cloned()
-        .map(serde_json::from_value)
+        .map(T::deserialize)
         .transpose()
         .map_err(|e| e.to_string())
 }
@@ -216,8 +214,7 @@ pub async fn get_skills_by_agent(pool: &AppStore, agent_id: &str) -> Result<Vec<
             .values()
             .filter(|r| field(r, "agent_id") == agent_id && managed(r))
             .filter_map(|r| d.table("skills").get(field(r, "skill_id")))
-            .cloned()
-            .map(|r| serde_json::from_value(r).map_err(|e| e.to_string()))
+            .map(|r| Skill::deserialize(r).map_err(|e| e.to_string()))
             .collect()
     })
 }
@@ -226,7 +223,37 @@ pub async fn get_skills_for_agent(
     pool: &AppStore,
     agent_id: &str,
 ) -> Result<Vec<SkillForAgent>, String> {
+    // Validate the same fields as the owned DTOs, but borrow strings that are
+    // not returned (notably the potentially large Markdown content).
+    #[derive(Deserialize)]
+    struct SkillView<'a> {
+        id: &'a str,
+        name: &'a str,
+        description: Option<&'a str>,
+        file_path: &'a str,
+        #[serde(rename = "canonical_path")]
+        _canonical_path: Option<&'a str>,
+        is_central: bool,
+        source: Option<&'a str>,
+        #[serde(rename = "content")]
+        _content: Option<&'a str>,
+        #[serde(rename = "scanned_at")]
+        _scanned_at: &'a str,
+    }
+    #[derive(Deserialize)]
+    struct InstallationView<'a> {
+        #[serde(rename = "skill_id")]
+        _skill_id: &'a str,
+        #[serde(rename = "agent_id")]
+        _agent_id: &'a str,
+        installed_path: &'a str,
+        link_type: &'a str,
+        symlink_target: Option<&'a str>,
+        created_at: &'a str,
+    }
     pool.read(|d| {
+        let skills = d.table("skills");
+        let sources = d.table("skill_sources");
         let mut out = Vec::new();
         for i in d
             .table("skill_installations")
@@ -234,26 +261,26 @@ pub async fn get_skills_for_agent(
             .filter(|r| field(r, "agent_id") == agent_id && managed(r))
         {
             let id = field(i, "skill_id");
-            if let Some(raw) = d.table("skills").get(id) {
-                let skill: Skill = serde::Deserialize::deserialize(raw)
+            if let Some(raw) = skills.get(id) {
+                let skill: SkillView = serde::Deserialize::deserialize(raw)
                     .map_err(|e: serde_json::Error| e.to_string())?;
-                let install: SkillInstallation = serde::Deserialize::deserialize(i)
+                let install: InstallationView = serde::Deserialize::deserialize(i)
                     .map_err(|e: serde_json::Error| e.to_string())?;
-                let source = d.table("skill_sources").get(id);
+                let source = sources.get(id);
                 let source_field =
                     |key: &str| source.and_then(|s| s[key].as_str()).map(str::to_owned);
                 out.push(SkillForAgent {
                     installation_source: "independent".into(),
-                    row_id: skill.id.clone(),
-                    id: skill.id,
-                    name: skill.name,
-                    description: skill.description,
-                    file_path: skill.file_path,
-                    dir_path: install.installed_path,
-                    link_type: install.link_type,
-                    symlink_target: install.symlink_target,
+                    row_id: skill.id.to_owned(),
+                    id: skill.id.to_owned(),
+                    name: skill.name.to_owned(),
+                    description: skill.description.map(str::to_owned),
+                    file_path: skill.file_path.to_owned(),
+                    dir_path: install.installed_path.to_owned(),
+                    link_type: install.link_type.to_owned(),
+                    symlink_target: install.symlink_target.map(str::to_owned),
                     is_central: skill.is_central,
-                    source: skill.source,
+                    source: skill.source.map(str::to_owned),
                     source_kind: None,
                     source_root: None,
                     is_read_only: false,
@@ -263,7 +290,7 @@ pub async fn get_skills_for_agent(
                     source_author: source_field("source_author"),
                     source_repo: source_field("source_repo"),
                     source_path: source_field("source_path"),
-                    created_at: Some(install.created_at),
+                    created_at: Some(install.created_at.to_owned()),
                 });
             }
         }
@@ -941,8 +968,7 @@ pub async fn get_collection_skills(
         members
             .into_iter()
             .filter_map(|r| d.table("skills").get(field(r, "skill_id")))
-            .cloned()
-            .map(|r| serde_json::from_value::<Skill>(r).map_err(|e| e.to_string()))
+            .map(|r| Skill::deserialize(r).map_err(|e| e.to_string()))
             .collect()
     })
 }
@@ -961,8 +987,7 @@ pub async fn get_skill_collections(
         members
             .into_iter()
             .filter_map(|r| d.table("collections").get(field(r, "collection_id")))
-            .cloned()
-            .map(|r| serde_json::from_value::<Collection>(r).map_err(|e| e.to_string()))
+            .map(|r| Collection::deserialize(r).map_err(|e| e.to_string()))
             .collect()
     })
 }
