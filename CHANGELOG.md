@@ -2,6 +2,15 @@
 
 [English](CHANGELOG.md) | [简体中文](CHANGELOG.zh.md)
 
+## 1.4.0 - 2026-10-19
+
+- Redesign Tasks around batch summaries and expandable rows. Select imported skills, resolve conflicts and review repository updates inline, with current tasks and history in separate tabs.
+- Show individual and batch repository refreshes, with progress, stop, resume and failed-item retries. Keep AI remarks and explanations out of the task window.
+- Fix update checks failing when snapshot storage reaches capacity. Compress and deduplicate snapshots, avoid storing unchanged payloads, and release completed update payloads.
+- Automatically collect unused snapshots at startup and after task state changes, while retaining snapshots needed by active tasks, pending reviews and recovery.
+- Preserve error codes and show actionable failure details instead of a generic operation-failed message.
+- Rewrite the Chinese and English READMEs with six illustrated workflows each, and fix English install-button plural forms.
+
 ## 1.3.0 - 2026-10-19
 
 - Rebrand as Arsenal with a new icon and simplified brand header.
