@@ -1,43 +1,99 @@
+<p align="center"><img src="public/arsenal.svg" width="80" alt="Arsenal"></p>
+
 # Arsenal
 
-AI tools and capabilities management. Skills are supported today; templates, workflows and knowledge are future directions.
+**Keep your AI skills in one library, ready to use across tools and projects.**
 
-[简体中文](README_CN.md) · [Download](https://github.com/yufenglyu/Arsenal/releases) · [Changelog](CHANGELOG.md)
+Arsenal is a desktop application for collecting, organizing, installing and maintaining AI skills. Browse your library, see where skills are installed, review upstream changes and keep notes about what works for you—all in one workspace.
 
-![Library and nested groups](docs/images/v1.3/library.png)
+[简体中文](README_CN.md) · [Download](https://github.com/yufenglyu/Arsenal/releases) · [Changelog](CHANGELOG.md) · [Report an issue](https://github.com/yufenglyu/Arsenal/issues)
 
-Screenshots show actual v1.3.0 frontend components in Chinese with fictional demonstration data, not bundled content.
+![Skill library with nested groups, tags and installation targets](docs/images/product/library-en.png)
 
-## Organize and install
+*Screenshots use actual application components with fictional demonstration data. Example skills are not bundled.*
 
-Import from GitHub or local folders. The library remains the primary storage. Shared skills, software platforms and project directories are grouped under Skill installation. Installation prefers links, with copying as a fallback.
+## Why Arsenal?
 
-Manage nested groups directly beneath the library. Drag skills or repositories into groups, reorder groups, use Shift to move membership, and use selection and expansion shortcuts. Groups support both skill and repository views. Removing membership does not delete the source skill. Create groups through the context menu.
+Collecting skills is easy. Finding the right one later, understanding when to use it and keeping it available across AI tools takes more work.
 
-Click section titles to collapse or expand. Resize the library section vertically. Clicking navigation icons keeps collapsed sidebars collapsed. Tables support configurable columns, widths and sorting; the skill-count column is not sortable.
+| The problem | How Arsenal helps |
+| --- | --- |
+| Skills are scattered across GitHub, downloads and projects | Import from GitHub or local folders and browse repositories and skills together |
+| Your collection becomes difficult to navigate | Organize it with nested groups, tags and search |
+| Several AI tools need the same skills | Manage shared, platform-specific and project-specific installations in one place |
+| Upstream changes are hard to track | Check source changes and review results before synchronization |
+| Practical knowledge gets forgotten | Read documentation, write remarks and link Obsidian notes |
 
-## Updates and tasks
+## One library, multiple destinations
 
-![Update dialog](docs/images/v1.3/update.png)
+The skill library stores the original files. Choose where to install each skill: share frequently used capabilities, or build a focused set for a particular tool or project.
 
-Refresh repository information updates metadata, stars and documentation without updating skill files. Check skill updates inspects upstream changes for review before synchronization. Open Tasks from the status bar to view previous results, filter failures and retry selected work.
+```text
+GitHub / Local folders
+        ↓
+     Skill library
+        ├── Groups and tags: organize and find
+        └── Skill installation
+              ├── Shared Hub
+              ├── Software platforms
+              └── Project directories
+```
 
-Checks save progress per repository. Pause finishes the current repository before stopping. After restarting, choose Continue check in Tasks to skip completed repositories. A repository interrupted before completion is checked again. Keep the task record if you intend to resume it.
+- **Collect in one place.** Import GitHub repositories or local skills, review the skill list and resolve conflicts during import.
+- **Install by destination.** Choose platforms or projects and inspect installation relationships and counts.
+- **Reduce duplicate copies.** Shared Hub links back to library skills. Platform installation prefers links and falls back to copying when necessary. Whether a tool reads a shared directory depends on that tool's support and configuration.
+- **Bring your own tools.** Configure platform names and skill paths, enable the platforms you use and manage project directories.
 
-## Notes and portable data
+## Organize around your work
 
-Use tags, remarks and AI-assisted suggestions to organize skills. Obsidian notes retain stable identifiers. The new-note subdirectory is relative to the vault, for example `附件/SkillsHub`.
+Use groups for development, research, writing or other activities, and tags for purpose and characteristics. Drag skills or repositories into nested groups. Reordering, multiple selection and keyboard shortcuts help manage a growing library.
 
-Windows portable installations need `arsenal.exe` and `.arsenal`. Close the old application before upgrading and preserve your existing data directory. Never overwrite it with packaged defaults.
+Switch between repository and flat skill views, and search names, descriptions and remarks. Adjustable columns and collapsible sidebars let you arrange the workspace while keeping documents and skill lists close at hand.
 
-Migration rewrites legacy `.skillshub` paths and installed links, validates them, then removes the compatibility directory. Two independent data directories block migration. Backups remain under `.arsenal/migrations`. Existing protocols, note properties and upgrade identifiers remain compatible.
+## Review changes and manage background work
 
-## Development
+Repository refresh and skill update checks serve different purposes. Refresh retrieves metadata, stars and documentation; update checks inspect upstream skill changes for review before synchronization.
 
-Run `pnpm install`, then `pnpm dev` for the frontend or `pnpm tauri dev` for the desktop application.
+Imports, checks and updates share a task center with progress and results. Filter failures or items needing attention, then retry individually or in batches without searching through completed work.
 
-Validate with `pnpm test`, `pnpm typecheck` and `cargo test --manifest-path src-tauri/Cargo.toml`.
+![Task center with failure filtering and retry controls](docs/images/product/tasks-en.png)
 
-Package Windows with `pnpm package:release:windows`; see [packaging instructions](scripts/README.md) for other platforms. Available release attachments are authoritative; local Windows builds do not verify macOS or Linux.
+Update checks save progress per repository and support pause and continuation. After restarting the application, continue unfinished repositories without rechecking completed ones. Closing the task window leaves background work running.
+
+## Keep what you learn
+
+- **Read documentation** alongside skill details and repository information.
+- **Write remarks and add tags** to record useful scenarios, limitations and your own assessment.
+- **Use AI-assisted suggestions** for remarks and tags, then edit and save them. An AI service must be configured.
+- **Connect Obsidian notes** for longer practical records, using stable identifiers to associate notes with skills or repositories.
+
+## Keep control of your data
+
+Skills and configuration live locally. Local backups, WebDAV backups and repository synchronization help preserve your library. Windows portable mode keeps `arsenal.exe` beside its `.arsenal` data directory.
+
+Close the old application and back up your data before upgrading. Preserve your existing `.arsenal` directory rather than replacing it with packaged defaults. Remote imports, synchronization and AI features connect to their respective services.
+
+## Get started
+
+1. Download an installer or portable archive from [Releases](https://github.com/yufenglyu/Arsenal/releases).
+2. Choose **Add skills** in the library and import a GitHub repository or local folder.
+3. Create groups, add tags, read documentation and record useful remarks.
+4. Configure destinations under **Skill installation**, then install skills into platforms or projects.
+5. Check for upstream changes and open **Tasks** from the status bar to review progress and results.
+
+Available platforms and package formats are listed in the release attachments.
+
+## Development and contributions
+
+The frontend uses React and TypeScript; the desktop application uses Tauri and Rust.
+
+```bash
+pnpm install
+pnpm tauri dev
+```
+
+Use `pnpm dev` for frontend development. Validate with `pnpm test`, `pnpm typecheck` and `cargo test --manifest-path src-tauri/Cargo.toml`. See [build and packaging scripts](scripts/README.md) for distribution instructions.
+
+Issues and focused improvements are welcome. Include your operating system, application version and reproduction steps, and keep sensitive information out of screenshots and logs.
 
 Licensed under [Apache-2.0](LICENSE).
