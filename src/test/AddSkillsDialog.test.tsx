@@ -213,8 +213,10 @@ it("keeps conflicts pending and resumes them from the global task center", async
   expect(invoke.mock.calls.filter(([command]) => command === "import_github_repo_skills")).toHaveLength(0);
   render(<MemoryRouter><TaskCenter/></MemoryRouter>);
   fireEvent.click(screen.getByRole("button", {name:/任务 ·/}));
-  fireEvent.click(screen.getByRole("button", {name:"继续导入"}));
-  fireEvent.click(screen.getByRole("button", {name:"confirm selection"}));
+  fireEvent.click(screen.getByRole("button", {name:"选择技能"}));
+  expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  fireEvent.change(screen.getByRole("combobox", {name:"同名处理：A"}), {target:{value:"overwrite"}});
+  fireEvent.click(screen.getByRole("button", {name:"导入 2 项技能"}));
   await waitFor(() => expect(queue.getState().tasks.every(task => task.status === "success")).toBe(true));
   expect(queue.getState().tasks).toHaveLength(2);
   expect(new Set(queue.getState().tasks.map(task => task.batchId)).size).toBe(1);

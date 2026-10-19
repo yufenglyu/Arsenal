@@ -24,6 +24,31 @@ export async function previewLocalImport(sourceDir: string) {
 }
 
 export const PREPARE_GITHUB_IMPORT = "prepare_github_resource_import";
+export function preparedImportPreview(taskId: string): GitHubRepoPreview | null {
+  const task = useTaskQueueStore.getState().tasks.find(task => task.id === taskId);
+  const result = task?.steps.find(step => step.command === PREPARE_GITHUB_IMPORT)?.result as GitHubRepoPreview | undefined;
+  if (!result?.repo || typeof result.repo.owner !== "string" || typeof result.repo.repo !== "string" || !Array.isArray(result.skills)) return null;
+  if (!result.skills.every(skill => skill && typeof skill.sourcePath === "string" && typeof skill.skillId === "string" && typeof skill.skillName === "string")) return null;
+  return result;
+}
+
+// Validate against the reviewed preview and transition the existing batch only once.
+export function submitPreparedImport(taskId: string, preview: GitHubRepoPreview, selections: GitHubSkillImportSelection[]): string | null {
+  const queue = useTaskQueueStore.getState();
+  const task = queue.tasks.find(task => task.id === taskId);
+  const step = task?.steps.find(step => step.command === PREPARE_GITHUB_IMPORT);
+  if (!task || task.status !== "awaiting_input" || task.clearRequested || step?.result !== preview || typeof step.args.repoUrl !== "string") return null;
+  const paths = new Set(preview.skills.map(skill => skill.sourcePath));
+  const chosen = selections.filter(item => item.resolution !== "skip");
+  if (!chosen.length || new Set(selections.map(item => item.sourcePath)).size !== selections.length || selections.some(item => !paths.has(item.sourcePath) || !["skip","rename","overwrite"].includes(item.resolution))) return null;
+  if (chosen.some(item => item.resolution === "rename" && (!item.renamedSkillId?.trim() || /[\\/]/.test(item.renamedSkillId) || [".",".."].includes(item.renamedSkillId.trim())))) return null;
+  const batchId = task.batchId ?? task.id;
+  const id = enqueueGitHubImport(step.args.repoUrl, preview, selections, batchId);
+  if (!id) return null;
+  queue.patch(task.id, {batchId, status:"success", skippedImportSkills:preview.skills.filter(skill => !chosen.some(item => item.sourcePath === skill.sourcePath)).map(skill => skill.skillName),
+    steps:task.steps.map(item => ({...item,status:"success"}))});
+  return id;
+}
 const pendingPreviews = new Map<string, Promise<GitHubRepoPreview>>();
 useTaskQueueStore.subscribe((state) => {
   for (const requestId of pendingPreviews.keys()) {

@@ -1,99 +1,123 @@
-<p align="center"><img src="public/arsenal.svg" width="80" alt="Arsenal"></p>
+<p align="center"><img src="public/arsenal.svg" width="88" alt="Arsenal icon"></p>
+<h1 align="center">Arsenal</h1>
+<p align="center"><strong>Your AI skills, organized and ready where you work.</strong></p>
+<p align="center">AI tools and capabilities management · Collect · Organize · Install · Update · Annotate</p>
+<p align="center">
+  <a href="https://github.com/yufenglyu/Arsenal/releases"><img src="https://img.shields.io/github/v/release/yufenglyu/Arsenal?style=flat-square&color=0078d4" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="Apache-2.0"></a>
+</p>
+<p align="center">
+  <a href="https://github.com/yufenglyu/Arsenal/releases">Download</a> ·
+  <a href="#at-a-glance">Features</a> ·
+  <a href="#get-started">Get started</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="README_CN.md">简体中文</a>
+</p>
 
-# Arsenal
+Arsenal brings **Skills** from GitHub, local folders and different AI tools into one desktop workspace. Organize your collection, install skills into tools such as Claude Code, Codex and Cursor—or individual projects—review upstream changes, and keep practical notes alongside the skills.
 
-**Keep your AI skills in one library, ready to use across tools and projects.**
+![Arsenal workspace with nested groups, repository trees, platform and project destinations, and a skill document beside the library](docs/images/product/document-en.png)
 
-Arsenal is a desktop application for collecting, organizing, installing and maintaining AI skills. Browse your library, see where skills are installed, review upstream changes and keep notes about what works for you—all in one workspace.
+<p align="center"><sub>Current source UI with fictional demonstration data. Example skills are not bundled. Published releases may differ.</sub></p>
 
-[简体中文](README_CN.md) · [Download](https://github.com/yufenglyu/Arsenal/releases) · [Changelog](CHANGELOG.md) · [Report an issue](https://github.com/yufenglyu/Arsenal/issues)
+## At a glance
 
-![Skill library with nested groups, tags and installation targets](docs/images/product/library-en.png)
+| Collect and organize | Install and maintain | Read and remember |
+| --- | --- | --- |
+| Import selected skills from GitHub or local folders | Shared Hub, software platforms and project directories | Read SKILL.md and repository documents side by side |
+| Nested groups, drag and drop, multi-select and tags | See installation relationships; choose links or copies | Skill and repository remarks with AI assistance |
+| Repository / flat views, search and sorting | Review repository changes, retry failures and resume checks | Connect Obsidian notes through stable links |
 
-*Screenshots use actual application components with fictional demonstration data. Example skills are not bundled.*
+**One library, different working environments.** Keep literature tools in a research project, install review and testing skills into a development project, and place everyday capabilities in Shared Hub. See what is installed where without inspecting folders by hand.
 
-## Why Arsenal?
+## Choose what to import. Find it when you need it.
 
-Collecting skills is easy. Finding the right one later, understanding when to use it and keeping it available across AI tools takes more work.
+Add a GitHub URL or a local folder. If a repository contains multiple skills, select the ones you want. Resolve name conflicts by skipping, renaming or overwriting. When import preparation runs in the background, return to its task row to finish your choices.
 
-| The problem | How Arsenal helps |
+![Inline import review with skill selection and a name-conflict resolution control](docs/images/product/import-en.png)
+
+Expand repositories by source and organize groups around your work. Drag repositories or skills into nested groups, filter by tags, or switch to a flat list to compare skills across sources. Search names, descriptions and remarks; adjust column widths and visible columns to fit your workflow.
+
+![Library organized into research, development, design and writing groups, with repository remarks and a skill list](docs/images/product/library-en.png)
+
+## Collect once. Install by tool or project.
+
+The library holds your original skill files. Choose destinations during installation and see existing links before making changes. Use symbolic links or create independent copies.
+
+| Destination | Useful for |
 | --- | --- |
-| Skills are scattered across GitHub, downloads and projects | Import from GitHub or local folders and browse repositories and skills together |
-| Your collection becomes difficult to navigate | Organize it with nested groups, tags and search |
-| Several AI tools need the same skills | Manage shared, platform-specific and project-specific installations in one place |
-| Upstream changes are hard to track | Check source changes and review results before synchronization |
-| Practical knowledge gets forgotten | Read documentation, write remarks and link Obsidian notes |
+| **Shared Hub** | A common set of skills for tools that support the shared directory |
+| **Software platforms** | Separate skill selections for tools such as Claude Code and Cursor |
+| **Project directories** | Capabilities scoped to a particular project |
 
-## One library, multiple destinations
+Configure custom platforms and skill paths. Shared-directory discovery depends on each tool's support and configuration. Independent copies do not automatically change when the source files change.
 
-The skill library stores the original files. Choose where to install each skill: share frequently used capabilities, or build a focused set for a particular tool or project.
+![Installation dialog with software platforms, project directories, and symbolic-link or copy options](docs/images/product/install-en.png)
 
-```text
-GitHub / Local folders
-        ↓
-     Skill library
-        ├── Groups and tags: organize and find
-        └── Skill installation
-              ├── Shared Hub
-              ├── Software platforms
-              └── Project directories
-```
+## Review the changes before you update
 
-- **Collect in one place.** Import GitHub repositories or local skills, review the skill list and resolve conflicts during import.
-- **Install by destination.** Choose platforms or projects and inspect installation relationships and counts.
-- **Reduce duplicate copies.** Shared Hub links back to library skills. Platform installation prefers links and falls back to copying when necessary. Whether a tool reads a shared directory depends on that tool's support and configuration.
-- **Bring your own tools.** Configure platform names and skill paths, enable the platforms you use and manage project directories.
+**Refresh repository information** retrieves metadata, stars and documentation. **Update skill library** checks source content and lets you confirm synchronization. These are separate operations, available for a batch or a single repository.
 
-## Organize around your work
+Review additions, modifications, deletions and document changes by repository, then expand skills to inspect the affected files. Select repositories to update; retry failed checks individually.
 
-Use groups for development, research, writing or other activities, and tags for purpose and characteristics. Drag skills or repositories into nested groups. Reordering, multiple selection and keyboard shortcuts help manage a growing library.
+![Repository update review expanded to file-level changes, with a separate retry for a failed repository](docs/images/product/review-en.png)
 
-Switch between repository and flat skill views, and search names, descriptions and remarks. Adjustable columns and collapsible sidebars let you arrange the workspace while keeping documents and skill lists close at hand.
+> Source updates mirror the selected repositories. They overwrite local skill content and process upstream deletions. Keep personal knowledge in remarks or notes, and back up local edits you want to preserve.
 
-## Review changes and manage background work
+## Batch work, with attention where it is needed
 
-Repository refresh and skill update checks serve different purposes. Refresh retrieves metadata, stars and documentation; update checks inspect upstream skill changes for review before synchronization.
+Tasks start with a batch summary. Skill selection, import conflicts and update reviews expand inside the corresponding row, keeping other tasks in context. Completed items can stay folded while errors and retry actions remain easy to find.
 
-Imports, checks and updates share a task center with progress and results. Filter failures or items needing attention, then retry individually or in batches without searching through completed work.
+![Task center showing an import, a single-repository refresh and a library update with their own states and actions](docs/images/product/tasks-en.png)
 
-![Task center with failure filtering and retry controls](docs/images/product/tasks-en.png)
+- **Resume checks:** progress is recorded per repository, so unfinished work can continue after stopping or restarting.
+- **Keep working:** closing the task window leaves background work running.
+- **Maintain caches automatically:** release unreferenced and completed snapshots while retaining reviews, retries and recovery data.
+- **Reduce distractions:** AI remarks and explanations stay in their own views, outside the task window.
 
-Update checks save progress per repository and support pause and continuation. After restarting the application, continue unfinished repositories without rechecking completed ones. Closing the task window leaves background work running.
+## Understand a skill—and remember how you use it
 
-## Keep what you learn
+Read documents beside the library and record when a skill helps, what inputs it needs and where its limits are. AI can suggest remarks and tags for you to edit and confirm. Link longer practical records to Obsidian notes with stable identifiers.
 
-- **Read documentation** alongside skill details and repository information.
-- **Write remarks and add tags** to record useful scenarios, limitations and your own assessment.
-- **Use AI-assisted suggestions** for remarks and tags, then edit and save them. An AI service must be configured.
-- **Connect Obsidian notes** for longer practical records, using stable identifiers to associate notes with skills or repositories.
-
-## Keep control of your data
-
-Skills and configuration live locally. Local backups, WebDAV backups and repository synchronization help preserve your library. Windows portable mode keeps `arsenal.exe` beside its `.arsenal` data directory.
-
-Close the old application and back up your data before upgrading. Preserve your existing `.arsenal` directory rather than replacing it with packaged defaults. Remote imports, synchronization and AI features connect to their respective services.
+See the [companion integration](integrations/) for Obsidian setup and requirements. AI features require a configured service and send relevant content to your selected provider.
 
 ## Get started
 
-1. Download an installer or portable archive from [Releases](https://github.com/yufenglyu/Arsenal/releases).
-2. Choose **Add skills** in the library and import a GitHub repository or local folder.
-3. Create groups, add tags, read documentation and record useful remarks.
-4. Configure destinations under **Skill installation**, then install skills into platforms or projects.
-5. Check for upstream changes and open **Tasks** from the status bar to review progress and results.
+1. **Download:** choose an installer or portable archive from [Releases](https://github.com/yufenglyu/Arsenal/releases). Available operating systems, architectures and formats depend on the release assets.
+2. **Import:** choose **Add skills** and enter a GitHub URL or select a local directory.
+3. **Install:** select a skill and choose its platform or project destinations.
+4. **Maintain:** organize groups, read documents and add remarks. Use **Update skills** to check upstream changes.
 
-Available platforms and package formats are listed in the release attachments.
+Default shortcuts: `Ctrl/Cmd + K` for global search, `Ctrl/Cmd + F` for page search, `F3` to switch repository / flat views, and `F5` to refresh the list. Shortcuts can be changed in Settings.
 
-## Development and contributions
+### Local data and backups
 
-The frontend uses React and TypeScript; the desktop application uses Tauri and Rust.
+Skills and configuration are stored locally, with local and WebDAV backups available. Windows portable mode keeps `arsenal.exe` beside the `.arsenal` data directory. Exit and back up before upgrading; preserve your existing `.arsenal` instead of replacing it with packaged defaults.
+
+Local browsing and organization do not require an AI service. GitHub imports, source checks, WebDAV and AI features connect to their respective services.
+
+<details>
+<summary><strong>Development and contributions</strong></summary>
+
+React + TypeScript frontend, Tauri 2 + Rust desktop backend. Install Node.js, pnpm, Rust and the [Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ```bash
 pnpm install
 pnpm tauri dev
 ```
 
-Use `pnpm dev` for frontend development. Validate with `pnpm test`, `pnpm typecheck` and `cargo test --manifest-path src-tauri/Cargo.toml`. See [build and packaging scripts](scripts/README.md) for distribution instructions.
+```bash
+pnpm typecheck
+pnpm lint
+pnpm test
+cargo test --manifest-path src-tauri/Cargo.toml
+pnpm tauri build
+```
 
-Issues and focused improvements are welcome. Include your operating system, application version and reproduction steps, and keep sensitive information out of screenshots and logs.
+`pnpm dev` runs the frontend only; desktop capabilities require Tauri. See the [build, packaging and cleanup scripts](scripts/README.md), and the [screenshot reproduction guide](docs/screenshots/README.md).
 
-Licensed under [Apache-2.0](LICENSE).
+Report issues through [GitHub Issues](https://github.com/yufenglyu/Arsenal/issues), including the OS, application version and reproduction steps. Remove personal data and credentials from screenshots and logs.
+
+</details>
+
+Licensed under [Apache-2.0](LICENSE). See [NOTICE](NOTICE) for third-party acknowledgments.

@@ -1,3 +1,4 @@
+import i18n from "@/i18n";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
 const { invoke, listen } = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn(async (_event: string, _callback: (event: {payload: Record<string, unknown>}) => void) => vi.fn()) }));
@@ -6,7 +7,12 @@ vi.mock("@tauri-apps/api/event", () => ({listen}));
 import {
   useTaskQueueStore as queue,
   waitForTask,
+  taskErrorMessage,
 } from "@/stores/taskQueueStore";
+it("explains snapshot error codes returned as repository report strings",()=>{
+ expect(taskErrorMessage("SNAPSHOT_CACHE_FULL")).toBe(i18n.t("workflow.errors.SNAPSHOT_CACHE_FULL"));
+ expect(taskErrorMessage("UNSAFE_SNAPSHOT_PATH: unsupported managed file type")).toBe(i18n.t("workflow.errors.UNSAFE_SNAPSHOT_PATH"));
+});
 const input = (key: string, locks: string[] = []) => ({
   key,
   kind: "update" as const,
@@ -179,8 +185,6 @@ describe("background queue", () => {
   });
 });
 
-import {taskErrorMessage} from "@/stores/taskQueueStore";
-import i18n from "@/i18n";
 it("distinguishes changed categories from changed remote contents",()=>{
   expect(taskErrorMessage("Preview changed: item category changed; check this repository again")).toBe(i18n.t("workflow.errors.categoryChanged"));
   expect(taskErrorMessage("Preview changed: remote content version changed; check this repository again")).toBe(i18n.t("workflow.errors.remoteVersionChanged"));

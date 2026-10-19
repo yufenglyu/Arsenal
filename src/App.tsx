@@ -1,5 +1,6 @@
 import { NotebookNavigation } from "@/components/notebook/NotebookNavigation";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
+import {startSnapshotCacheMaintenance} from "@/stores/snapshotCacheMaintenance";
 import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { PlatformView } from "@/pages/PlatformView";
@@ -9,6 +10,7 @@ import { SkillDetailPage } from "@/pages/SkillDetailPage";
 import { SettingsView } from "@/pages/SettingsView";
 
 function App() {
+  useEffect(startSnapshotCacheMaintenance, []);
   const location = useLocation();
   const navigate = useNavigate();
   const settingsOpen = location.pathname === "/settings";

@@ -522,11 +522,12 @@
     "sharedPlatformCentralize": "Will add to Shared Hub",
     "sharedPlatformHint": "Selecting a shared platform adds this skill to Shared Hub and syncs it to every enabled platform and project, not only the current target.",
     "notDetected": "(not detected)",
-    "confirmInstall": "Install to {{count}} target{{count, select, 1 {} other {s}}}",
+    "confirmInstall": "Install to {{count}} targets",
     "selectPlatform": "Please select at least one target.",
     "selectPlatforms": "Select install targets",
     "cancel": "Cancel",
-    "installing": "Installing..."
+    "installing": "Installing...",
+    "confirmInstall_one": "Install to {{count}} target"
   },
   "detail": {
     "chooseFile": "Choose file",
@@ -685,10 +686,11 @@
     "succeeded": "{{succeeded}} succeeded, {{failed}} failed:",
     "close": "Close",
     "cancel": "Cancel",
-    "install": "Install to {{count}} target{{count, select, 1 {} other {s}}}",
+    "install": "Install to {{count}} targets",
     "installing": "Installing...",
     "selectPlatform": "Please select at least one target.",
-    "selectPlatforms": "Select install targets"
+    "selectPlatforms": "Select install targets",
+    "install_one": "Install to {{count}} target"
   },
   "collectionPicker": {
     "title": "Add to bundle",
@@ -1481,6 +1483,62 @@
         "addressLinks": "Installation links have changed or cannot be migrated safely. Check them and retry.",
         "addressRecovery": "Directory migration needs recovery. Retry the address change or restart. Scanning and synchronization wait until recovery completes."
       }
+    },
+    "batch": {
+      "current": "Current",
+      "history": "History",
+      "noHistory": "No history yet",
+      "updateLibrary": "Update skill library",
+      "updateSelected": "Update selected repositories",
+      "refreshSingle": "Refresh repository",
+      "scopeAll": "All {{count}} repositories",
+      "scopeSelected": "{{count}} selected repositories",
+      "scopeCount": "{{count}} repositories",
+      "checking": "Checking",
+      "refreshing": "Refreshing",
+      "stopped": "Stopped",
+      "failedCount": "{{count}} failed",
+      "reviewCount": "{{count}} repositories to review",
+      "updateResult": "{{updated}} updated · {{unchanged}} unchanged",
+      "chooseSkills": "Choose skills",
+      "review": "Review changes",
+      "collapse": "Collapse",
+      "resume": "Resume unfinished",
+      "retryFailed": "Retry failed",
+      "retryHint": "Retry failed items only; completed results are retained.",
+      "log": "Log",
+      "later": "Later",
+      "draftRetained": "Your choices are retained",
+      "completedCount": "{{count}} completed",
+      "settled": "{{done}} completed · {{skipped}} skipped",
+      "unchangedCount": "{{count}} unchanged",
+      "importSelection": "Import {{count}} · skip {{skipped}}",
+      "nameConflict": "Name conflict",
+      "conflictFor": "Resolve conflict: {{name}}",
+      "renameFor": "Rename: {{name}}",
+      "previewUnavailable": "Preview changed or is unavailable. Check again before proceeding.",
+      "invalidRename": "Enter a valid skill ID without path separators.",
+      "chooseOne": "Choose at least one skill to import",
+      "importConfirm": "Import {{count}} skills",
+      "updateConfirm": "Confirm update for {{count}} repositories",
+      "confirmDeletions": "Confirm listed deletions ({{count}} repositories)",
+      "selectUpdates": "Select repositories to update ({{count}})",
+      "searchRepos": "Search repositories",
+      "searchItems": "Search items",
+      "needsCheck": "Check again",
+      "changes": "{{added}} added · {{modified}} modified · {{deleted}} deleted",
+      "syncing": "Syncing",
+      "importTitle": "Import skills",
+      "importReady": "{{count}} skills found",
+      "documentsChanged": "Documents {{count}}",
+      "scopeAll_one": "All {{count}} repository",
+      "scopeSelected_one": "{{count}} selected repository",
+      "scopeCount_one": "{{count}} repository",
+      "reviewCount_one": "{{count}} repository to review",
+      "importConfirm_one": "Import {{count}} skill",
+      "updateConfirm_one": "Confirm update for {{count}} repository",
+      "confirmDeletions_one": "Confirm listed deletions ({{count}} repository)",
+      "importReady_one": "{{count}} skill found"
     }
   },
   "g": {
@@ -1636,5 +1694,5 @@
     "expandAll": "Expand all",
     "collapseAll": "Collapse all",
     "operationFailed": "Group operation failed. Refresh and try again."
-}
+  }
 }

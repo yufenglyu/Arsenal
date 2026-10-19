@@ -2,6 +2,10 @@ import {expect,it} from "vitest";
 import {groupStatus,importDetailRows,matchesTaskFilter} from "@/lib/taskPresentation";
 import type {BackgroundTask} from "@/stores/taskQueueStore";
 const task=(id:string,status:BackgroundTask["status"]):BackgroundTask=>({id,key:id,label:id,kind:"import",status,cancelRequested:false,createdAt:0,locks:[],steps:[]});
+it("retains preparation failures even when no preview was returned",()=>{
+ const failed={...task("prepare","failed"),steps:[{command:"prepare_github_resource_import",args:{},label:"prepare",status:"failed" as const,error:"timeout"}]};
+ expect(importDetailRows([failed])).toEqual([{key:"prepare:0",name:"prepare",status:"failed",error:"timeout"}]);
+});
 it("keeps mixed batch failures actionable instead of reporting the first successful child",()=>{
  expect(groupStatus([task("one","success"),task("two","failed")])).toBe("partial");
  expect(groupStatus([task("one","success"),task("two","queued")])).toBe("queued");

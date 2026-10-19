@@ -1,7 +1,7 @@
 import {useNotebookStore} from "./notebookStore";
 import {invoke, isTauriRuntime} from "@/lib/tauri";
 import { useRepositoryDocumentStore } from "./repositoryDocumentStore";
-import {activityAttention, pendingUpdateCount} from "@/lib/activityCenter";
+import {activityAttention, isTaskVisible, pendingUpdateCount} from "@/lib/activityCenter";
 import {
   registerTaskExecutor,
   registerTaskResult,
@@ -29,6 +29,7 @@ export function hasRepositoryChanges(item: RepositorySyncPreview): boolean {
 }
 
 interface RepositorySyncState {
+  applySnapshots: (choices: {repository: string; snapshotId: string; allowDeletions: boolean}[], generation: string | null) => number;
   migratingRepository: string | null;
   changeRepositoryAddress: (repository: string, newAddress: string) => Promise<void>;
   updateErrors: Record<string, string>;
@@ -73,6 +74,25 @@ const activeRechecks = new Set<string>();
 export const useRepositorySyncStore = create<RepositorySyncState>()(
   persist(
     (set, get) => ({
+      applySnapshots: (choices, generation) => {
+        const state = get();
+        if (state.reportGeneration !== generation || state.isChecking || state.checkingRepository || state.migratingRepository) return 0;
+        const parentReportGeneration = getReportTaskGeneration();
+        const batchId = crypto.randomUUID();
+        let count = 0;
+        for (const choice of choices) {
+          const repo = get().preview?.repositories.find(repo => repo.repository === choice.repository && repo.snapshotId === choice.snapshotId);
+          if (!repo || repo.error || !hasRepositoryChanges(repo)) continue;
+          const deletes = repo.deleted.length > 0 || repo.documentChanges?.some(file => file.status === "deleted") || repo.modified.some(item => item.files?.some(file => file.status === "deleted"));
+          if (deletes && !choice.allowDeletions) continue;
+          if (useTaskQueueStore.getState().tasks.some(task => isTaskActive(task) && task.locks.some(lock => lock === "repo:*" || lock === `repo:${repo.repository.toLowerCase()}`))) continue;
+          useTaskQueueStore.getState().enqueue({key:`mirror:${repo.snapshotId}`, batchId, parentReportGeneration,
+            kind:"update", label:repo.repository, batchLabel:i18n.t("workflow.mirror.apply"), locks:[`repo:${repo.repository.toLowerCase()}`],
+            steps:[{command:"apply_repository_snapshot", label:repo.repository, args:{snapshotId:repo.snapshotId}}]});
+          count++;
+        }
+        return count;
+      },
       migratingRepository: null,
       changeRepositoryAddress: async (repository, newAddress) => {
         if (get().migratingRepository || get().isChecking || get().checkingRepository || useTaskQueueStore.getState().tasks.some(isTaskActive)) throw new Error("addressBusy");
@@ -113,8 +133,9 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
           }))];
           const batchId = crypto.randomUUID();
           const ids = repos.map(repository => useTaskQueueStore.getState().enqueue({
-            batchId, batchLabel: i18n.t("workflow.refreshRepository"),
-            key: `repository-metadata:${repository}`, kind: "check", label: `${i18n.t("workflow.refreshRepository")} · ${repository}`,
+            batchId, batchLabel: i18n.t("workflow.refreshRepositoryInfo"),
+            scope: {mode: repositories?.length ? "selected" : "all", repositories: repos},
+            key: `repository-metadata:${repository}`, kind: "check", label: `${i18n.t("workflow.refreshRepositoryInfo")} · ${repository}`,
             locks: [`repo:${repository}`],
             steps: [{ command: "refresh_repository", args: { repository }, label: repository }],
           }));
@@ -284,7 +305,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
       },
       setOpen: (open) => {
         const state = get();
-        const tasks = useTaskQueueStore.getState().tasks.filter(task => !task.clearRequested);
+        const tasks = useTaskQueueStore.getState().tasks.filter(isTaskVisible);
         const pending = pendingUpdateCount(state.preview, state.ignored, tasks) + activityAttention(tasks, state.preview, state.checkedAt, state.error).count + (state.error ? 1 : 0);
         set({open, centerView: open ? pending ? "pending" : tasks.some(task => task.status === "running" || task.status === "queued") ? "active" : "history" : null});
       },
@@ -350,6 +371,7 @@ async function checkInBackground(
       parentReportGeneration: parentReportGeneration ?? reportGeneration ?? undefined,
       key: `check:${repositories?.slice().sort().join(",") ?? "all"}:${reportGeneration ?? "legacy"}`,
       kind: "check",
+      scope: {mode: repositories?.length ? "selected" : "all", repositories: planned},
       locks: repositories?.length ? repositories.map(repo => `repo:${repo.toLowerCase()}`) : ["repo:*"],
       label: repositories?.length ? i18n.t("workflow.checkRepositories", {count:repositories.length}) : i18n.t("workflow.allSourceRepositories"),
       steps: scopes.map(scope => ({
@@ -417,8 +439,22 @@ registerTaskExecutor(
   (args) =>
     useResourceLibraryStore
       .getState()
-      .previewRepositorySync(args.repositories as string[] | undefined),
+      .previewRepositorySync(args.repositories as string[] | undefined, retainedSnapshotIds()),
 );
+
+// Compute at execution time, not enqueue time: preceding check steps may have
+// produced additional snapshots while this task waited for its repository lock.
+export function retainedSnapshotIds(): string[] {
+  const ids = new Set((useRepositorySyncStore.getState().preview?.repositories ?? [])
+    .flatMap(repo => repo.snapshotId ? [repo.snapshotId] : []));
+  for (const task of useTaskQueueStore.getState().tasks) {
+    if (task.status === "success" || task.clearRequested) continue;
+    for (const step of task.steps) {
+      if (step.command === "apply_repository_snapshot" && typeof step.args.snapshotId === "string") ids.add(step.args.snapshotId);
+    }
+  }
+  return [...ids];
+}
 
 registerTaskResult("update_source_backed_resource_skill", async () => {
   await useResourceLibraryStore.getState().loadResourceLibrary();
@@ -507,6 +543,6 @@ registerTaskCompletion("apply_repository_snapshot", async () => {
 function releaseSnapshots(repositories: RepositorySyncPreview[]) {
   if (!isTauriRuntime()) return;
   const tasks = useTaskQueueStore.getState().tasks;
-  const snapshotIds = repositories.flatMap(repo => repo.snapshotId && !tasks.some(task => isTaskActive(task) && task.steps.some(step=>step.args.snapshotId===repo.snapshotId)) ? [repo.snapshotId] : []);
+  const snapshotIds = repositories.flatMap(repo => repo.snapshotId && !tasks.some(task => task.status !== "success" && !task.clearRequested && task.steps.some(step=>step.command === "apply_repository_snapshot" && step.args.snapshotId===repo.snapshotId)) ? [repo.snapshotId] : []);
   if (snapshotIds.length) void invoke("release_repository_snapshots", {snapshotIds}).catch(()=>{/* A retained cache is safe; never fail a check because cleanup failed. */});
 }

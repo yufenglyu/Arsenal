@@ -60,7 +60,7 @@ interface ResourceLibraryState {
   ) => Promise<BatchInstallResult>;
   togglePlatformLink: (skillId: string, agentId: string) => Promise<void>;
   updateSourceBackedSkills: () => Promise<SkillSourceUpdateReport>;
-  previewRepositorySync: (repositories?: string[]) => Promise<RepositorySyncPreviewReport>;
+  previewRepositorySync: (repositories?: string[], retainedSnapshotIds?: string[]) => Promise<RepositorySyncPreviewReport>;
   syncSourceBackedSkills: (
     options: RepositorySyncApplyOptions
   ) => Promise<SkillSourceUpdateReport>;
@@ -196,14 +196,14 @@ export const useResourceLibraryStore = create<ResourceLibraryState>((set, get) =
     }
   },
 
-  previewRepositorySync: async (repositories) => {
+  previewRepositorySync: async (repositories, retainedSnapshotIds) => {
     if (!isTauriRuntime()) {
       return { repositories: [] };
     }
 
     const preview = await invoke<RepositorySyncPreviewReport>(
       "preview_source_backed_resource_repository_updates",
-      { repositories: repositories ?? null }
+      { repositories: repositories ?? null, ...(retainedSnapshotIds ? {retainedSnapshotIds} : {}) }
     );
     const skills = await invoke<SkillWithLinks[]>("get_resource_library_skills");
     set({ skills });

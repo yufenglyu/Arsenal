@@ -157,7 +157,7 @@ describe("background repository preview", () => {
     useRepositorySyncStore.getState().markApplied();
     const check = vi.spyOn(useResourceLibraryStore.getState(), "previewRepositorySync").mockResolvedValue({repositories:[{...first,modified:[{skillId:"x",name:"Changed"}]}]});
     await useRepositorySyncStore.getState().recheckRepository("one/repo");
-    expect(check).toHaveBeenCalledWith(["one/repo"]);
+    expect(check).toHaveBeenCalledWith(["one/repo"], []);
     expect(useRepositorySyncStore.getState().preview?.repositories[1]).toEqual(second);
     expect(useRepositorySyncStore.getState()).toMatchObject({applied:false,appliedRepositories:["two/repo"],includeAdded:false,removeDeleted:true,checkingRepository:null});
     useRepositorySyncStore.getState().markRepositoryApplied("one/repo");

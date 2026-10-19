@@ -47,13 +47,14 @@ function records(value: unknown): Record<string, unknown>[] {
 // Read only the documented skill/result fields. Never render arbitrary IPC payloads.
 export function importDetailRows(tasks: BackgroundTask[]): ImportDetailRow[] {
   const importing = tasks.some(task => task.steps.some(step => step.command === "import_github_repo_skills"));
-  return tasks.flatMap(task => task.steps.flatMap((step, index): ImportDetailRow[] => {
+  return tasks.flatMap(task => [...(task.skippedImportSkills ?? []).map((name, index): ImportDetailRow => ({key:`${task.id}:skip:${index}`,name,status:"skipped"})), ...task.steps.flatMap((step, index): ImportDetailRow[] => {
     const key = `${task.id}:${index}`;
     const result = step.result && typeof step.result === "object" ? step.result as Record<string, unknown> : {};
     if (step.command === "prepare_github_resource_import") {
       if (importing) return [];
-      return records(result.skills).flatMap((skill, i) => typeof skill.name === "string" ? [{key:`${key}:${i}`,name:skill.name,
+      const skills = records(result.skills).flatMap((skill, i): ImportDetailRow[] => typeof (skill.skillName ?? skill.name) === "string" ? [{key:`${key}:${i}`,name:String(skill.skillName ?? skill.name),
         status:task.status === "awaiting_input" ? skill.conflict ? "awaiting_input" : "ready" : step.status ?? task.status}] : []);
+      return skills.length ? skills : [{key,name:step.label,status:step.status ?? task.status,error:step.error}];
     }
     const imported = records(result.importedSkills).flatMap((skill, i) => typeof skill.skillName === "string"
       ? [{key:`${key}:imported:${i}`,name:skill.skillName,status:"imported" as const}] : []);
@@ -67,5 +68,5 @@ export function importDetailRows(tasks: BackgroundTask[]): ImportDetailRow[] {
       }] : []);
     }
     return [{key,name:step.label,status:step.status ?? task.status,error:step.error}];
-  }));
+  })]);
 }

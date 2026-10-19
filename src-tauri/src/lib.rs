@@ -109,6 +109,7 @@ pub fn run() {
             commands::repository_mirror::apply_repository_snapshot,
             commands::repository_address::change_repository_address,
             commands::repository_mirror::release_repository_snapshots,
+            commands::repository_mirror::list_repository_snapshot_cache,
             commands::github_import::refresh_repository_stars,
             commands::github_import::refresh_repository,
             commands::skills::preview_local_resource_skills,

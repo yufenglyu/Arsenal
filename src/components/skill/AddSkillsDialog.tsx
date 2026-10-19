@@ -6,6 +6,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, PackagePlus } from "lucide-react";
 import { toast } from "sonner";
 import { useGitHubImportStore } from "@/stores/githubImportStore";
+import { useRepositorySyncStore } from "@/stores/repositorySyncStore";
 import { taskErrorMessage, useTaskQueueStore } from "@/stores/taskQueueStore";
 import type { GitHubRepoPreview, GitHubSkillImportSelection } from "@/types";
 import { GitHubRepoImportWizard } from "@/components/github-import/GitHubRepoImportWizard";
@@ -86,7 +87,9 @@ export function AddSkillsDialog({
           return;
         }
         if (preview.skills.some((skill) => skill.conflict)) {
-          setWizard(true);
+          continueGitHubImportInBackground(repoUrl, Promise.resolve(preview));
+          close();
+          useRepositorySyncStore.getState().setCenterView("active");
           return;
         }
         queueGitHub(

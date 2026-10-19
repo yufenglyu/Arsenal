@@ -11,6 +11,8 @@ node_modules/
 .vite/
 *.tsbuildinfo
 .eslintcache
+__pycache__/
+*.py[cod]
 /vite.config.js
 /vite.config.d.ts
 
@@ -80,6 +82,7 @@ desktop.ini
 /reference/
 /.tmp-chrome-*/
 /.tmp-npx-probe/
+/.tmp-*
 /.factory/
 /.worktrees/
 

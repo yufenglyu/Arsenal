@@ -1481,6 +1481,54 @@
         "addressLinks": "安装链接已改变或无法安全迁移，请检查后重试。",
         "addressRecovery": "目录迁移尚未恢复完成。请重试修改地址或重新启动；恢复前不会扫描或同步该仓库。"
       }
+    },
+    "batch": {
+      "current": "当前任务",
+      "history": "历史记录",
+      "noHistory": "暂无历史记录",
+      "updateLibrary": "更新技能仓库",
+      "updateSelected": "更新所选仓库",
+      "refreshSingle": "刷新仓库",
+      "scopeAll": "全部 {{count}} 个仓库",
+      "scopeSelected": "所选 {{count}} 个仓库",
+      "scopeCount": "{{count}} 个仓库",
+      "checking": "检查中",
+      "refreshing": "刷新中",
+      "stopped": "已停止",
+      "failedCount": "失败 {{count}}",
+      "reviewCount": "{{count}} 个仓库待审阅",
+      "updateResult": "更新 {{updated}} · 无需更新 {{unchanged}}",
+      "chooseSkills": "选择技能",
+      "review": "审阅变更",
+      "collapse": "收起",
+      "resume": "继续未完成项",
+      "retryFailed": "重试失败项",
+      "retryHint": "仅重试失败项，已完成的结果保留。",
+      "log": "日志",
+      "later": "稍后处理",
+      "draftRetained": "选择会保留，可稍后继续",
+      "completedCount": "已完成 {{count}}",
+      "settled": "完成 {{done}} · 跳过 {{skipped}}",
+      "unchangedCount": "无需更新 {{count}}",
+      "importSelection": "导入 {{count}} · 跳过 {{skipped}}",
+      "nameConflict": "同名技能",
+      "conflictFor": "同名处理：{{name}}",
+      "renameFor": "重命名：{{name}}",
+      "previewUnavailable": "预览已变化或不可用，请重新检查后再处理。",
+      "invalidRename": "请输入有效的技能 ID，不含路径分隔符。",
+      "chooseOne": "至少选择一项可导入的技能",
+      "importConfirm": "导入 {{count}} 项技能",
+      "updateConfirm": "确认更新 {{count}} 个仓库",
+      "confirmDeletions": "确认删除所列技能或文件（{{count}} 个仓库）",
+      "selectUpdates": "选择待更新仓库 ({{count}})",
+      "searchRepos": "搜索仓库",
+      "searchItems": "搜索处理项",
+      "needsCheck": "需重新检查",
+      "changes": "新增 {{added}} · 修改 {{modified}} · 删除 {{deleted}}",
+      "syncing": "同步中",
+      "importTitle": "导入技能",
+      "importReady": "发现 {{count}} 项技能",
+      "documentsChanged": "文档 {{count}}"
     }
   },
   "g": {
@@ -1636,5 +1684,5 @@
     "expandAll": "展开全部",
     "collapseAll": "收起全部",
     "operationFailed": "分组操作失败，请刷新后重试。"
-}
+  }
 }

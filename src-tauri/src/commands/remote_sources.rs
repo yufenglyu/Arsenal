@@ -902,8 +902,9 @@ pub async fn plan_repository_update_check(state: State<'_, AppState>) -> Result<
 pub async fn preview_source_backed_resource_repository_updates(
     state: State<'_, AppState>,
     repositories: Option<Vec<String>>,
+    retained_snapshot_ids: Option<Vec<String>>,
 ) -> Result<RepositorySyncPreviewReport, String> {
-    super::repository_mirror::check(&state.db, repositories).await
+    super::repository_mirror::check_with_retained(&state.db, repositories, retained_snapshot_ids).await
 }
 
 async fn update_source_backed_skills_impl(

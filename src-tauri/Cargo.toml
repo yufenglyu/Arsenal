@@ -34,6 +34,12 @@ required-features = ["migrate-config"]
 default = []
 prepare-config = []
 migrate-config = []
+snapshot-maintenance = []
+
+[[bin]]
+name = "snapshot_maintenance"
+path = "src/build/snapshot_maintenance.rs"
+required-features = ["snapshot-maintenance"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

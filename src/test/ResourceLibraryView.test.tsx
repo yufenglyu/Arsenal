@@ -615,7 +615,7 @@ describe("ResourceLibraryView delete", () => {
     fireEvent.click(openRowActions(folderRow).getByRole("menuitem", { name: "更新仓库技能" }));
 
     await waitFor(() => {
-      expect(mockPreviewRepositorySync).toHaveBeenCalledWith(["owner/repo"]);
+      expect(mockPreviewRepositorySync).toHaveBeenCalledWith(["owner/repo"], []);
     });
     expect(mockSyncSourceBackedSkills).not.toHaveBeenCalled();
     vi.mocked(invoke).mockImplementation(async command => command === "plan_repository_update_check" ? [] : undefined);

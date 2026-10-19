@@ -10,11 +10,13 @@ use crate::{
     db::{self, AppStore},
     AppState,
 };
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use std::{
     collections::{BTreeMap, HashSet},
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 use tauri::State;
@@ -23,6 +25,194 @@ use tauri::State;
 // is honored between repository steps; a started repository finishes its current write.
 pub(crate) static MIRROR_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const MAX_SNAPSHOT_BYTES: usize = 128 * 1024 * 1024;
+const MAX_CACHE_BYTES: usize = 1024 * 1024 * 1024;
+const CACHE_HIGH_WATER_BYTES: usize = MAX_CACHE_BYTES * 4 / 5;
+const SNAPSHOT_ENCODING: &str = "gzip-base64-v1";
+
+fn encode_payload(payload: &str) -> Result<String, String> {
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    encoder
+        .write_all(payload.as_bytes())
+        .map_err(|_| "WRITE_FAILED")?;
+    Ok(base64::engine::general_purpose::STANDARD
+        .encode(encoder.finish().map_err(|_| "WRITE_FAILED")?))
+}
+
+fn read_snapshot(row: &serde_json::Value) -> Result<Snapshot, String> {
+    let payload = row["payload"].as_str().ok_or("SNAPSHOT_UNAVAILABLE")?;
+    if digest(payload.as_bytes()) != row["digest"].as_str().ok_or("SNAPSHOT_UNAVAILABLE")? {
+        return Err("SNAPSHOT_UNAVAILABLE".into());
+    }
+    match row["encoding"].as_str() {
+        None => serde_json::from_str(payload).map_err(|_| "SNAPSHOT_UNAVAILABLE".into()),
+        Some(SNAPSHOT_ENCODING) => {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(payload)
+                .map_err(|_| "SNAPSHOT_UNAVAILABLE")?;
+            let mut decoded = Vec::new();
+            flate2::read::GzDecoder::new(bytes.as_slice())
+                .take(MAX_CACHE_BYTES as u64 + 1)
+                .read_to_end(&mut decoded)
+                .map_err(|_| "SNAPSHOT_UNAVAILABLE")?;
+            if decoded.len() > MAX_CACHE_BYTES {
+                return Err("SNAPSHOT_TOO_LARGE".into());
+            }
+            serde_json::from_slice(&decoded).map_err(|_| "SNAPSHOT_UNAVAILABLE".into())
+        }
+        _ => Err("SNAPSHOT_UNAVAILABLE".into()),
+    }
+}
+
+// IDs come from the live preview and unfinished apply tasks. A recovery journal
+// and any applying snapshot always take precedence over frontend retention.
+async fn reconcile_snapshots(pool: &AppStore, retained: &[String]) -> Result<(), String> {
+    let retained: HashSet<_> = retained.iter().map(String::as_str).collect();
+    let obsolete = pool.read(|d| {
+        Ok(d.table("repository_mirror_snapshots")
+            .iter()
+            .filter(|(id, row)| {
+                !retained.contains(id.as_str())
+                    && row["state"] != "applying"
+                    && !d
+                        .table("repository_mirror_recovery")
+                        .contains_key(id.as_str())
+            })
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>())
+    })?;
+    if obsolete.is_empty() {
+        return Ok(());
+    }
+    pool.write(|d| {
+        for id in &obsolete {
+            d.table_mut("repository_mirror_snapshots").remove(id);
+        }
+        Ok(())
+    })
+    .await
+}
+
+// Upgrade retained legacy snapshots without changing IDs, content or write consent.
+pub async fn compact_snapshot_cache(pool: &AppStore) -> Result<usize, String> {
+    let _guard = MIRROR_LOCK.lock().await;
+    compact_snapshot_cache_locked(pool).await
+}
+pub async fn reconcile_snapshot_cache(pool: &AppStore, retained: &[String]) -> Result<(), String> {
+    let _guard = MIRROR_LOCK.lock().await;
+    reconcile_snapshots(pool, retained).await
+}
+async fn compact_snapshot_cache_locked(pool: &AppStore) -> Result<usize, String> {
+    finish_completed_snapshots(pool).await?;
+    let replacements = pool.read(|d| {
+        d.table("repository_mirror_snapshots")
+            .iter()
+            .filter(|(_, row)| row["encoding"].is_null() && row["payload"].is_string())
+            .map(|(id, row)| {
+                let payload = row["payload"].as_str().ok_or("SNAPSHOT_UNAVAILABLE")?;
+                if digest(payload.as_bytes())
+                    != row["digest"].as_str().ok_or("SNAPSHOT_UNAVAILABLE")?
+                {
+                    return Err("SNAPSHOT_UNAVAILABLE".into());
+                }
+                Ok((id.clone(), encode_payload(payload)?))
+            })
+            .collect::<Result<Vec<_>, String>>()
+    })?;
+    let count = replacements.len();
+    if count > 0 {
+        pool.write(|d| {
+            for (id, payload) in &replacements {
+                let row = d
+                    .table_mut("repository_mirror_snapshots")
+                    .get_mut(id)
+                    .ok_or("PREVIEW_EXPIRED")?;
+                row["digest"] = digest(payload.as_bytes()).into();
+                row["payload"] = payload.clone().into();
+                row["encoding"] = SNAPSHOT_ENCODING.into();
+            }
+            Ok(())
+        })
+        .await?;
+    }
+    Ok(count)
+}
+
+fn clear_completed_payload(d: &mut crate::storage::store::Data, id: &str) {
+    if let Some(row) = d.table_mut("repository_mirror_snapshots").get_mut(id) {
+        if let Some(row) = row.as_object_mut() {
+            for field in ["payload", "digest", "encoding"] {
+                row.remove(field);
+            }
+        }
+    }
+    d.table_mut("repository_mirror_recovery").remove(id);
+}
+
+// Only the committed applied state proves recovery bytes are no longer needed.
+// Keep a small receipt so a replay after a lost IPC response remains idempotent.
+async fn finish_completed_snapshots(pool: &AppStore) -> Result<(), String> {
+    let ids = pool.read(|d| {
+        Ok(d.table("repository_mirror_snapshots")
+            .iter()
+            .filter(|(id, row)| {
+                row["state"] == "applied"
+                    && (!row["payload"].is_null()
+                        || d.table("repository_mirror_recovery")
+                            .contains_key(id.as_str()))
+            })
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>())
+    })?;
+    if ids.is_empty() {
+        return Ok(());
+    }
+    pool.write(|d| {
+        for id in &ids {
+            clear_completed_payload(d, id);
+        }
+        Ok(())
+    })
+    .await
+}
+
+fn cache_payload_bytes(pool: &AppStore) -> Result<usize, String> {
+    pool.read(|d| {
+        Ok(d.table("repository_mirror_snapshots")
+            .values()
+            .filter_map(|row| row["payload"].as_str())
+            .map(str::len)
+            .sum())
+    })
+}
+
+async fn ensure_cache_capacity(pool: &AppStore, incoming: usize) -> Result<(), String> {
+    if cache_payload_bytes(pool)?.saturating_add(incoming) >= CACHE_HIGH_WATER_BYTES {
+        finish_completed_snapshots(pool).await?;
+    }
+    if cache_payload_bytes(pool)?.saturating_add(incoming) > MAX_CACHE_BYTES {
+        return Err("SNAPSHOT_CACHE_FULL".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn list_repository_snapshot_cache(
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, MirrorError> {
+    let _guard = MIRROR_LOCK.lock().await;
+    finish_completed_snapshots(&state.db)
+        .await
+        .map_err(MirrorError::from)?;
+    state
+        .db
+        .read(|d| {
+            Ok(d.table("repository_mirror_snapshots")
+                .keys()
+                .cloned()
+                .collect())
+        })
+        .map_err(MirrorError::from)
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Coverage {
@@ -216,32 +406,66 @@ async fn preview(pool: &AppStore, snapshot: &Snapshot) -> Result<RepositorySyncP
     Ok(report)
 }
 async fn persist_snapshot(pool: &AppStore, snapshot: &Snapshot) -> Result<String, String> {
-    let payload = serde_json::to_string(snapshot).map_err(|e| e.to_string())?;
-    let used = pool.read(|d| {
-        Ok(d.table("repository_mirror_snapshots")
-            .values()
-            .filter_map(|r| r["payload"].as_str())
-            .map(str::len)
-            .sum::<usize>())
-    })?;
-    if used + payload.len() > 1024 * 1024 * 1024 {
-        return Err("SNAPSHOT_CACHE_FULL".into());
+    let json = serde_json::to_string(snapshot).map_err(|e| e.to_string())?;
+    if json.len() > MAX_CACHE_BYTES {
+        return Err("SNAPSHOT_TOO_LARGE".into());
     }
+    let payload = encode_payload(&json)?;
+    let payload_digest = digest(payload.as_bytes());
+    if let Some(id) = pool.read(|d| {
+        Ok(d.table("repository_mirror_snapshots")
+            .iter()
+            .find(|(_, row)| {
+                row["state"] == "checked"
+                    && row["digest"] == payload_digest
+                    && row["payload"] == payload
+            })
+            .map(|(id, _)| id.clone()))
+    })? {
+        return Ok(id);
+    }
+    ensure_cache_capacity(pool, payload.len()).await?;
     let id = uuid::Uuid::new_v4().to_string();
     let repository = format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo).to_lowercase();
     pool.write(|d| {
-        d.table_mut("repository_mirror_snapshots").insert(id.clone(), serde_json::json!({"id":id,"repository":repository,"payload":payload,"digest":digest(payload.as_bytes()),"created_at":chrono::Utc::now().to_rfc3339(),"state":"checked"}));
+        d.table_mut("repository_mirror_snapshots").insert(id.clone(), serde_json::json!({"id":id,"repository":repository,"payload":payload,"encoding":SNAPSHOT_ENCODING,"digest":payload_digest,"created_at":chrono::Utc::now().to_rfc3339(),"state":"checked"}));
         d.table_mut("repository_mirrors").entry(repository.clone()).or_insert_with(|| serde_json::json!({"repository":repository,"last_snapshot_id":null})); Ok(())
     }).await?;
     Ok(id)
+}
+async fn retain_actionable_snapshot(
+    pool: &AppStore,
+    snapshot: &Snapshot,
+    report: &mut RepositorySyncPreview,
+) -> Result<(), String> {
+    // A no-change report needs only its checked commit, never an apply payload.
+    if !(report.added.is_empty()
+        && report.modified.is_empty()
+        && report.deleted.is_empty()
+        && report.document_changes.is_empty())
+    {
+        report.snapshot_id = Some(persist_snapshot(pool, snapshot).await?);
+    }
+    Ok(())
 }
 pub async fn check(
     pool: &AppStore,
     repositories: Option<Vec<String>>,
 ) -> Result<RepositorySyncPreviewReport, String> {
+    check_with_retained(pool, repositories, None).await
+}
+pub async fn check_with_retained(
+    pool: &AppStore,
+    repositories: Option<Vec<String>>,
+    retained_snapshot_ids: Option<Vec<String>>,
+) -> Result<RepositorySyncPreviewReport, String> {
     let _guard = MIRROR_LOCK.lock().await;
     super::repository_address::recover(pool).await?;
     resume_interrupted(pool).await?;
+    if let Some(ids) = retained_snapshot_ids {
+        reconcile_snapshots(pool, &ids).await?;
+    }
+    compact_snapshot_cache_locked(pool).await?;
     linker::normalize_resource_backed_central_records_impl(pool).await?;
     // Scan before freezing the denominator, including independent local skills.
     skills::get_resource_library_skills_impl(pool).await?;
@@ -332,7 +556,7 @@ pub async fn check(
                 .map(|(_, skill)| skill.id.clone())
                 .collect::<Vec<_>>();
             db::record_skill_check_times(pool, &ids, &chrono::Utc::now().to_rfc3339()).await?;
-            report.snapshot_id = Some(persist_snapshot(pool, &snapshot).await?);
+            retain_actionable_snapshot(pool, &snapshot, &mut report).await?;
             Ok::<_, String>(report)
         }
         .await;
@@ -405,14 +629,10 @@ pub(crate) async fn apply(pool: &AppStore, id: &str) -> Result<(), String> {
                 .cloned())
         })?
         .ok_or("PREVIEW_EXPIRED")?;
-    let payload = row["payload"]
-        .as_str()
-        .ok_or("SNAPSHOT_UNAVAILABLE")?
-        .to_owned();
-    if digest(payload.as_bytes()) != row["digest"].as_str().ok_or("SNAPSHOT_UNAVAILABLE")? {
-        return Err("SNAPSHOT_UNAVAILABLE".into());
+    if row["state"] == "applied" {
+        return Ok(());
     }
-    let snapshot: Snapshot = serde_json::from_str(&payload).map_err(|_| "SNAPSHOT_UNAVAILABLE")?;
+    let snapshot = read_snapshot(&row)?;
     let result = apply_contents(pool, id, &snapshot).await;
     if result.is_err() {
         set_snapshot_state(pool, id, "failed").await?;
@@ -587,8 +807,12 @@ async fn apply_contents(pool: &AppStore, id: &str, snapshot: &Snapshot) -> Resul
     {
         return Err("WRITE_FAILED: repository document verification failed".into());
     }
-    set_snapshot_state(pool, id, "applied").await?;
     pool.write(|d| {
+        // Publish completion and retire its recovery/cache bytes atomically.
+        if let Some(row) = d.table_mut("repository_mirror_snapshots").get_mut(id) {
+            row["state"] = "applied".into();
+        }
+        clear_completed_payload(d, id);
         if let Some(row) = d
             .table_mut("repository_mirrors")
             .get_mut(&repository.to_ascii_lowercase())
@@ -632,12 +856,7 @@ pub(crate) async fn resume_interrupted(pool: &AppStore) -> Result<(), String> {
     rows.sort_by(|a, b| a["created_at"].as_str().cmp(&b["created_at"].as_str()));
     for row in rows {
         let id = row["id"].as_str().ok_or("SNAPSHOT_UNAVAILABLE")?.to_owned();
-        let payload = row["payload"].as_str().ok_or("SNAPSHOT_UNAVAILABLE")?;
-        if digest(payload.as_bytes()) != row["digest"].as_str().ok_or("SNAPSHOT_UNAVAILABLE")? {
-            return Err("SNAPSHOT_UNAVAILABLE".into());
-        }
-        let snapshot: Snapshot =
-            serde_json::from_str(payload).map_err(|_| "SNAPSHOT_UNAVAILABLE")?;
+        let snapshot = read_snapshot(&row)?;
         if let Err(error) = apply_contents(pool, &id, &snapshot).await {
             set_snapshot_state(pool, &id, "failed").await?;
             return Err(error);
@@ -649,6 +868,219 @@ pub(crate) async fn resume_interrupted(pool: &AppStore) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn successful_apply_releases_payload_and_recovery_but_keeps_replay_receipt() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        pool.read(|d| {
+            let row = &d.table("repository_mirror_snapshots")[&id];
+            assert_eq!(row["state"], "applied");
+            assert!(row["payload"].is_null());
+            assert!(!d.table("repository_mirror_recovery").contains_key(&id));
+            Ok(())
+        })
+        .unwrap();
+        apply(&pool, &id).await.unwrap();
+        assert_eq!(compact_snapshot_cache(&pool).await.unwrap(), 0);
+    }
+    #[tokio::test]
+    async fn pressure_reclaims_completed_bytes_without_evicting_unfinished_work() {
+        let (_dir, pool, _) = fixture().await;
+        pool.write(|d| {
+            d.table_mut("repository_mirror_snapshots").insert(
+                "done".into(),
+                serde_json::json!({"state":"applied","payload":"old"}),
+            );
+            d.table_mut("repository_mirror_recovery")
+                .insert("done".into(), serde_json::json!({}));
+            Ok(())
+        })
+        .await
+        .unwrap();
+        ensure_cache_capacity(&pool, MAX_CACHE_BYTES).await.unwrap();
+        for (id, state) in [
+            ("review", "checked"),
+            ("retry", "failed"),
+            ("active", "applying"),
+        ] {
+            pool.write(|d| {
+                d.table_mut("repository_mirror_snapshots").insert(
+                    id.into(),
+                    serde_json::json!({"state":state,"payload":"keep"}),
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        }
+        assert_eq!(
+            ensure_cache_capacity(&pool, MAX_CACHE_BYTES)
+                .await
+                .unwrap_err(),
+            "SNAPSHOT_CACHE_FULL"
+        );
+        assert_eq!(cache_payload_bytes(&pool).unwrap(), 12);
+        assert!(!pool
+            .read(|d| Ok(d.table("repository_mirror_recovery").contains_key("done")))
+            .unwrap());
+    }
+    #[tokio::test]
+    async fn explicit_release_rechecks_apply_and_recovery_protection() {
+        let (_dir, pool, _) = fixture().await;
+        pool.write(|d| {
+            for (id, state) in [
+                ("old", "checked"),
+                ("active", "applying"),
+                ("recover", "failed"),
+            ] {
+                d.table_mut("repository_mirror_snapshots").insert(
+                    id.into(),
+                    serde_json::json!({"state":state,"payload":"keep"}),
+                );
+            }
+            d.table_mut("repository_mirror_recovery")
+                .insert("recover".into(), serde_json::json!({}));
+            Ok(())
+        })
+        .await
+        .unwrap();
+        release_snapshots_locked(&pool, &["old".into(), "active".into(), "recover".into()])
+            .await
+            .unwrap();
+        assert_eq!(
+            pool.read(|d| Ok(d
+                .table("repository_mirror_snapshots")
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()))
+                .unwrap(),
+            vec!["active", "recover"]
+        );
+    }
+    #[tokio::test]
+    async fn unchanged_repository_needs_no_retained_apply_payload() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let mut report = empty_report("example/fixtures");
+        report.remote_ref = Some(snapshot.repo.branch.clone());
+        retain_actionable_snapshot(&pool, &snapshot, &mut report)
+            .await
+            .unwrap();
+        assert!(report.snapshot_id.is_none());
+        assert!(report.remote_ref.is_some());
+        assert_eq!(
+            pool.read(|d| Ok(d.table("repository_mirror_snapshots").len()))
+                .unwrap(),
+            0
+        );
+    }
+    #[tokio::test]
+    async fn unchanged_check_reuses_immutable_snapshot_instead_of_filling_cache() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let first = persist_snapshot(&pool, &snapshot).await.unwrap();
+        let second = persist_snapshot(&pool, &snapshot).await.unwrap();
+        assert_eq!(
+            first, second,
+            "identical checked snapshots must not accumulate"
+        );
+        assert_eq!(
+            pool.read(|d| Ok(d.table("repository_mirror_snapshots").len()))
+                .unwrap(),
+            1
+        );
+    }
+    #[tokio::test]
+    async fn cache_compaction_preserves_legacy_snapshot_identity_and_bytes() {
+        let (_dir, pool, mut snapshot) = fixture().await;
+        snapshot
+            .contents
+            .files
+            .insert("skills/one/large.txt".into(), vec![65; 100_000]);
+        let payload = serde_json::to_string(&snapshot).unwrap();
+        pool.write(|d| { d.table_mut("repository_mirror_snapshots").insert("legacy".into(),
+            serde_json::json!({"id":"legacy","state":"checked","payload":payload,"digest":digest(payload.as_bytes())})); Ok(()) }).await.unwrap();
+        assert_eq!(compact_snapshot_cache(&pool).await.unwrap(), 1);
+        let row = pool
+            .read(|d| Ok(d.table("repository_mirror_snapshots")["legacy"].clone()))
+            .unwrap();
+        assert!(row["payload"].as_str().unwrap().len() < payload.len() / 10);
+        assert_eq!(
+            read_snapshot(&row).unwrap().contents.files,
+            snapshot.contents.files
+        );
+        assert_eq!(compact_snapshot_cache(&pool).await.unwrap(), 0);
+        let mut corrupt = row;
+        corrupt["payload"] = "corrupt".into();
+        assert!(read_snapshot(&corrupt).is_err());
+    }
+    #[tokio::test]
+    async fn cache_reconciliation_preserves_retained_applying_and_recovery_snapshots() {
+        let (_dir, pool, _) = fixture().await;
+        pool.write(|d| {
+            for id in ["retained", "applying", "recoverable", "orphan"] {
+                d.table_mut("repository_mirror_snapshots").insert(
+                    id.into(),
+                    serde_json::json!({"state":if id=="applying" {"applying"} else {"checked"}}),
+                );
+            }
+            d.table_mut("repository_mirror_recovery")
+                .insert("recoverable".into(), serde_json::json!({}));
+            Ok(())
+        })
+        .await
+        .unwrap();
+        reconcile_snapshots(&pool, &["retained".into()])
+            .await
+            .unwrap();
+        let ids = pool
+            .read(|d| {
+                Ok(d.table("repository_mirror_snapshots")
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>())
+            })
+            .unwrap();
+        assert_eq!(ids, vec!["applying", "recoverable", "retained"]);
+    }
+    #[tokio::test]
+    #[ignore = "explicit public network diagnostic; never reads installed user data"]
+    async fn live_public_repository_check_probe() {
+        let repository =
+            std::env::var("ARSENAL_DIAGNOSTIC_REPOSITORY").expect("explicit repository required");
+        let (_dir, pool, _) = fixture().await;
+        let auth = std::env::var("ARSENAL_DIAGNOSTIC_AUTH").ok();
+        let resolved = github::resolve_update_revision(&repository, auth.as_deref(), None)
+            .await
+            .map_err(|_| "revision request failed")
+            .unwrap();
+        let contents = github::fetch_mirror_snapshot(&resolved, auth.as_deref())
+            .await
+            .map_err(|error| {
+                if error.starts_with("UNSAFE_SNAPSHOT_PATH") {
+                    "unsupported remote file type"
+                } else {
+                    "snapshot request failed"
+                }
+            })
+            .unwrap();
+        let snapshot = Snapshot {
+            version: 1,
+            repo: resolved,
+            contents,
+            originals: vec![],
+            installations: vec![],
+        };
+        validate_snapshot(&snapshot).unwrap();
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        let row = pool
+            .read(|d| Ok(d.table("repository_mirror_snapshots")[&id].clone()))
+            .unwrap();
+        assert_eq!(
+            read_snapshot(&row).unwrap().contents.files,
+            snapshot.contents.files
+        );
+        println!("Network resolve + download + validation + persisted roundtrip: passed");
+    }
     async fn fixture() -> (tempfile::TempDir, AppStore, Snapshot) {
         let dir = tempfile::tempdir().unwrap();
         let pool = crate::db::AppStore::connect(":memory:").await.unwrap();
@@ -1455,24 +1887,27 @@ pub async fn release_repository_snapshots(
     snapshot_ids: Vec<String>,
 ) -> Result<(), MirrorError> {
     let _guard = MIRROR_LOCK.lock().await;
-    for id in snapshot_ids {
-        state
-            .db
-            .write(|d| {
-                if d.table("repository_mirror_snapshots")
-                    .get(&id)
-                    .is_some_and(|r| r["state"] != "applying")
-                {
-                    d.table_mut("repository_mirror_snapshots").remove(&id);
-                }
-                Ok(())
-            })
-            .await
-            .map_err(|_| MirrorError {
-                code: "WRITE_FAILED",
-            })?;
+    release_snapshots_locked(&state.db, &snapshot_ids)
+        .await
+        .map_err(MirrorError::from)
+}
+async fn release_snapshots_locked(pool: &AppStore, snapshot_ids: &[String]) -> Result<(), String> {
+    if snapshot_ids.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    pool.write(|d| {
+        for id in snapshot_ids {
+            if d.table("repository_mirror_snapshots")
+                .get(id)
+                .is_some_and(|r| r["state"] != "applying")
+                && !d.table("repository_mirror_recovery").contains_key(id)
+            {
+                d.table_mut("repository_mirror_snapshots").remove(id);
+            }
+        }
+        Ok(())
+    })
+    .await
 }
 
 async fn set_snapshot_state(pool: &AppStore, id: &str, state: &str) -> Result<(), String> {

@@ -1,296 +1,591 @@
-import {TaskDetailFilters, type DetailFilter} from "./TaskDetailFilters";
-import {HintIcon} from "@/components/ui/hint-icon";
-import {ActionIcon} from "@/components/ui/action-icon";
-import {useEffect, useRef, useState} from "react";
-import {ChevronRight, Download, RefreshCw} from "lucide-react";
-import {useTranslation} from "react-i18next";
-import {useTaskQueueStore, isTaskActive, taskErrorMessage, type TaskStep, type BackgroundTask} from "@/stores/taskQueueStore";
-import {useRepositorySyncStore} from "@/stores/repositorySyncStore";
-import {useAppStatusStore} from "@/stores/appStatusStore";
-import {activityGroups, activityAttention, pendingUpdateCount, needsAttention} from "@/lib/activityCenter";
-import {groupStatus, importDetailRows, importRepository, matchesTaskFilter, taskPriority, taskTab, type TaskFilter, type TaskTab} from "@/lib/taskPresentation";
-import {cn} from "@/lib/utils";
-import {UpdateCenter} from "@/components/skill/UpdateCenter";
-import {AddSkillsDialog} from "@/components/skill/AddSkillsDialog";
-import {PREPARE_GITHUB_IMPORT} from "@/stores/importPreparationStore";
-import {isTauriRuntime} from "@/lib/tauri";
-import {Button} from "@/components/ui/button";
-import {Dialog, DialogContent, DialogHeader, DialogTitle} from "@/components/ui/dialog";
-// Only render the known check-report fields; never expose arbitrary IPC args/results.
-function RepositoryCheckDetails({step}: {step: TaskStep}) {
-  const {t} = useTranslation();
-  const scope = Array.isArray(step.args.repositories) ? step.args.repositories.filter((repo): repo is string => typeof repo === "string") : [];
-  const result = step.result;
-  const repositories = result && typeof result === "object" && "repositories" in result && Array.isArray(result.repositories)
-    ? result.repositories.filter((repo): repo is import("@/types").RepositorySyncPreview =>
-      repo && typeof repo === "object" && typeof repo.repository === "string" &&
-      ["added", "modified", "deleted", "unchanged"].every(category => Array.isArray(repo[category]))) : [];
-  const categories = ["added", "modified", "deleted", "unchanged"] as const;
-  const successful = repositories.filter(repo => !repo.error);
-  return <div className="mt-2 space-y-2">
-    <p className="text-muted-foreground">{t("workflow.checkScope")} · {scope.length ? scope.join(", ") : t("workflow.allSourceRepositories")}</p>
-    {repositories.length ? <>
-      <p>{t("workflow.checkResultSummary", {repositories: repositories.length,
-        skills: successful.reduce((sum, repo) => sum + categories.reduce((count, category) => count + repo[category].length, 0), 0),
-        failures: repositories.length - successful.length})}</p>
-      <ul className="divide-y divide-border">
-        {repositories.map(repo => <li key={repo.repository} className="py-2">
-          <p className="font-medium">{repo.repository}</p>
-          {repo.error ? <p className="mt-1 text-destructive">{t("workflow.checkFailed")} · {taskErrorMessage(repo.error)}</p> : <>
-            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
-              {categories.map(category => <span key={category}>{t(`workflow.change.${category}`)} {repo[category].length}</span>)}
-            </div>
-            {!!(repo.added.length + repo.modified.length + repo.deleted.length) && <details className="mt-1">
-              <summary className="cursor-pointer text-muted-foreground">{t("workflow.changedSkills")}</summary>
-              {categories.filter(category => category !== "unchanged").flatMap(category => repo[category].filter(item => typeof item.name === "string").map(item =>
-                <p key={`${category}:${item.skillId}`} className="py-0.5">{t(`workflow.change.${category}`)} · {item.name}</p>))}
-            </details>}
-          </>}
-        </li>)}
-      </ul>
-    </> : <p className="text-muted-foreground">{t(step.status === "running" || step.status === "queued" ? "workflow.checkDetailsPending" : "workflow.checkDetailsUnavailable")}</p>}
-  </div>;
-}
+import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  ChevronRight,
+  CircleAlert,
+  Download,
+  FolderSync,
+  ListTodo,
+  RefreshCw,
+  RotateCcw,
+  Square,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { HintIcon } from "@/components/ui/hint-icon";
+import { useTaskQueueStore, isTaskActive } from "@/stores/taskQueueStore";
+import { useRepositorySyncStore } from "@/stores/repositorySyncStore";
+import { useAppStatusStore } from "@/stores/appStatusStore";
+import {
+  PREPARE_GITHUB_IMPORT,
+  preparedImportPreview,
+} from "@/stores/importPreparationStore";
+import {
+  buildTaskBatches,
+  CHECK_REPOSITORIES,
+  retryableTask,
+  type TaskBatch,
+} from "@/lib/taskBatches";
+import { importDetailRows } from "@/lib/taskPresentation";
+import { cn } from "@/lib/utils";
+import { TaskImportReview } from "./TaskImportReview";
+import { TaskRepositoryReview } from "./TaskRepositoryReview";
+import { TaskBatchDetails } from "./TaskBatchDetails";
+import { useTaskCloseGuard } from "./useTaskCloseGuard";
 
-
-function TaskDetails({items}: {items: BackgroundTask[]}) {
-  const {t} = useTranslation();
-  const [filter, setFilter] = useState<DetailFilter>("all");
-  const [search, setSearch] = useState("");
-  const imports = items[0]?.kind === "import";
-  const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
-  const allRows = importDetailRows(items);
-  const matches = (row:typeof allRows[number], value:DetailFilter) => value === "all"
-    || value === "failed" && ["failed", "partial", "interrupted"].includes(row.status)
-    || value === "attention" && ["awaiting_input", "ready", "failed", "partial", "interrupted", "cancelled"].includes(row.status)
-    || value === "finished" && ["imported", "skipped", "success"].includes(row.status);
-  const matchesTask = (task:BackgroundTask, value:DetailFilter) => matches({key:task.id,name:task.label,status:task.status},value);
-  const counts = Object.fromEntries((["all", "attention", "failed", "finished"] as const).map(value=>[value,imports ? allRows.filter(row=>matches(row,value)).length : items.filter(task=>matchesTask(task,value)).length])) as Record<DetailFilter,number>;
-  const visibleTasks = items.filter(task=>matchesTask(task,filter) && [task.label,...task.steps.map(step=>step.label)].some(label=>label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())));
-  const retryable = (task:BackgroundTask) => ["failed","partial","interrupted","cancelled"].includes(task.status);
-  const selected = visibleTasks.filter(task=>selectedTasks.has(task.id) && retryable(task));
-  const rows = allRows.filter(row=>matches(row,filter) && row.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
-  return <>
-    <div className="shrink-0 px-4 py-3">
-      <TaskDetailFilters value={filter} onChange={value=>{setFilter(value);setSelectedTasks(new Set());}} counts={counts} search={search} onSearch={value=>{setSearch(value);setSelectedTasks(new Set());}}/>
-    </div>
-    <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
-      {imports ? <table className="w-full table-fixed text-left text-sm">
-        <thead className="sticky top-0 bg-popover text-muted-foreground"><tr><th className="border-b py-2 font-medium">{t("skillBrowser.columns.name")}</th><th className="w-28 border-b py-2 font-medium">{t("workflow.taskPanel.status")}</th></tr></thead>
-        <tbody>{rows.map(row => <tr key={row.key}><td className="border-b border-border/70 py-3 pr-3"><span className="break-all">{row.name}</span>{row.error && <p className="mt-1 text-destructive">{taskErrorMessage(row.error, "import")}</p>}</td>
-          <td className={cn("border-b border-border/70 py-3 align-top", ["partial", "failed", "interrupted"].includes(row.status) ? "text-destructive" : "text-muted-foreground")}>{t(row.status === "imported" ? "status.importedLabel" : row.status === "skipped" ? "status.skippedLabel" : row.status === "ready" ? "workflow.taskPanel.readyToImport" : `workflow.taskStatus.${row.status}`)}</td></tr>)}</tbody>
-      </table> : visibleTasks.map(task => <section key={task.id} className="border-b border-border py-3 text-sm">
-        <div className="mb-3 flex items-center gap-2">
-          <input type="checkbox" aria-label={t("workflow.taskPanel.selectTaskNamed",{name:task.label})} disabled={!retryable(task)} checked={selectedTasks.has(task.id) && retryable(task)} onChange={event=>{const checked=event.target.checked;setSelectedTasks(previous=>{const next=new Set(previous);if(checked)next.add(task.id);else next.delete(task.id);return next;});}}/>
-          <span className="min-w-0 flex-1 break-all">{task.label}</span>
-          <span className={cn("text-xs",retryable(task) ? "text-destructive" : "text-muted-foreground")}>{t(`workflow.taskStatus.${task.status}`)}</span>
-          {retryable(task) && <Button variant="outline" aria-label={t("workflow.taskPanel.retryTaskNamed",{name:task.label})} onClick={()=>useTaskQueueStore.getState().retry(task.id)}><ActionIcon action="retry"/>{t(task.kind === "check" && ["cancelled", "interrupted"].includes(task.status) ? "workflow.continueCheck" : "workflow.retryTask")}</Button>}
-        </div>
-        {task.steps.map((step, index) => <div key={index} className="mb-2">
-          {task.steps.length > 1 && <p>{step.label} · {t(`workflow.taskStatus.${step.status ?? "queued"}`)}</p>}
-          {step.error && <p className="mt-1 text-destructive">{taskErrorMessage(step.error, task.kind)}</p>}
-          {step.command === "preview_source_backed_resource_repository_updates" && <RepositoryCheckDetails step={step}/>}
-          {task.kind === "ai" && step.status === "success" && <p className="mt-2 select-text whitespace-pre-wrap">{typeof step.result === "string" ? step.result : Array.isArray(step.result) && step.result.every(item => typeof item === "string") ? step.result.join(", ") : ""}</p>}
-        </div>)}
-      </section>)}
-      {!imports && !visibleTasks.length && <p className="py-8 text-center text-xs text-muted-foreground">{t("workflow.noFilteredCheckResults")}</p>}
-      {imports && !rows.length && <p className="py-8 text-center text-xs text-muted-foreground">{t(!allRows.length && items.some(isTaskActive) ? "workflow.taskPanel.importPreparing" : "workflow.noFilteredCheckResults")}</p>}
-    </div>
-    {!imports && <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border px-4 py-3">
-      <label className="mr-auto inline-flex items-center gap-2 text-xs"><input type="checkbox" aria-label={t("workflow.taskPanel.selectVisible")} disabled={!visibleTasks.some(retryable)} checked={visibleTasks.some(retryable) && visibleTasks.filter(retryable).every(task=>selectedTasks.has(task.id))} ref={input=>{if(input)input.indeterminate=selected.length>0 && selected.length<visibleTasks.filter(retryable).length;}} onChange={event=>setSelectedTasks(new Set(event.target.checked ? visibleTasks.filter(retryable).map(task=>task.id) : []))}/>{t("workflow.taskPanel.selectVisible")}{selected.length>0 && <span>{t("workflow.selectedCompact",{count:selected.length})}</span>}</label>
-      <Button variant="outline" disabled={!selected.length} onClick={()=>{selected.forEach(task=>useTaskQueueStore.getState().retry(task.id));setSelectedTasks(new Set());}}><ActionIcon action="retry"/>{t("workflow.taskPanel.retrySelected")}</Button>
-    </div>}
-  </>;
-}
+const activeStatus = (status: string) =>
+  ["running", "queued", "stopping"].includes(status);
+const failedStatus = (status: string) =>
+  ["failed", "partial", "interrupted"].includes(status);
 
 export function TaskCenter() {
-  const {t, i18n} = useTranslation();
+  const { t } = useTranslation();
   const state = useRepositorySyncStore();
-  const tasks = useTaskQueueStore(s => s.tasks).filter(task => !task.clearRequested);
-  const importResult = useAppStatusStore(s => s.task);
-  const [chosenTab, setTab] = useState<TaskTab | null>(null);
-  const [filters, setFilters] = useState<Record<TaskTab, TaskFilter>>({import:"all", update:"all"});
-  const [selection, setSelection] = useState<Record<TaskTab, string | null>>({import:null, update:null});
-  const [reviewTaskId, setReviewTaskId] = useState<string | null>(null);
+  const tasks = useTaskQueueStore((s) => s.tasks);
+  const legacy = useAppStatusStore((s) => s.task);
+  const batches = buildTaskBatches(tasks, state, legacy);
+  const [tab, setTab] = useState<"current" | "history">("current");
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [visited, setVisited] = useState<Set<string>>(new Set());
   const wasOpen = useRef(false);
-  const {count: attentionCount} = activityAttention(tasks, state.preview, state.checkedAt, state.error);
-  const updatePending = pendingUpdateCount(state.preview, state.ignored, tasks);
-  const pending = updatePending + attentionCount + (state.error ? 1 : 0);
-  const hasReport = !!state.preview || !!state.error;
-  const tab = chosenTab ?? (state.centerView === "history" && importResult?.kind === "import" ? "import"
-    : updatePending || hasReport ? "update" : tasks.some(task => task.kind === "import") ? "import" : "update");
-  const reportTasks = hasReport && state.reportGeneration ? tasks.filter(task => task.parentReportGeneration === state.reportGeneration && !task.clearRequested) : [];
-  const reportActive = reportTasks.filter(isTaskActive);
-  const groups = activityGroups(tasks.filter(task => !reportTasks.includes(task)));
-  // The newest completed check is represented by the live report, not a duplicate row.
-  const latestCheckId = groups.find(group => group.items.every(task => task.kind === "check" && task.steps.some(step => step.command === "preview_source_backed_resource_repository_updates")))?.id;
-  const entries = groups.filter(group => !(hasReport && group.id === latestCheckId && !group.items.some(isTaskActive))).map(group => ({
-    id:group.id, label:group.items[0].kind === "import" ? importRepository(group.items) ?? group.label : group.label, tab:taskTab(group.items[0]), status:groupStatus(group.items), createdAt:group.items[0].createdAt, items:group.items,
-  }));
-  if (hasReport) entries.push({id:"report",label:t(state.repositories?.length ? "workflow.taskPanel.scopedCheck" : "workflow.taskPanel.fullCheck"),tab:"update",
-    status:reportActive.length ? groupStatus(reportActive) : reportTasks.some(task => ["cancelled", "interrupted"].includes(task.status) && task.steps.some(step => step.status !== "success")) ? "interrupted" : state.error || state.preview?.repositories.some(repo=>repo.error || state.updateErrors[`mirror:${repo.snapshotId}`]) ? "partial" : updatePending ? "awaiting_input" : "success",createdAt:state.reportCheckedAt ?? 0,items:[]});
-  if (importResult?.kind && importResult.status !== "idle" && !tasks.some(task => task.id === importResult.id)) entries.push({
-    id:`status:${importResult.id}`,label:importResult.label,tab:importResult.kind,
-    status:importResult.status === "running" ? "running" : importResult.status === "error" ? "partial" : "success",
-    createdAt:Date.parse(importResult.startedAt ?? "") || 0,items:[],
-  });
-  const visible = entries.filter(entry => entry.tab === tab && matchesTaskFilter(entry.status, filters[tab]))
-    .sort((a,b) => taskPriority(a.status) - taskPriority(b.status) || b.createdAt - a.createdAt);
-  const current = visible.find(entry => entry.id === selection[tab]) ?? visible.find(entry => entry.id === "report") ?? visible[0];
-  const active = current?.items.filter(isTaskActive) ?? [];
-  const stopping = active.length > 0 && active.every(task => task.cancelRequested);
-  const reviewTask = current?.items.find(task => task.status === "awaiting_input" && task.steps.some(step => step.command === PREPARE_GITHUB_IMPORT));
-  const completed = current?.items.reduce((sum, task) => sum + task.steps.filter(step => step.status === "success").length, 0) ?? 0;
-  const total = current?.items.reduce((sum, task) => sum + task.steps.length, 0) ?? 0;
-  const importRows = current?.tab === "import" ? importDetailRows(current.items) : [];
-  const repository = current?.tab === "import" ? importRepository(current.items) : null;
-  const importingTask = active.find(task => task.status === "running" && task.steps.some(step => step.command === "import_github_repo_skills" && step.status === "running"));
-  const importProgress = importingTask?.importProgress;
-  const importStage = importingTask ? importProgress?.phase ?? "preparing" : "checking";
-  const fileProgress = importProgress?.phase === "writing" && importProgress.totalFiles > 0 ? importProgress : null;
-  const progressTotal = fileProgress?.totalFiles ?? Math.max(1,total);
-  const progressCompleted = fileProgress?.completedFiles ?? completed;
-  const determinate = !!fileProgress || total > 1 || completed > 0;
-  const currentId = current?.id;
+  useTaskCloseGuard();
+  const expand = (id: string | null) => {
+    setExpanded(id);
+    if (id) setVisited((previous) => new Set(previous).add(id));
+  };
+  const isHistory = (batch: TaskBatch) =>
+    batch.status === "success" && !(tab === "current" && expanded === batch.id);
+  const counts = {
+    running: batches.filter((batch) => activeStatus(batch.status)).length,
+    pending: batches.filter(
+      (batch) => !activeStatus(batch.status) && batch.status !== "success",
+    ).length,
+  };
+  const reportId = batches.find((batch) => batch.report)?.id;
+  const currentCount = batches.filter((batch) => !isHistory(batch)).length;
+  const historyCount = batches.length - currentCount;
   useEffect(() => {
-    if (!state.open) return;
-    if (chosenTab === null) setTab(tab);
-    if (currentId && !selection[tab]) setSelection(previous => ({...previous,[tab]:currentId}));
-  }, [state.open, chosenTab, tab, currentId, selection]);
-  useEffect(() => {
-    if (!state.open) {wasOpen.current=false;return;}
+    if (!state.open) {
+      wasOpen.current = false;
+      return;
+    }
     if (wasOpen.current) return;
-    wasOpen.current=true;
-    if (state.centerView === "pending" && hasReport) {
-      setTab("update");
-      setFilters(previous => ({...previous,update:"all"}));
-      setSelection(previous => ({...previous,update:"report"}));
+    wasOpen.current = true;
+    if (
+      state.centerView === "history" &&
+      legacy?.kind &&
+      legacy.status !== "idle"
+    ) {
+      const id = `status:${legacy.id}`;
+      setTab(legacy.status === "success" ? "history" : "current");
+      setExpanded(id);
+      setVisited((previous) => new Set(previous).add(id));
+      return;
     }
-  }, [state.open, state.centerView, hasReport]);
-  const statusId = importResult?.id;
-  const statusKind = importResult?.kind;
-  useEffect(() => {
-    if (state.open && state.centerView === "history" && statusId && statusKind) {
-      setTab(statusKind);
-      setFilters(previous => ({...previous,[statusKind]:"all"}));
-      setSelection(previous => ({...previous,[statusKind]:`status:${statusId}`}));
+    setTab(
+      state.centerView === "history" && currentCount === 0
+        ? "history"
+        : "current",
+    );
+    if (state.centerView === "pending" && reportId) {
+      setExpanded(reportId);
+      setVisited((previous) => new Set(previous).add(reportId));
     }
-  }, [state.open, state.centerView, statusId, statusKind]);
-  const statusLabel = (status: ReturnType<typeof groupStatus>) => t(status === "stopping" ? "workflow.stopping" : status === "awaiting_input" ? "workflow.taskPanel.filter.attention" : `workflow.taskStatus.${status}`);
-  const statusColor = (status: ReturnType<typeof groupStatus>) => matchesTaskFilter(status, "failed") ? "text-destructive"
-    : matchesTaskFilter(status, "active") || status === "awaiting_input" ? "text-primary" : "text-muted-foreground";
-  function cleanFinished() {
-    const candidates = entries.filter(entry => entry.tab === tab && ["success", "cancelled"].includes(entry.status));
-    candidates.forEach(entry => entry.items.forEach(task => useTaskQueueStore.getState().remove(task.id)));
-    if (candidates.some(entry => entry.id.startsWith("status:"))) useAppStatusStore.getState().resetStatus();
-  }
-  useEffect(() => {
-    const before = (event: BeforeUnloadEvent) => {
-      if (useTaskQueueStore.getState().tasks.some(isTaskActive)) {
-        event.preventDefault();
-        event.returnValue = "";
+  }, [state.open, state.centerView, reportId, currentCount, legacy]);
+  const title = (batch: TaskBatch) =>
+    batch.report !== undefined
+      ? t(
+          batch.scope?.mode === "all"
+            ? "workflow.batch.updateLibrary"
+            : "workflow.batch.updateSelected",
+        )
+      : batch.kind === "refresh"
+        ? t(
+            batch.repository
+              ? "workflow.batch.refreshSingle"
+              : "workflow.refreshRepositoryInfo",
+          )
+        : batch.kind === "import"
+          ? t("workflow.batch.importTitle")
+          : batch.label;
+  const scope = (batch: TaskBatch) =>
+    batch.scope && (batch.report !== undefined || !batch.repository)
+      ? t(
+          batch.scope.mode === "all"
+            ? "workflow.batch.scopeAll"
+            : "workflow.batch.scopeSelected",
+          {
+            count:
+              batch.scope.repositories.length ||
+              batch.report?.length ||
+              batch.tasks.length,
+          },
+        )
+      : batch.kind === "refresh" && !batch.repository
+        ? t("workflow.batch.scopeCount", { count: batch.tasks.length })
+        : null;
+  const progress = (batch: TaskBatch) => {
+    if (batch.report?.length)
+      return {
+        done: batch.report.filter((row) => row.status === "success").length,
+        total: Math.max(
+          batch.scope?.repositories.length ?? 0,
+          batch.report.length,
+        ),
+        determinate: true,
+      };
+    const file = batch.tasks.find(
+      (task) =>
+        isTaskActive(task) &&
+        task.importProgress?.phase === "writing" &&
+        task.importProgress.totalFiles > 0,
+    )?.importProgress;
+    const steps = batch.tasks
+      .flatMap((task) => task.steps)
+      .filter(
+        (step) =>
+          !batch.tasks.some((task) =>
+            task.steps.some(
+              (item) => item.command === "import_github_repo_skills",
+            ),
+          ) || step.command !== PREPARE_GITHUB_IMPORT,
+      );
+    return file
+      ? { done: file.completedFiles, total: file.totalFiles, determinate: true }
+      : {
+          done: steps.filter((step) => step.status === "success").length,
+          total: steps.length,
+          determinate:
+            steps.length > 1 || steps.some((step) => step.status === "success"),
+        };
+  };
+  const summary = (batch: TaskBatch) => {
+    const { done, total } = progress(batch);
+    if (batch.status === "stopping") return t("workflow.stopping");
+    if (activeStatus(batch.status)) {
+      if (batch.status === "queued") return t("workflow.taskStatus.queued");
+      const checking =
+        batch.report !== undefined &&
+        !batch.tasks.some(
+          (task) => isTaskActive(task) && task.kind === "update",
+        );
+      const importing = batch.tasks.find(
+        (task) => task.importProgress,
+      )?.importProgress;
+      const label = checking
+        ? t("workflow.batch.checking")
+        : batch.report !== undefined
+          ? t("workflow.batch.syncing")
+          : batch.kind === "refresh"
+            ? t("workflow.batch.refreshing")
+            : importing
+              ? t(`workflow.taskPanel.importStage.${importing.phase}`)
+              : t("workflow.taskStatus.running");
+      return total > 1 ? `${label} · ${done} / ${total}` : label;
+    }
+    if (batch.status === "cancelled") return t("workflow.batch.stopped");
+    if (batch.report) {
+      const failed = batch.report.filter(
+        (row) => row.error || failedStatus(row.status),
+      ).length;
+      if (failed || batch.reportError)
+        return t("workflow.batch.failedCount", { count: failed || 1 });
+      const pending = batch.report.filter(
+        (row) => row.pending || row.needsCheck,
+      ).length;
+      if (pending) return t("workflow.batch.reviewCount", { count: pending });
+      return t("workflow.batch.updateResult", {
+        updated: batch.report.filter((row) => row.applied).length,
+        unchanged: batch.report.filter((row) => !row.applied).length,
+      });
+    }
+    if (failedStatus(batch.status))
+      return t("workflow.batch.failedCount", {
+        count: batch.tasks.filter(retryableTask).length || 1,
+      });
+    if (batch.status === "awaiting_input") {
+      const task = batch.tasks.find((task) => task.status === "awaiting_input");
+      return t("workflow.batch.importReady", {
+        count: task ? (preparedImportPreview(task.id)?.skills.length ?? 0) : 0,
+      });
+    }
+    const rows = batch.kind === "import" ? importDetailRows(batch.tasks) : [];
+    const skipped = rows.filter((row) => row.status === "skipped").length;
+    return skipped
+      ? t("workflow.batch.settled", { done: rows.length - skipped, skipped })
+      : t("workflow.taskStatus.success");
+  };
+  const retry = (batch: TaskBatch) => {
+    if (batch.report) {
+      const resumable = batch.tasks.filter(
+        (task) =>
+          ["cancelled", "interrupted"].includes(task.status) &&
+          task.steps.some((step) => step.command === CHECK_REPOSITORIES),
+      );
+      if (resumable.length)
+        resumable.forEach((task) =>
+          useTaskQueueStore.getState().retry(task.id),
+        );
+      else if (batch.reportError)
+        void state.checkForUpdates(state.repositories ?? undefined);
+      else {
+        const repos = batch.report
+          .filter((row) => row.needsCheck)
+          .map((row) => row.repository);
+        if (repos.length) void state.recheckRepositories(repos);
+        else expand(batch.id);
       }
-    };
-    window.addEventListener("beforeunload", before);
-    let dispose: (() => void) | undefined;
-    let stopped = false;
-    if (isTauriRuntime())
-      void import("@tauri-apps/api/window")
-        .then(async ({ getCurrentWindow }) => {
-          const unlisten = await getCurrentWindow().onCloseRequested(
-            async (event) => {
-              if (!useTaskQueueStore.getState().tasks.some(isTaskActive))
-                return;
-              event.preventDefault();
-              const { confirm } = await import("@tauri-apps/plugin-dialog");
-              if (await confirm(t("workflow.exitTasks"), { kind: "warning" }))
-                await getCurrentWindow().destroy();
-            },
-          );
-          if (stopped) unlisten();
-          else dispose = unlisten;
-        })
-        .catch(() => {
-          /* No native window is available in browser previews. */
-        });
-    return () => {
-      stopped = true;
-      dispose?.();
-      window.removeEventListener("beforeunload", before);
-    };
-  }, [t]);
-
-
-
-  return <>
-    <Button size="status" variant="ghost" onClick={() => state.setOpen(true)}><ActionIcon action="tasks"/>{t("workflow.activityTitle")} · {t("workflow.activitySummary", {running:tasks.filter(isTaskActive).length,pending})}</Button>
-    <Dialog open={state.open} onOpenChange={state.setOpen}>
-      <DialogContent className="flex resize flex-col gap-0 overflow-hidden p-0" style={{width:"min(72rem, calc(100vw - 2rem))",height:"min(46rem, calc(100dvh - 2rem))",minWidth:"min(40rem, calc(100vw - 2rem))",minHeight:"min(28rem, calc(100dvh - 2rem))",maxWidth:"calc(100vw - 2rem)",maxHeight:"calc(100dvh - 2rem)"}}>
-        <DialogHeader className="m-0 shrink-0 px-4 py-2 pr-12"><div className="flex items-center gap-1"><DialogTitle className="flex items-center gap-2"><ActionIcon action="tasks"/>{t("workflow.activityTitle")}</DialogTitle><Button type="button" size="icon-sm" variant="ghost" className="text-muted-foreground" title={t("workflow.taskPanel.backgroundHint")} aria-label={t("workflow.taskPanel.backgroundHint")}><ActionIcon action="info"/></Button></div></DialogHeader>
-        <div role="tablist" aria-label={t("workflow.taskPanel.taskType")} className="flex shrink-0 gap-4 border-b border-border px-4">
-          {(["import", "update"] as const).map(value => <button type="button" key={value} role="tab" aria-label={`${t(`workflow.taskPanel.tabs.${value}`)} ${t("workflow.taskPanel.runningCount",{count:entries.filter(entry => entry.tab === value && matchesTaskFilter(entry.status,"active")).length})}`} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1} aria-controls={`task-panel-${value}`} id={`task-tab-${value}`}
-            onKeyDown={event => {if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {event.preventDefault();const next=event.key === "Home" ? "import" : event.key === "End" ? "update" : value === "import" ? "update" : "import";setTab(next);document.getElementById(`task-tab-${next}`)?.focus({preventScroll:true});}}}
-            className={cn("inline-flex min-h-10 items-center gap-2 border-b-2 border-transparent text-sm font-semibold text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",tab === value && "border-primary text-primary")} onClick={() => setTab(value)}>
-            {value === "import" ? <Download className="size-[1em] shrink-0"/> : <RefreshCw className="size-[1em] shrink-0"/>}{t(`workflow.taskPanel.tabs.${value}`)}
-            <span className="text-xs font-normal">{entries.filter(entry => entry.tab === value && matchesTaskFilter(entry.status,"active")).length || null}</span>
-          </button>)}
-        </div>
-        <div className="flex min-h-0 flex-1" role="tabpanel" id={`task-panel-${tab}`} aria-labelledby={`task-tab-${tab}`}>
-          <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-sidebar sm:w-64" aria-label={t("workflow.taskPanel.taskList")}>
-            <div className="shrink-0 p-3"><select className="h-8 w-full rounded-md border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none" aria-label={t("workflow.taskPanel.filterTasks")} value={filters[tab]} onChange={event => setFilters(previous => ({...previous,[tab]:event.target.value as TaskFilter}))}>
-              {(["all", "active", "attention", "failed", "finished"] as const).map(value => <option key={value} value={value}>{t(`workflow.taskPanel.filter.${value}`)} {entries.filter(entry => entry.tab === tab && matchesTaskFilter(entry.status,value)).length}</option>)}
-            </select></div>
-            <div className="min-h-0 flex-1 overflow-auto pb-3">
-              {visible.map(entry => <button key={entry.id} type="button" aria-pressed={current?.id === entry.id} onClick={() => setSelection(previous => ({...previous,[tab]:entry.id}))}
-                className={cn("w-full border-l-2 border-transparent px-4 py-3 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",current?.id === entry.id && "border-l-primary bg-accent text-accent-foreground")}>
-                <span className="block truncate text-sm font-semibold" title={`${entry.label} · ${entry.createdAt ? new Date(entry.createdAt).toLocaleString(i18n.language) : "—"}`}>{entry.label}</span>
-                <span className="mt-1 flex items-center gap-2 text-xs"><span className={statusColor(entry.status)}>{entry.id === "report" && entry.status === "awaiting_input" && updatePending > 0 ? t("workflow.taskPanel.pendingChanges",{count:updatePending}) : statusLabel(entry.status)}</span></span>
-              </button>)}
-              {!visible.length && <p className="px-3 py-10 text-center text-xs text-muted-foreground">{t("workflow.noTasks")}</p>}
+    } else
+      batch.tasks
+        .filter(retryableTask)
+        .forEach((task) => useTaskQueueStore.getState().retry(task.id));
+  };
+  const action = (batch: TaskBatch) => {
+    const active = batch.tasks.filter(isTaskActive);
+    if (activeStatus(batch.status))
+      return (
+        <Button
+          variant="ghost"
+          disabled={!active.length || batch.status === "stopping"}
+          onClick={() =>
+            active.forEach((task) =>
+              useTaskQueueStore.getState().cancel(task.id),
+            )
+          }
+        >
+          <Square />
+          {t("workflow.stopTask")}
+        </Button>
+      );
+    if (batch.status === "awaiting_input")
+      return (
+        <Button
+          variant="ghost"
+          aria-expanded={expanded === batch.id}
+          onClick={() => expand(expanded === batch.id ? null : batch.id)}
+        >
+          {t(
+            expanded === batch.id
+              ? "workflow.batch.collapse"
+              : batch.kind === "import"
+                ? "workflow.batch.chooseSkills"
+                : "workflow.batch.review",
+          )}
+          <ChevronRight className={cn(expanded === batch.id && "rotate-90")} />
+        </Button>
+      );
+    if (failedStatus(batch.status) || batch.status === "cancelled") {
+      const syncFailed =
+        !batch.report?.some((row) => row.needsCheck) &&
+        batch.report?.some((row) => row.error && !row.needsCheck);
+      return (
+        <Button
+          variant="outline"
+          title={t("workflow.batch.retryHint")}
+          onClick={() => retry(batch)}
+        >
+          <RotateCcw />
+          {t(
+            syncFailed
+              ? "workflow.batch.review"
+              : batch.status === "cancelled"
+                ? "workflow.batch.resume"
+                : "workflow.batch.retryFailed",
+          )}
+        </Button>
+      );
+    }
+    return null;
+  };
+  const clearHistory = () => {
+    for (const batch of batches.filter(isHistory)) {
+      if (batch.report !== undefined) state.clearCheckResults();
+      else if (batch.legacy) useAppStatusStore.getState().resetStatus();
+      else
+        batch.tasks.forEach((task) =>
+          useTaskQueueStore.getState().remove(task.id),
+        );
+    }
+  };
+  const changeTab = (value: typeof tab) => {
+    setTab(value);
+    setExpanded(null);
+  };
+  const visibleCount = tab === "current" ? currentCount : historyCount;
+  return (
+    <>
+      <Button size="status" variant="ghost" onClick={() => state.setOpen(true)}>
+        <ListTodo />
+        {t("workflow.activityTitle")} · {t("workflow.activitySummary", counts)}
+      </Button>
+      <Dialog open={state.open} onOpenChange={state.setOpen}>
+        <DialogContent
+          keepMounted
+          className="flex flex-col gap-0 overflow-hidden p-0"
+          style={{
+            width: "min(67.5rem, calc(100vw - 2rem))",
+            height: "min(45rem, calc(100dvh - 2rem))",
+            maxWidth: "calc(100vw - 2rem)",
+          }}
+        >
+          <DialogDescription className="sr-only">
+            {t("workflow.taskPanel.backgroundHint")}
+          </DialogDescription>
+          <header className="flex shrink-0 flex-wrap items-center gap-4 border-b border-border p-4 pr-12">
+            <DialogTitle className="flex items-center gap-2">
+              <ListTodo className="size-[1em]" />
+              {t("workflow.activityTitle")}
+            </DialogTitle>
+            <div
+              role="tablist"
+              aria-label={t("workflow.activityTitle")}
+              className="flex items-center gap-4"
+            >
+              {(["current", "history"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  id={`batch-tab-${value}`}
+                  aria-selected={tab === value}
+                  tabIndex={tab === value ? 0 : -1}
+                  aria-controls={`batch-panel-${value}`}
+                  onClick={() => changeTab(value)}
+                  onKeyDown={(event) => {
+                    if (
+                      ["ArrowLeft", "ArrowRight", "Home", "End"].includes(
+                        event.key,
+                      )
+                    ) {
+                      event.preventDefault();
+                      const next =
+                        event.key === "Home"
+                          ? "current"
+                          : event.key === "End"
+                            ? "history"
+                            : value === "current"
+                              ? "history"
+                              : "current";
+                      changeTab(next);
+                      document.getElementById(`batch-tab-${next}`)?.focus();
+                    }
+                  }}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-sm text-sm focus-visible:outline-2 focus-visible:outline-ring",
+                    tab === value
+                      ? "font-semibold text-primary"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {t(`workflow.batch.${value}`)}
+                  <span className="text-xs font-normal">
+                    {value === "current" ? currentCount : historyCount}
+                  </span>
+                </button>
+              ))}
             </div>
-            <div className="flex h-14 shrink-0 items-center border-t border-border px-3"><Button size="sm" variant="ghost" className="text-muted-foreground" disabled={!entries.some(entry => entry.tab === tab && entry.id !== "report" && ["success", "cancelled"].includes(entry.status))} onClick={cleanFinished}><ActionIcon action="clear"/>{t("workflow.clearFinished")}</Button></div>
-          </aside>
-          <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={t("workflow.taskPanel.skillDetails")}>
-            {hasReport && <div hidden={current?.id !== "report"} className={current?.id === "report" ? "flex min-h-0 flex-1 flex-col" : "hidden"}><UpdateCenter key={state.reportGeneration ?? "initial"} embedded taskLayout/></div>}
-            {current?.items.length ? <>
-              <div className="shrink-0 border-b border-border p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0 flex-1"><h3 className="break-all text-sm font-semibold">{current.label}</h3><p className="mt-1 text-xs text-muted-foreground" title={new Date(current.createdAt).toLocaleString(i18n.language)}><span className={statusColor(current.status)}>{statusLabel(current.status)}</span></p></div>
-                  <div className="flex flex-wrap items-center gap-1">
-                    {reviewTask && <Button size="sm" onClick={() => setReviewTaskId(reviewTask.id)}>{t("workflow.resumeImport")}</Button>}
-                    {active.length > 0 ? <Button size="sm" variant="outline" disabled={stopping} onClick={() => active.forEach(task => useTaskQueueStore.getState().cancel(task.id))}><ActionIcon action="stop"/>{t(current.items.every(task => task.steps.every(step => step.command === "preview_source_backed_resource_repository_updates")) ? "workflow.pauseCheck" : "workflow.stopTask")}</Button>
-                      : current.items.some(task => needsAttention(task) && task.status !== "awaiting_input" || task.status === "cancelled") && <Button size="sm" variant="outline" onClick={() => current.items.filter(task => needsAttention(task) && task.status !== "awaiting_input" || task.status === "cancelled").forEach(task => useTaskQueueStore.getState().retry(task.id))}><ActionIcon action="retry"/>{t(current.items.every(task => task.steps.every(step => step.command === "preview_source_backed_resource_repository_updates")) && current.items.some(task => ["cancelled", "interrupted"].includes(task.status)) ? "workflow.continueCheck" : current.items.length>1 ? (current.items.some(task=>task.status==="cancelled") ? "workflow.taskPanel.retryUnfinished" : "workflow.taskPanel.retryFailed") : "workflow.retryTask")}</Button>}
-                    {(!active.length || stopping) && <Button size="sm" variant="ghost" aria-label={t("workflow.deleteTaskRecord",{name:current.label})} onClick={() => current.items.forEach(task => useTaskQueueStore.getState().remove(task.id))}><ActionIcon action="delete"/>{t("workflow.deleteRecord")}</Button>}
+            {tab === "history" && (
+              <Button
+                variant="ghost"
+                className="ml-auto"
+                disabled={!historyCount}
+                onClick={clearHistory}
+              >
+                {t("workflow.clearFinished")}
+              </Button>
+            )}
+          </header>
+          <div
+            role="tabpanel"
+            id={`batch-panel-${tab}`}
+            aria-labelledby={`batch-tab-${tab}`}
+            className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]"
+          >
+            {batches.map((batch) => {
+              const open = expanded === batch.id;
+              const hidden =
+                tab === "history" ? !isHistory(batch) : isHistory(batch);
+              const prepared = batch.tasks.find(
+                (task) =>
+                  task.status === "awaiting_input" &&
+                  task.steps.some(
+                    (step) => step.command === PREPARE_GITHUB_IMPORT,
+                  ),
+              );
+              const p = progress(batch);
+              const Icon = failedStatus(batch.status)
+                ? CircleAlert
+                : batch.kind === "import"
+                  ? Download
+                  : batch.kind === "refresh"
+                    ? FolderSync
+                    : RefreshCw;
+              const batchTitle = title(batch);
+              return (
+                <article
+                  key={batch.id}
+                  hidden={hidden}
+                  aria-label={[batchTitle, batch.repository]
+                    .filter(Boolean)
+                    .join(" ")}
+                  className={cn(
+                    "border-b border-border",
+                    open && "border-l-2 border-l-primary",
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-3",
+                      open && "bg-accent pl-3.5",
+                    )}
+                  >
+                    <button
+                      type="button"
+                      aria-expanded={open}
+                      aria-controls={`batch-details-${batch.id}`}
+                      onClick={() => expand(open ? null : batch.id)}
+                      className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left text-sm focus-visible:outline-2 focus-visible:outline-ring"
+                    >
+                      <ChevronRight
+                        className={cn(
+                          "size-[1em] shrink-0 text-muted-foreground transition-transform",
+                          open && "rotate-90",
+                        )}
+                      />
+                      <Icon
+                        className={cn(
+                          "size-[1em] shrink-0",
+                          failedStatus(batch.status) && "text-destructive",
+                        )}
+                      />
+                      <span className="min-w-0">
+                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span
+                            className="font-semibold"
+                            title={
+                              batch.kind === "refresh"
+                                ? t("workflow.refreshRepositoryInfoHint")
+                                : undefined
+                            }
+                          >
+                            {batchTitle}
+                          </span>
+                          {batch.repository && (
+                            <span
+                              className="max-w-full truncate"
+                              title={batch.repository}
+                            >
+                              {batch.repository}
+                            </span>
+                          )}
+                          {scope(batch) && (
+                            <span className="text-xs text-muted-foreground">
+                              {scope(batch)}
+                            </span>
+                          )}
+                        </span>
+                        <span
+                          className={cn(
+                            "mt-1 block text-xs",
+                            failedStatus(batch.status)
+                              ? "text-destructive"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          {summary(batch)}
+                        </span>
+                      </span>
+                    </button>
+                    <div className="shrink-0">{action(batch)}</div>
                   </div>
-                </div>
-                <p className="mt-3 text-xs text-muted-foreground">{importRows.length ? t("workflow.taskPanel.importSummary",{total:importRows.length,imported:importRows.filter(row => row.status === "imported" || row.status === "success").length,skipped:importRows.filter(row => row.status === "skipped").length}) : t("workflow.taskSteps",{completed,total})}</p>
-                {current.tab === "import" && active.length > 0 && (repository || importingTask) && <div role="status" aria-live="polite" className="mt-3 space-y-1 text-xs">
-                  <p className="text-primary">{t(active.some(task => task.status === "running") ? `workflow.taskPanel.importStage.${importStage}` : "workflow.taskStatus.queued")}</p>
-                  <details className="group">
-                    <summary className="flex cursor-pointer list-none items-center gap-2 text-muted-foreground [&::-webkit-details-marker]:hidden">{t("workflow.taskPanel.executionDetails")}<ChevronRight className="size-[1em] shrink-0 group-open:rotate-90"/></summary>
-                    <div className="mt-3 space-y-2">
-                      {repository && <p>{t("workflow.taskPanel.currentRepository",{repository})}</p>}
-                  {importProgress?.currentSkill && <p className="break-all font-medium">{t("workflow.taskPanel.currentSkill",{name:importProgress.currentSkill})}</p>}
-                  {importProgress?.currentPath && <p className="break-all text-muted-foreground">{t("workflow.taskPanel.currentFile",{path:importProgress.currentPath})}</p>}
-                  {!!importProgress?.totalFiles && <p className="text-muted-foreground">{t("workflow.taskPanel.fileProgress",{completed:importProgress.completedFiles,total:importProgress.totalFiles})}</p>}
+                  {batch.status === "running" && (
+                    <div
+                      role="progressbar"
+                      aria-label={batchTitle}
+                      aria-valuemin={0}
+                      aria-valuemax={Math.max(1, p.total)}
+                      aria-valuenow={p.determinate ? p.done : undefined}
+                      className="ml-14 mr-4 h-0.5 overflow-hidden bg-muted"
+                    >
+                      <div
+                        className={cn(
+                          "h-full bg-primary",
+                          !p.determinate && "animate-pulse",
+                        )}
+                        style={{
+                          width: p.determinate
+                            ? `${Math.min(1, p.done / Math.max(1, p.total)) * 100}%`
+                            : "33%",
+                        }}
+                      />
                     </div>
-                  </details>
-                </div>}
-                {current.items.length > 1 && <p className="mt-2 text-xs text-muted-foreground">{t("workflow.batchProgress",{completed:current.items.filter(task => task.status === "success").length,running:current.items.filter(task => task.status === "running").length,queued:current.items.filter(task => task.status === "queued").length,failed:current.items.filter(task => needsAttention(task) && task.status !== "awaiting_input").length})}</p>}
-                {active.length > 0 && <div role="progressbar" aria-label={current.label} aria-valuemin={0} aria-valuenow={determinate ? progressCompleted : undefined} aria-valuemax={progressTotal} className="mt-3 h-1 overflow-hidden rounded-full bg-muted"><div className={cn("h-full bg-primary",!determinate && "animate-pulse")} style={{width:!determinate ? "33%" : `${Math.min(1,progressCompleted/progressTotal)*100}%`}}/></div>}
-                {stopping && <p className="mt-3 text-xs text-muted-foreground">{t("workflow.stopAfterStep")}</p>}
-              </div>
-              <TaskDetails key={current.id} items={current.items}/>
-              <div className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs text-muted-foreground"><HintIcon text={t("workflow.taskPanel.recordsHint")}/>
-                <Button size="sm" variant="outline" disabled={!tasks.some(task => taskTab(task) === tab && isTaskActive(task) && !task.cancelRequested)} onClick={() => tasks.filter(task => taskTab(task) === tab && isTaskActive(task)).forEach(task => useTaskQueueStore.getState().cancel(task.id))}><ActionIcon action="stop"/>{t("workflow.stopAllTasks")}</Button>
-              </div>
-            </> : current?.id.startsWith("status:") && importResult ? <>
-              <div className="flex shrink-0 items-center justify-between gap-2 px-4 py-4"><h3 className="font-semibold">{importResult.label}</h3>{importResult.status !== "running" && <Button size="sm" variant="ghost" onClick={() => useAppStatusStore.getState().resetStatus()}>{t("workflow.deleteRecord")}</Button>}</div>
-              <div className="min-h-0 flex-1 overflow-auto px-4">{importResult.items?.map((item,index) => <div key={index} className="flex flex-wrap items-center gap-2 border-b border-border py-3 text-xs"><span>{item.name}</span><span className="text-muted-foreground">{item.repository}</span><span className="ml-auto">{t(item.status === "updated" ? importResult.kind === "import" ? "status.importedLabel" : "workflow.updated" : item.status === "failed" ? "workflow.taskStatus.failed" : "status.skippedLabel")}</span>{item.status === "failed" && importResult.onRetryFailedItem && <Button size="sm" variant="outline" onClick={() => importResult.onRetryFailedItem?.(item)}>{t("status.retryFailedItem")}</Button>}</div>)}</div>
-            </> : current?.id !== "report" && <p className="m-auto px-4 text-center text-sm text-muted-foreground">{t("workflow.taskPanel.selectTask")}</p>}
-          </section>
-        </div>
-      </DialogContent>
-    </Dialog>
-    {reviewTaskId && <AddSkillsDialog key={reviewTaskId} preparedTaskId={reviewTaskId} open onOpenChange={open => {if(!open)setReviewTaskId(null);}}/>}
-  </>;
+                  )}
+                  <div
+                    id={`batch-details-${batch.id}`}
+                    hidden={!open}
+                    className="border-t border-border px-4 pb-3 sm:pl-14"
+                  >
+                    {(open || visited.has(batch.id)) &&
+                      (batch.report !== undefined ? (
+                        <TaskRepositoryReview
+                          key={state.reportGeneration ?? "legacy"}
+                          batch={batch}
+                          onLater={() => expand(null)}
+                        />
+                      ) : prepared ? (
+                        <TaskImportReview
+                          taskId={prepared.id}
+                          onLater={() => expand(null)}
+                        />
+                      ) : (
+                        <TaskBatchDetails batch={batch} />
+                      ))}
+                    {open &&
+                      !activeStatus(batch.status) &&
+                      batch.report === undefined &&
+                      batch.status !== "awaiting_input" && (
+                        <div className="flex justify-end">
+                          <Button
+                            variant="ghost"
+                            aria-label={t("workflow.deleteTaskRecord", {
+                              name: batchTitle,
+                            })}
+                            onClick={() => {
+                              batch.tasks.forEach((task) =>
+                                useTaskQueueStore.getState().remove(task.id),
+                              );
+                              if (batch.legacy)
+                                useAppStatusStore.getState().resetStatus();
+                            }}
+                          >
+                            {t("workflow.deleteRecord")}
+                          </Button>
+                        </div>
+                      )}
+                  </div>
+                </article>
+              );
+            })}
+            {!visibleCount && (
+              <p className="p-4 py-12 text-center text-sm text-muted-foreground">
+                {t(
+                  tab === "current"
+                    ? "workflow.noTasks"
+                    : "workflow.batch.noHistory",
+                )}
+              </p>
+            )}
+          </div>
+          <footer className="flex shrink-0 items-center border-t border-border px-4 py-3">
+            <HintIcon text={t("workflow.taskPanel.backgroundHint")} />
+          </footer>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
