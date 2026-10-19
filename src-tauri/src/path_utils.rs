@@ -106,7 +106,7 @@ fn existing_portable_config_dir(
 ) -> Option<PathBuf> {
     for dir in portable_anchor_dirs(exe_dir, extra_dir) {
         let portable = dir.join(".arsenal");
-        if portable.is_dir() || dir.join(".skillshub").is_dir() {
+        if portable.is_dir() {
             return Some(portable);
         }
     }
@@ -123,16 +123,14 @@ fn resolve_app_data_dir_from_extra(
     home_dir: &Path,
 ) -> PathBuf {
     if let Some(exe_dir) = exe_dir {
-        if let Some(path) = read_dir_pointer(&exe_dir.join("arsenal-config-path"), home_dir)
-            .or_else(|| read_dir_pointer(&exe_dir.join("skillshub-config-path"), home_dir)) {
+        if let Some(path) = read_dir_pointer(&exe_dir.join("arsenal-config-path"), home_dir) {
             return path;
         }
     }
     if let Some(portable) = existing_portable_config_dir(exe_dir, extra_dir) {
         return portable;
     }
-    if let Some(path) = read_dir_pointer(&home_dir.join(".arsenal-config-path"), home_dir)
-        .or_else(|| read_dir_pointer(&home_dir.join(".skillshub-config-path"), home_dir)) {
+    if let Some(path) = read_dir_pointer(&home_dir.join(".arsenal-config-path"), home_dir) {
         return path;
     }
     home_dir.join(".arsenal")
@@ -144,9 +142,7 @@ pub fn normalize_app_data_dir_with_home(path: &str, home_dir: &Path) -> Result<P
         return Err("Config directory cannot be empty".to_string());
     }
     let expanded = expand_home_path_with_home(trimmed, home_dir);
-    if expanded.file_name().and_then(|name| name.to_str()) == Some(".skillshub") {
-        Ok(expanded.with_file_name(".arsenal"))
-    } else if expanded.file_name().and_then(|name| name.to_str()) == Some(".arsenal") {
+    if expanded.file_name().and_then(|name| name.to_str()) == Some(".arsenal") {
         Ok(expanded)
     } else {
         Ok(expanded.join(".arsenal"))
@@ -190,9 +186,6 @@ fn write_app_data_dir_override_with_extra(
     let auto_path = auto_app_data_dir_without_pointer(exe_dir, extra_dir, home_dir);
     let home_pointer = home_dir.join(".arsenal-config-path");
     let exe_pointer = exe_dir.map(|dir| dir.join("arsenal-config-path"));
-    // Retire legacy overrides so clearing the new override cannot revive them.
-    remove_pointer_file(&home_dir.join(".skillshub-config-path"))?;
-    if let Some(dir) = exe_dir { remove_pointer_file(&dir.join("skillshub-config-path"))?; }
     if path == auto_path {
         if let Some(pointer) = &exe_pointer {
             remove_pointer_file(pointer)?;
@@ -313,10 +306,6 @@ fn copy_app_data_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-pub fn legacy_app_data_dir() -> PathBuf {
-    resolve_home_dir().join(".skillsmanage")
 }
 
 pub fn central_skills_dir() -> PathBuf {
@@ -970,14 +959,14 @@ mod tests {
     }
 
     #[test]
-    fn normalize_app_data_dir_appends_skillshub_folder() {
+    fn normalize_app_data_dir_appends_arsenal_folder() {
         let path =
             normalize_app_data_dir_with_home("~/data", Path::new("/tmp/home")).expect("path");
         assert_eq!(path, PathBuf::from("/tmp/home/data/.arsenal"));
     }
 
     #[test]
-    fn normalize_app_data_dir_keeps_skillshub_folder() {
+    fn normalize_app_data_dir_keeps_arsenal_folder() {
         let path = normalize_app_data_dir_with_home("~/custom/.arsenal", Path::new("/tmp/home"))
             .expect("path");
         assert_eq!(path, PathBuf::from("/tmp/home/custom/.arsenal"));
@@ -994,7 +983,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_app_data_dir_uses_skillshub_next_to_macos_app() {
+    fn resolve_app_data_dir_uses_arsenal_next_to_macos_app() {
         let dir = tempfile::tempdir().expect("tempdir");
         let stage = dir.path().join("portable");
         let exe_dir = stage.join("SkillsHub.app").join("Contents").join("MacOS");
@@ -1051,18 +1040,18 @@ mod tests {
     }
 
     #[test]
-    fn legacy_pointer_and_portable_directory_resolve_to_arsenal() {
+    fn legacy_pointer_and_portable_directory_are_ignored() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("home");
         let exe = temp.path().join("app");
         std::fs::create_dir_all(exe.join(".skillshub")).unwrap();
         std::fs::create_dir_all(&home).unwrap();
-        assert_eq!(resolve_app_data_dir_from(Some(&exe), &home), exe.join(".arsenal"));
+        assert_eq!(resolve_app_data_dir_from(Some(&exe), &home), home.join(".arsenal"));
         let custom = temp.path().join("custom/.skillshub");
         std::fs::write(exe.join("skillshub-config-path"), custom.to_str().unwrap()).unwrap();
-        assert_eq!(resolve_app_data_dir_from(Some(&exe), &home), custom.with_file_name(".arsenal"));
+        assert_eq!(resolve_app_data_dir_from(Some(&exe), &home), home.join(".arsenal"));
         std::fs::write(home.join(".skillshub-config-path"), custom.to_str().unwrap()).unwrap();
-        assert_eq!(resolve_app_data_dir_from(None, &home), custom.with_file_name(".arsenal"));
+        assert_eq!(resolve_app_data_dir_from(None, &home), home.join(".arsenal"));
     }
 
     #[test]

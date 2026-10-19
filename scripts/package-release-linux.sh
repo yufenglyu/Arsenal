@@ -182,12 +182,8 @@ assert_compatible_app_identity() {
     echo "Refusing to package: app data must default to ~/.arsenal." >&2
     exit 1
   }
-  grep -q 'legacy_app_data_dir' "$root/src-tauri/src/path_utils.rs" || {
-    echo "Refusing to package: legacy ~/.skillsmanage migration support is missing." >&2
-    exit 1
-  }
-  grep -q 'migrate_legacy_app_data_if_needed' "$root/src-tauri/src/lib.rs" || {
-    echo "Refusing to package: legacy app data migration is missing." >&2
+  grep -q 'storage::store::Store::open' "$root/src-tauri/src/lib.rs" || {
+    echo "Refusing to package: current JSON store startup is missing." >&2
     exit 1
   }
 }

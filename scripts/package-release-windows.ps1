@@ -151,10 +151,9 @@ function Assert-Compatible-AppIdentity {
 
   $pathUtils = Read-TextFile (Join-Path $Root "src-tauri/src/path_utils.rs")
   $lib = Read-TextFile (Join-Path $Root "src-tauri/src/lib.rs")
-  if ($pathUtils -notmatch 'join\("\.arsenal"\)' -or $pathUtils -notmatch 'legacy_app_data_dir' -or
-      $lib -notmatch 'check_storage_migration' -or $lib -notmatch 'storage::store::Store::open' -or
-      -not (Test-Path (Join-Path $Root 'scripts/migrate-sqlite-to-json.py'))) {
-    throw "Refusing to package: preserve the .arsenal location, JSON store startup, and explicit legacy migration support."
+  if ($pathUtils -notmatch 'join\("\.arsenal"\)' -or
+      $lib -notmatch 'storage::store::Store::open') {
+    throw "Refusing to package: preserve the .arsenal location and current JSON store startup."
   }
 }
 

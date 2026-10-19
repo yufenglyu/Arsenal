@@ -94,6 +94,8 @@ Default shortcuts: `Ctrl/Cmd + K` for global search, `Ctrl/Cmd + F` for page sea
 
 Skills and configuration are stored locally, with local and WebDAV backups available. Windows portable mode keeps `arsenal.exe` beside the `.arsenal` data directory. Exit and back up before upgrading; preserve your existing `.arsenal` instead of replacing it with packaged defaults.
 
+Arsenal reads the current `.arsenal` configuration directly. Legacy configuration directories and pointers are not migrated or modified automatically.
+
 Local browsing and organization do not require an AI service. GitHub imports, source checks, WebDAV and AI features connect to their respective services.
 
 <details>

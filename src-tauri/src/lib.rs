@@ -1,7 +1,5 @@
 pub mod commands;
 pub mod config_store;
-pub mod config_dir_migration;
-pub mod config_path_migration;
 pub mod db;
 mod db_config;
 pub mod path_utils;
@@ -24,13 +22,11 @@ pub struct AppState {
     pub db: AppStore,
 }
 
-fn check_storage_migration(new_dir: &Path, legacy_dir: &Path) -> Result<(), String> {
-    if !new_dir.join("store/manifest.json").is_file()
-        && (new_dir.join("db.sqlite").exists() || legacy_dir.join("db.sqlite").exists())
-    {
-        return Err("STORAGE_MIGRATION_REQUIRED: see docs/JSON存储迁移操作指南.md".into());
-    }
-    Ok(())
+async fn open_app_store(db_dir: &Path) -> Result<AppStore, String> {
+    fs::create_dir_all(db_dir).map_err(|error| error.to_string())?;
+    let pool = storage::store::Store::open(db_dir)?;
+    db::init_database(&pool).await?;
+    Ok(pool)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -48,14 +44,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let db_dir = path_utils::app_data_dir();
-            config_dir_migration::migrate(&db_dir).map_err(std::io::Error::other)?;
-            check_storage_migration(&db_dir, &path_utils::legacy_app_data_dir())
-                .map_err(std::io::Error::other)?;
-            fs::create_dir_all(&db_dir)?;
-            let pool = storage::store::Store::open(&db_dir).map_err(std::io::Error::other)?;
-            tauri::async_runtime::block_on(config_path_migration::finish(&pool))
-                .map_err(std::io::Error::other)?;
-            tauri::async_runtime::block_on(db::init_database(&pool))
+            let pool = tauri::async_runtime::block_on(open_app_store(&db_dir))
                 .map_err(std::io::Error::other)?;
 
             tauri::async_runtime::block_on(async {
@@ -221,38 +210,51 @@ pub fn run() {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::check_storage_migration;
-    #[test]
-    fn legacy_storage_requires_explicit_migration_without_copying() {
+mod current_config_startup_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn current_config_starts_beside_legacy_data_without_migrating() {
         let temp = tempfile::tempdir().unwrap();
-        let old = temp.path().join("old");
-        let new = temp.path().join("new");
-        std::fs::create_dir_all(&old).unwrap();
-        std::fs::write(old.join("db.sqlite"), b"legacy fixture").unwrap();
-        assert!(check_storage_migration(&new, &old)
-            .unwrap_err()
-            .starts_with("STORAGE_MIGRATION_REQUIRED"));
-        assert!(!new.exists());
-        assert_eq!(
-            std::fs::read(old.join("db.sqlite")).unwrap(),
-            b"legacy fixture"
-        );
+        let current = temp.path().join(".arsenal");
+        let legacy = temp.path().join(".skillshub");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("config.json"), "legacy fixture").unwrap();
+        drop(storage::store::Store::open(&current).unwrap());
+        let pool = open_app_store(&current).await.unwrap();
+        assert_eq!(pool.directory(), current);
+        assert_eq!(fs::read(legacy.join("config.json")).unwrap(), b"legacy fixture");
+        assert!(!current.join("migrations/arsenal-paths-v2").exists());
     }
-    #[test]
-    fn valid_json_location_does_not_copy_old_database() {
+
+    #[tokio::test]
+    async fn startup_ignores_dangling_legacy_installation_link() {
         let temp = tempfile::tempdir().unwrap();
-        let old = temp.path().join("old");
-        let new = temp.path().join("new");
-        std::fs::create_dir_all(&old).unwrap();
-        std::fs::create_dir_all(new.join("store")).unwrap();
-        std::fs::write(old.join("db.sqlite"), b"legacy fixture").unwrap();
-        std::fs::write(
-            new.join("store/manifest.json"),
-            b"validated separately by Store::open",
-        )
-        .unwrap();
-        check_storage_migration(&new, &old).unwrap();
-        assert!(!new.join("db.sqlite").exists());
+        let current = temp.path().join(".arsenal");
+        fs::create_dir_all(&current).unwrap();
+        let link = current.join("old-installed-skill");
+        let missing = temp.path().join(".skillshub/library/removed-skill");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&missing, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&missing, &link).unwrap();
+        let pool = open_app_store(&current).await.unwrap();
+        assert_eq!(pool.directory(), current);
+        assert_eq!(fs::read_link(&link).unwrap(), missing);
+        assert!(!current.join("migrations/arsenal-paths-v2").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn startup_ignores_dangling_legacy_config_link() {
+        let temp = tempfile::tempdir().unwrap();
+        let current = temp.path().join(".arsenal");
+        let legacy = temp.path().join(".skillshub");
+        let missing = temp.path().join("removed-legacy-target");
+        std::os::unix::fs::symlink(&missing, &legacy).unwrap();
+        let pool = open_app_store(&current).await.unwrap();
+        assert_eq!(pool.directory(), current);
+        assert_eq!(fs::read_link(&legacy).unwrap(), missing);
+        assert!(!missing.exists());
     }
 }

@@ -94,6 +94,8 @@ Obsidian 联动的安装方法和使用边界见 [配套插件说明](integratio
 
 技能和配置保存在本地，支持本地备份及 WebDAV 备份。Windows 便携模式将 `arsenal.exe` 与 `.arsenal` 数据目录放在一起。升级前退出程序并备份，保留已有 `.arsenal`，不要用打包的默认数据覆盖自己的工具库。
 
+Arsenal 直接读取当前 `.arsenal` 配置，不再自动迁移或修改旧版配置目录及路径指针。
+
 本地浏览与整理不依赖 AI 服务；GitHub 导入、来源检查、WebDAV 和 AI 功能需要连接各自服务。
 
 <details>

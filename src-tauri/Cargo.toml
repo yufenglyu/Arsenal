@@ -1,6 +1,6 @@
 [package]
 name = "arsenal"
-version = "1.4.0"
+version = "1.4.1"
 description = "AI tools and capabilities management"
 authors = ["yufenglyu"]
 license = "Apache-2.0"
@@ -25,15 +25,9 @@ name = "prepare_config_dir"
 path = "src/build/prepare_config_dir.rs"
 required-features = ["prepare-config"]
 
-[[bin]]
-name = "migrate_config_paths"
-path = "src/build/migrate_config_paths.rs"
-required-features = ["migrate-config"]
-
 [features]
 default = []
 prepare-config = []
-migrate-config = []
 snapshot-maintenance = []
 
 [[bin]]

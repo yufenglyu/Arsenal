@@ -135,6 +135,9 @@ jobs:
       - name: Build macOS bundles
         run: pnpm tauri build --target universal-apple-darwin --bundles app,dmg --no-sign --ci
 
+      - name: Verify macOS startup with obsolete configuration links
+        run: python3 scripts/test-macos-startup.py src-tauri/target/universal-apple-darwin/release/bundle/macos/Arsenal.app
+
       - name: Prepare macOS assets
         shell: bash
         run: |
@@ -281,10 +284,36 @@ jobs:
           path: release-assets/*
           if-no-files-found: error
 
+  verify-macos:
+    name: Verify macOS startup (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    needs: build-macos
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-15-intel]
+    steps:
+      - name: Checkout startup check
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Download packaged macOS application
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-release-macos
+          path: release-assets
+      - name: Check packaged application startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          ditto -x -k "release-assets/arsenal_${VERSION}_macos_universal.zip" packaged-app
+          python3 scripts/test-macos-startup.py packaged-app/Arsenal.app
+
   publish:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-windows, build-macos, build-linux]
+    needs: [build-windows, build-macos, build-linux, verify-macos]
     steps:
       - name: Checkout release metadata
         uses: actions/checkout@v4

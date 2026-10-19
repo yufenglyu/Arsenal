@@ -2,6 +2,12 @@
 
 [English](CHANGELOG.md) | [简体中文](CHANGELOG.zh.md)
 
+## 1.4.1 - 2026-10-19
+
+- Remove automatic legacy configuration and installation-link migration, which could abort startup on macOS when an old link points to missing data.
+- Use current `.arsenal` configuration directly and ignore obsolete configuration pointers; leave old directories and links untouched.
+- Remove the legacy path migration utility and obsolete packaging guards. Add packaged macOS startup checks for dangling links and coexisting old data.
+
 ## 1.4.0 - 2026-10-19
 
 - Redesign Tasks around batch summaries and expandable rows. Select imported skills, resolve conflicts and review repository updates inline, with current tasks and history in separate tabs.
