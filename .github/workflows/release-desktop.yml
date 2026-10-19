@@ -1,12 +1,18 @@
 name: Release Desktop
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build
+        required: true
+        type: string
   push:
     tags:
       - "v*"
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
@@ -14,6 +20,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build-windows:
@@ -22,6 +29,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -32,7 +41,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "24"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -62,7 +71,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           . ./scripts/package-release-windows.ps1 -LibraryOnly
-          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $version = $env:RELEASE_TAG -replace '^v', ''
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
 
           $msi = Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi" -Recurse -Filter *.msi | Select-Object -First 1
@@ -89,6 +98,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -99,7 +110,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "24"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -128,7 +139,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           BUNDLE_ROOT="src-tauri/target/universal-apple-darwin/release/bundle"
           CONFIG_DIR="src-tauri/resources/packaged-config"
           mkdir -p release-assets
@@ -171,6 +182,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -181,7 +194,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "24"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -215,7 +228,8 @@ jobs:
             libayatana-appindicator3-dev \
             pkg-config \
             rpm \
-            wget
+            wget \
+            xdg-utils
           "${APT_GET[@]}" install -y --no-install-recommends libwebkit2gtk-4.1-dev \
             || "${APT_GET[@]}" install -y --no-install-recommends libwebkit2gtk-4.0-dev
           "${APT_GET[@]}" install -y --no-install-recommends libsoup-3.0-dev \
@@ -237,7 +251,7 @@ jobs:
           ASSET_ARCH: ${{ matrix.asset-arch }}
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           BUNDLE_ROOT="src-tauri/target/release/bundle"
           CONFIG_DIR="src-tauri/resources/packaged-config"
           mkdir -p release-assets
@@ -274,13 +288,15 @@ jobs:
     steps:
       - name: Checkout release metadata
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Prepare release notes
         id: release_meta
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           : > release-body.md
           for CHANGELOG_PATH in CHANGELOG.md CHANGELOG.zh.md; do
             [ -f "$CHANGELOG_PATH" ] || { echo "Changelog file not found: $CHANGELOG_PATH" >&2; exit 1; }
@@ -311,6 +327,7 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           name: Arsenal v${{ steps.release_meta.outputs.version }}
           body_path: release-body.md
           files: release-assets/*
