@@ -497,7 +497,7 @@ describe("PlatformView", () => {
               file_path: "~/.agents/skills/promoted-skill/SKILL.md",
               dir_path: "~/.agents/skills/promoted-skill",
               link_type: "symlink",
-              symlink_target: "~/.skillshub/library/promoted-skill",
+              symlink_target: "~/.arsenal/library/promoted-skill",
               installation_source: "independent",
     is_central: true,
               source: "resource-library",

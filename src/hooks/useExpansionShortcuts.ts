@@ -9,7 +9,7 @@ export function useExpansionShortcuts(expand: () => void, collapse: () => void, 
     const plainArrow = arrowKeys && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
     const action = plainArrow && event.key === "ArrowRight" ? expand
       : plainArrow && event.key === "ArrowLeft" ? collapse
-      : matchesShortcutEvent(event.nativeEvent, shortcuts.expandSection) ? expand
+      : matchesShortcutEvent(event.nativeEvent, shortcuts.expandSection) || (shortcuts.expandSection === "plus" && event.key === "=" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) ? expand
       : matchesShortcutEvent(event.nativeEvent, shortcuts.collapseSection) ? collapse : null;
     if (!action) return;
     event.preventDefault();

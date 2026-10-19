@@ -1,5 +1,7 @@
 pub mod commands;
 pub mod config_store;
+pub mod config_dir_migration;
+pub mod config_path_migration;
 pub mod db;
 mod db_config;
 pub mod path_utils;
@@ -46,10 +48,13 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let db_dir = path_utils::app_data_dir();
+            config_dir_migration::migrate(&db_dir).map_err(std::io::Error::other)?;
             check_storage_migration(&db_dir, &path_utils::legacy_app_data_dir())
                 .map_err(std::io::Error::other)?;
             fs::create_dir_all(&db_dir)?;
             let pool = storage::store::Store::open(&db_dir).map_err(std::io::Error::other)?;
+            tauri::async_runtime::block_on(config_path_migration::finish(&pool))
+                .map_err(std::io::Error::other)?;
             tauri::async_runtime::block_on(db::init_database(&pool))
                 .map_err(std::io::Error::other)?;
 
@@ -166,6 +171,7 @@ pub fn run() {
             // Collections
             commands::collections::create_collection,
             commands::collections::get_collections,
+            commands::collections::change_collection_group,
             commands::collections::get_collection_detail,
             commands::collections::add_skill_to_collection,
             commands::collections::remove_skill_from_collection,
@@ -200,6 +206,7 @@ pub fn run() {
             commands::remote_sources::update_source_backed_resource_skills,
             commands::remote_sources::update_source_backed_resource_skill,
             commands::remote_sources::preview_source_backed_resource_repository_updates,
+            commands::remote_sources::plan_repository_update_check,
             commands::remote_sources::sync_source_backed_resource_skills,
             commands::remote_sources::explain_skill,
             commands::remote_sources::generate_repository_note,

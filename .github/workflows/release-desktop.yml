@@ -69,12 +69,12 @@ jobs:
           if ($null -eq $msi) {
             throw "Windows MSI bundle not found."
           }
-          Copy-Item $msi.FullName "release-assets/skillshub_${version}_windows_x64.msi"
+          Copy-Item $msi.FullName "release-assets/arsenal_${version}_windows_x64.msi"
 
           New-SkillshubPortableZip `
-            -ExePath "src-tauri/target/x86_64-pc-windows-msvc/release/skillshub.exe" `
+            -ExePath "src-tauri/target/x86_64-pc-windows-msvc/release/arsenal.exe" `
             -ConfigDir "src-tauri/resources/packaged-config" `
-            -ZipPath "release-assets/skillshub_${version}_windows_x64.zip"
+            -ZipPath "release-assets/arsenal_${version}_windows_x64.zip"
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -139,14 +139,14 @@ jobs:
           [ -n "$APP_PATH" ] || { echo "macOS .app bundle not found" >&2; exit 1; }
           [ -n "$DMG_PATH" ] || { echo "macOS .dmg bundle not found" >&2; exit 1; }
 
-          cp "$DMG_PATH" "release-assets/skillshub_${VERSION}_macos_universal.dmg"
+          cp "$DMG_PATH" "release-assets/arsenal_${VERSION}_macos_universal.dmg"
           # shellcheck source=scripts/package-release-macos.sh
           . ./scripts/package-release-macos.sh
           create_macos_portable_archives \
             "$APP_PATH" \
             "$CONFIG_DIR" \
-            "release-assets/skillshub_${VERSION}_macos_universal.zip" \
-            "release-assets/skillshub_${VERSION}_macos_universal.tar.gz"
+            "release-assets/arsenal_${VERSION}_macos_universal.zip" \
+            "release-assets/arsenal_${VERSION}_macos_universal.tar.gz"
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
@@ -250,15 +250,15 @@ jobs:
           [ -n "$RPM_PATH" ] || { echo "Linux .rpm bundle not found" >&2; exit 1; }
           [ -n "$APPIMAGE_PATH" ] || { echo "Linux .AppImage bundle not found" >&2; exit 1; }
 
-          cp "$DEB_PATH" "release-assets/skillshub-v${VERSION}-Linux-${ASSET_ARCH}.deb"
-          cp "$RPM_PATH" "release-assets/skillshub-v${VERSION}-Linux-${ASSET_ARCH}.rpm"
-          cp "$APPIMAGE_PATH" "release-assets/skillshub-v${VERSION}-Linux-${ASSET_ARCH}.AppImage"
+          cp "$DEB_PATH" "release-assets/arsenal-v${VERSION}-Linux-${ASSET_ARCH}.deb"
+          cp "$RPM_PATH" "release-assets/arsenal-v${VERSION}-Linux-${ASSET_ARCH}.rpm"
+          cp "$APPIMAGE_PATH" "release-assets/arsenal-v${VERSION}-Linux-${ASSET_ARCH}.AppImage"
           # shellcheck source=scripts/package-release-linux.sh
           . ./scripts/package-release-linux.sh
           create_linux_portable_tar \
             "$APPIMAGE_PATH" \
             "$CONFIG_DIR" \
-            "release-assets/skillshub-v${VERSION}-Linux-${ASSET_ARCH}.tar.gz"
+            "release-assets/arsenal-v${VERSION}-Linux-${ASSET_ARCH}.tar.gz"
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
@@ -311,6 +311,6 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          name: skillshub v${{ steps.release_meta.outputs.version }}
+          name: Arsenal v${{ steps.release_meta.outputs.version }}
           body_path: release-body.md
           files: release-assets/*

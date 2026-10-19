@@ -888,6 +888,17 @@ async fn preview_github_repo_group_scoped(
 }
 
 #[tauri::command]
+pub async fn plan_repository_update_check(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let mut repositories = github_repo_source_groups(&state.db, false).await?
+        .into_keys().collect::<Vec<_>>();
+    repositories.extend(state.db.read(|data| Ok(data.table("repository_mirrors").values()
+        .filter_map(|row| row["repository"].as_str().map(str::to_owned)).collect::<Vec<_>>()))?);
+    repositories.sort();
+    repositories.dedup();
+    Ok(repositories)
+}
+
+#[tauri::command]
 pub async fn preview_source_backed_resource_repository_updates(
     state: State<'_, AppState>,
     repositories: Option<Vec<String>>,
@@ -907,7 +918,7 @@ async fn update_source_backed_skills_impl(
     let repository_filter = normalized_repository_filter(repositories);
     let auth = github_import::github_direct_auth_from_settings(pool).await?;
     let client = reqwest::Client::builder()
-        .user_agent("SkillsHub/0.10.7")
+        .user_agent("Arsenal/0.10.7")
         .build()
         .map_err(|e| e.to_string())?;
     let mut items = Vec::new();
@@ -1385,7 +1396,7 @@ async fn update_source_backed_skill_impl(
     }
     let auth = github_import::github_direct_auth_from_settings(pool).await?;
     let client = reqwest::Client::builder()
-        .user_agent("SkillsHub/0.10.7")
+        .user_agent("Arsenal/0.10.7")
         .build()
         .map_err(|e| e.to_string())?;
     let (used_url, relocated_source_path, content) =
@@ -1703,7 +1714,7 @@ async fn request_skill_ai(
         .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string());
 
     let client = reqwest::Client::builder()
-        .user_agent("SkillsHub/0.10.7")
+        .user_agent("Arsenal/0.10.7")
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(180))
         .build()
@@ -1981,7 +1992,7 @@ async fn do_explain_skill_stream(
 
     // Streaming: only connect_timeout (total `.timeout()` would kill long streams).
     let client = reqwest::Client::builder()
-        .user_agent("SkillsHub/0.10.7")
+        .user_agent("Arsenal/0.10.7")
         .connect_timeout(Duration::from_secs(10))
         .pool_idle_timeout(Duration::from_secs(90))
         .build()

@@ -1,18 +1,18 @@
 [package]
-name = "skillshub"
-version = "1.2.0"
-description = "AI Agent Skills Hub"
+name = "arsenal"
+version = "1.3.0"
+description = "AI tools and capabilities management"
 authors = ["yufenglyu"]
 license = "Apache-2.0"
 edition = "2021"
-default-run = "skillshub"
+default-run = "arsenal"
 
 [lib]
 name = "skills_manage_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "skillshub"
+name = "arsenal"
 path = "src/main.rs"
 
 # Build-time helper only. Gate behind a feature so `tauri build` does not try to
@@ -25,9 +25,15 @@ name = "prepare_config_dir"
 path = "src/build/prepare_config_dir.rs"
 required-features = ["prepare-config"]
 
+[[bin]]
+name = "migrate_config_paths"
+path = "src/build/migrate_config_paths.rs"
+required-features = ["migrate-config"]
+
 [features]
 default = []
 prepare-config = []
+migrate-config = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

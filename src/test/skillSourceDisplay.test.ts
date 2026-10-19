@@ -23,7 +23,7 @@ describe("skill source display", () => {
       getSkillSourceLocation({
         is_central: true,
         link_type: "symlink",
-        symlink_target: "~/.skillshub/library/owner/repo/shared-skill",
+        symlink_target: "~/.arsenal/library/owner/repo/shared-skill",
       })
     ).toBe("resource-library");
     expect(getSkillSourceLineKeys("symlink", "resource-library").label).toBe(

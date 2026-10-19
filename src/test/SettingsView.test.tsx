@@ -114,7 +114,7 @@ function setupMocks({
   githubPat = "",
   isLoadingGitHubPat = false,
   isSavingGitHubPat = false,
-  resourceLibraryDir = "~/.skillshub/library",
+  resourceLibraryDir = "~/.arsenal/library",
   isLoadingResourceLibraryDir = false,
   loadGitHubPat = vi.fn(),
   saveGitHubPat = vi.fn(),
@@ -1131,17 +1131,17 @@ describe("SettingsView", () => {
   it("shows the app version in the about section", () => {
     setupMocks();
     renderSettingsView();
-    expect(screen.getByText(`SkillsHub v${APP_VERSION}`)).toBeTruthy();
+    expect(screen.getByText(`Arsenal v${APP_VERSION}`)).toBeTruthy();
   });
 
   it("shows an editable config folder path", () => {
     setupMocks({
       scanDirs: [mockBuiltinDir],
       agents: [mockBuiltinAgent],
-      configDir: "/Users/test/.skillshub",
+      configDir: "/Users/test/.arsenal",
     });
     renderSettingsView();
-    expect(screen.getByLabelText("配置文件路径")).toHaveValue("/Users/test/.skillshub");
+    expect(screen.getByLabelText("配置文件路径")).toHaveValue("/Users/test/.arsenal");
     expect(screen.getByRole("button", { name: "浏览配置文件路径" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "打开配置文件路径" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "浏览技能仓库路径" })).toBeTruthy();
@@ -1151,9 +1151,9 @@ describe("SettingsView", () => {
   });
 
   it("saves a custom config folder path", async () => {
-    const updateConfigDir = vi.fn().mockResolvedValue("D:/Apps/SkillsHub/.skillshub");
+    const updateConfigDir = vi.fn().mockResolvedValue("D:/Apps/SkillsHub/.arsenal");
     setupMocks({
-      configDir: "/Users/test/.skillshub",
+      configDir: "/Users/test/.arsenal",
       updateConfigDir,
     });
     renderSettingsView();
@@ -1170,10 +1170,10 @@ describe("SettingsView", () => {
   });
 
   it("browses a config folder and saves the selected path", async () => {
-    const updateConfigDir = vi.fn().mockResolvedValue("D:/Apps/SkillsHub/.skillshub");
+    const updateConfigDir = vi.fn().mockResolvedValue("D:/Apps/SkillsHub/.arsenal");
     mockOpenDialog.mockResolvedValueOnce("D:/Apps/SkillsHub");
     setupMocks({
-      configDir: "/Users/test/.skillshub",
+      configDir: "/Users/test/.arsenal",
       updateConfigDir,
     });
     renderSettingsView();
@@ -1186,14 +1186,14 @@ describe("SettingsView", () => {
   });
 
   it("opens the config folder in the file manager", async () => {
-    setupMocks({ configDir: "/Users/test/.skillshub" });
+    setupMocks({ configDir: "/Users/test/.arsenal" });
     renderSettingsView();
 
     fireEvent.click(screen.getByRole("button", { name: "打开配置文件路径" }));
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("open_in_file_manager", {
-        path: "/Users/test/.skillshub",
+        path: "/Users/test/.arsenal",
       });
     });
   });
@@ -1208,7 +1208,7 @@ describe("SettingsView", () => {
     const checkAppUpdate = vi.fn().mockResolvedValue({
       currentVersion: "0.12.0",
       latestVersion: "0.13.0",
-      latestUrl: "https://github.com/yufenglyu/skillshub/releases/tag/v0.13.0",
+      latestUrl: "https://github.com/yufenglyu/Arsenal/releases/tag/v0.13.0",
       isUpdateAvailable: true,
       releaseName: "v0.13.0",
       publishedAt: "2026-07-22T00:00:00Z",
@@ -1229,7 +1229,7 @@ describe("SettingsView", () => {
       updateInfo: {
         currentVersion: "0.12.0",
         latestVersion: "0.12.1",
-        latestUrl: "https://github.com/yufenglyu/skillshub/releases/tag/v0.12.1",
+        latestUrl: "https://github.com/yufenglyu/Arsenal/releases/tag/v0.12.1",
         isUpdateAvailable: true,
         releaseName: "v0.12.1",
         publishedAt: "2026-07-22T00:00:00Z",
@@ -1240,7 +1240,7 @@ describe("SettingsView", () => {
     expect(screen.getByText("最新版本 v0.12.1")).toBeTruthy();
     expect(screen.getByRole("link", { name: "打开发布页" })).toHaveAttribute(
       "href",
-      "https://github.com/yufenglyu/skillshub/releases/tag/v0.12.1"
+      "https://github.com/yufenglyu/Arsenal/releases/tag/v0.12.1"
     );
   });
 

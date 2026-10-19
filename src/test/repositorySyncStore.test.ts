@@ -52,6 +52,7 @@ describe("background repository preview", () => {
   });
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.mocked((window as unknown as {__TAURI_INTERNALS__: {invoke: ReturnType<typeof vi.fn>}}).__TAURI_INTERNALS__.invoke).mockResolvedValue([]);
     localStorage.clear();
     useRepositorySyncStore.setState({ preview: null, reportGeneration:null, open: false, isChecking: false, error: null,
       applied: false, appliedRepositories: [], checkingRepository: null, repositories: null, requestedRepositories: null, includeAdded: true, removeDeleted: false });
@@ -238,4 +239,44 @@ it("keeps the frozen coverage denominator when a repository is rechecked", async
   vi.spyOn(useResourceLibraryStore.getState(),"previewRepositorySync").mockResolvedValue({coverage:[{skillId:"one",name:"One",repository:"a/repo",status:"completed"},{skillId:"three",name:"New local",status:"excluded",reason:"local"}],repositories:[{...old.repositories[0],error:null,snapshotId:"new"}]});
   await useRepositorySyncStore.getState().recheckRepository("a/repo");
   expect(useRepositorySyncStore.getState().preview?.coverage).toEqual([{...old.coverage![0],status:"completed"},old.coverage![1]]);
+});
+
+
+describe("repository check checkpoints", () => {
+  const report = (repository:string):RepositorySyncPreviewReport => ({repositories:[{repository,added:[],modified:[],deleted:[],unchanged:[]}]});
+  it("pauses between repositories and resumes without checking completed repositories again", async () => {
+    vi.restoreAllMocks(); queue.setState({tasks:[]});
+    useRepositorySyncStore.setState({reportGeneration:"checkpoint",preview:null,isChecking:false,checkingRepository:null,migratingRepository:null});
+    let finish!: (value:RepositorySyncPreviewReport) => void;
+    const check = vi.spyOn(useResourceLibraryStore.getState(),"previewRepositorySync")
+      .mockImplementationOnce(() => new Promise(resolve => {finish=resolve;}))
+      .mockResolvedValueOnce(report("example/two"));
+    const pending = useRepositorySyncStore.getState().checkForUpdates(["example/one","example/two"]);
+    const task = queue.getState().tasks.at(-1)!;
+    expect(task.steps).toHaveLength(2);
+    queue.getState().cancel(task.id);
+    finish(report("example/one")); await pending;
+    expect(check).toHaveBeenCalledTimes(1);
+    expect(queue.getState().tasks.at(-1)?.steps[0].status).toBe("success");
+    expect(useRepositorySyncStore.getState().error).toBeNull();
+    await useRepositorySyncStore.getState().checkForUpdates();
+    expect(check.mock.calls.map(call=>call[0])).toEqual([["example/one"],["example/two"]]);
+    expect(useRepositorySyncStore.getState().preview?.repositories.map(repo=>repo.repository)).toEqual(["example/one","example/two"]);
+  });
+  it("rehydrates an interrupted check and continues only its unfinished repository steps", async () => {
+    vi.restoreAllMocks(); queue.setState({tasks:[]});
+    useRepositorySyncStore.setState({reportGeneration:"restart",preview:report("example/one"),isChecking:false,checkingRepository:null,migratingRepository:null,error:null});
+    const step = (repository:string) => ({command:"preview_source_backed_resource_repository_updates",label:repository,args:{repositories:[repository],reportGeneration:"restart"}});
+    const saved:BackgroundTask = {id:"restart",key:"restart",label:"Check",kind:"check",locks:["repo:*"],createdAt:1,cancelRequested:false,status:"running",parentReportGeneration:"restart",steps:[
+      {...step("example/one"),status:"success",result:report("example/one")},
+      {...step("example/two"),status:"running"}, {...step("example/three"),status:"queued"}]};
+    localStorage.setItem("skillshub.background-tasks.v1",JSON.stringify({state:{tasks:[saved]},version:0}));
+    await queue.persist.rehydrate();
+    expect(queue.getState().tasks[0].status).toBe("interrupted");
+    const check = vi.spyOn(useResourceLibraryStore.getState(),"previewRepositorySync").mockImplementation(async repos=>report(repos![0]));
+    await useRepositorySyncStore.getState().checkForUpdates();
+    expect(check.mock.calls.map(call=>call[0])).toEqual([["example/two"],["example/three"]]);
+    expect(useRepositorySyncStore.getState().preview?.repositories).toHaveLength(3);
+    expect(queue.getState().tasks[0].status).toBe("success");
+  });
 });

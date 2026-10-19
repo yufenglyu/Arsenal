@@ -136,13 +136,8 @@ export function GlobalSearchDialog({
         descriptionText: (col.description ?? "").toLowerCase(),
         onSelect: () => {
           close();
-          navigate("/collections", {
-            state: {
-              collectionContext: {
-                collectionId: col.id,
-              },
-            },
-          });
+          useCollectionStore.getState().selectGroup(col.id);
+          navigate("/resources");
         },
       });
     }

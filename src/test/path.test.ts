@@ -28,7 +28,7 @@ describe("path helpers", () => {
   });
 
   it("keeps tilde paths stable", () => {
-    expect(compactHomePath("~/.skillshub/db.sqlite")).toBe("~/.skillshub/db.sqlite");
+    expect(compactHomePath("~/.arsenal/db.sqlite")).toBe("~/.arsenal/db.sqlite");
   });
 
   it("keeps unix paths full for display", () => {
@@ -62,11 +62,11 @@ describe("path helpers", () => {
   });
 
   it("joins relative paths using platform-native display style", () => {
-    expect(joinPathForDisplay("/Users/alice", ".skillshub/db.sqlite")).toBe(
-      "/Users/alice/.skillshub/db.sqlite"
+    expect(joinPathForDisplay("/Users/alice", ".arsenal/db.sqlite")).toBe(
+      "/Users/alice/.arsenal/db.sqlite"
     );
-    expect(joinPathForDisplay("C:\\Users\\alice", ".skillshub/db.sqlite")).toBe(
-      "C:\\Users\\alice\\.skillshub\\db.sqlite"
+    expect(joinPathForDisplay("C:\\Users\\alice", ".arsenal/db.sqlite")).toBe(
+      "C:\\Users\\alice\\.arsenal\\db.sqlite"
     );
   });
 

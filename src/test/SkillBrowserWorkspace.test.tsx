@@ -448,3 +448,53 @@ it("does not treat the loose local-skills grouping as a repository notebook", ()
   fireEvent.click(screen.getByRole("button", {name: "本地技能"}));
   expect(screen.queryByRole("tab", {name: "笔记"})).not.toBeInTheDocument();
 });
+
+it('keeps overview, document and notebook available in a narrow collapsed rail',()=>{
+ render(<SkillBrowserWorkspace {...props}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Example/Tools'}));
+ fireEvent.click(screen.getByRole('button',{name:'收起预览'}));
+ const rail=screen.getByRole('complementary',{name:'详情预览'});
+ expect(rail).toHaveStyle({width:'40px'});
+ expect(within(rail).getByRole('button',{name:'概览'})).toBeEnabled();
+ expect(within(rail).getByRole('button',{name:'文档'})).toBeEnabled();
+ expect(within(rail).getByRole('button',{name:'笔记'})).toBeEnabled();
+ fireEvent.click(within(rail).getByRole('button',{name:'笔记'}));
+ expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+ fireEvent.click(within(rail).getByRole('button',{name:'显示预览'}));
+ expect(screen.getByRole('tab',{name:'笔记'})).toHaveAttribute('aria-selected','true');
+});
+
+it('inherits GitHot range selection and select-all keyboard behavior',()=>{
+ const selection=vi.fn();render(<SkillBrowserWorkspace {...props} forceFlat onSelectionChange={selection}/>);
+ const first=screen.getByRole('button',{name:'查看 First skill 的详情'}).closest('tr')!;
+ const second=screen.getByRole('button',{name:'查看 Second skill 的详情'}).closest('tr')!;
+ fireEvent.click(first);fireEvent.keyDown(first,{key:'ArrowDown',shiftKey:true});
+ expect(first).toHaveAttribute('aria-selected','true');expect(second).toHaveAttribute('aria-selected','true');expect(second).toHaveFocus();
+ fireEvent.click(first);fireEvent.keyDown(first,{key:'a',ctrlKey:true});expect(second).toHaveAttribute('aria-selected','true');
+ expect(selection).toHaveBeenLastCalledWith(['skill:one','skill:two']);
+});
+
+it('keeps preview collapsed on selection and across workspace remounts',()=>{
+ const view=render(<SkillBrowserWorkspace {...props}/>);
+ fireEvent.click(screen.getByRole('button',{name:'收起预览'}));
+ fireEvent.click(screen.getByRole('button',{name:'Example/Tools'}));
+ expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+ view.unmount();
+ render(<SkillBrowserWorkspace {...props} storageKey="other"/>);
+ expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'显示预览'})).toBeInTheDocument();
+});
+
+it('drags a collapsed repository as all of its skill members',()=>{
+ const drag=vi.fn();render(<SkillBrowserWorkspace {...props} onDragSkills={drag}/>);
+ const row=screen.getByRole('button',{name:'Example/Tools'}).closest('tr')!;
+ fireEvent.dragStart(row,{dataTransfer:{setData:vi.fn()}});
+ expect(drag).toHaveBeenCalledWith(expect.anything(),['one','two']);
+});
+it('detaches selected skill rows in one group operation',()=>{
+ const detach=vi.fn();render(<SkillBrowserWorkspace {...props} forceFlat onDetachSkills={detach}/>);
+ const row=screen.getByRole('button',{name:'查看 First skill 的详情'}).closest('tr')!;
+ fireEvent.click(row);fireEvent.keyDown(row,{key:'a',ctrlKey:true});
+ fireEvent.click(openRowActions(row).getByRole('menuitem',{name:'移出分组'}));
+ expect(detach).toHaveBeenCalledWith(['one','two']);
+});

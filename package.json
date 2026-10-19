@@ -1,7 +1,7 @@
 {
-  "name": "skillshub",
+  "name": "arsenal",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.3.0",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "package:obsidian": "node scripts/package-obsidian.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
-    "icon:desktop": "tauri icon src-tauri/icons/icon-source.png",
+    "icon:desktop": "tauri icon public/arsenal.svg",
     "package:release:windows": "powershell -ExecutionPolicy Bypass -File scripts/package-release-windows.ps1",
     "package:release:macos": "bash scripts/package-release-macos.sh",
     "package:release:linux": "bash scripts/package-release-linux.sh",

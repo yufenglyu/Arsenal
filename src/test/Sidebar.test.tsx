@@ -99,7 +99,8 @@ type SidebarPlatformState = Omit<typeof defaultStoreState, "skillsByAgent"> & {
 
 const defaultCollectionState = {
   collections: [],
-  currentDetail: null,
+  activeCollectionId:null, groupDetails:[], selectedSkillIds:[], includeDescendants:true, selectGroup:vi.fn(), loadGroupDetails:vi.fn().mockResolvedValue(undefined), changeGroup:vi.fn().mockResolvedValue(undefined),
+    currentDetail: null,
   isLoading: false,
   isLoadingDetail: false,
   error: null,
@@ -119,7 +120,7 @@ const defaultCollectionState = {
 const defaultResourceLibraryState = {
   skills: [],
   agents: [],
-  resourceLibraryDir: "~/.skillshub/library",
+  resourceLibraryDir: "~/.arsenal/library",
   isLoading: false,
   isUpdatingSources: false,
   togglingAgentId: null,
@@ -248,15 +249,53 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: /共享中心/ })).toBeInTheDocument();
   });
 
-  it("renders Skill Bundles icon button", () => {
+  it("replaces Skill Bundles with repository groups", () => {
     renderSidebar();
     // Use exact string match to avoid also matching "导入技能集"
-    expect(screen.getByRole("button", { name: "技能合集" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "技能分组" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tree",{name:"技能仓库"})).toBeInTheDocument();
   });
 
-  it("new/import collection buttons are on the list page, not sidebar", () => {
+  it("groups installation targets under one persistent heading while keeping collapsed rail navigation",()=>{
+    const view=renderSidebar();
+    const section=screen.getByRole('region',{name:'技能安装'});
+    expect(within(section).getByRole('button',{name:'共享中心'})).toBeInTheDocument();
+    expect(within(section).getByText('软件平台')).toBeInTheDocument();
+    expect(within(section).getByText('项目目录')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'技能安装'}));
+    expect(screen.queryByRole('button',{name:'共享中心'})).not.toBeInTheDocument();
+    view.unmount();renderSidebar();
+    expect(screen.getByRole('button',{name:'技能安装'})).toHaveAttribute('aria-expanded','false');
+    fireEvent.click(screen.getByRole('button',{name:'技能安装'}));
+    expect(screen.getByRole('button',{name:'共享中心'})).toBeInTheDocument();
+    expect(screen.queryByText('AI 工具与能力管理')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'折叠侧边栏'}));
+    expect(screen.getByRole('button',{name:'共享中心'})).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:/Claude Code/})).toBeInTheDocument();
+  });
+
+  it("toggles the repository from its title and restores its resized height",()=>{
+    localStorage.setItem('skillshub.sidebar.repositoryHeight','240');
     renderSidebar();
-    expect(screen.queryByRole("button", { name: /新建合集/ })).not.toBeInTheDocument();
+    const title=screen.getByRole('button',{name:'技能仓库'});
+    const region=screen.getByTestId('repository-tree-region');
+    expect(region).toHaveStyle({height:'240px'});
+    fireEvent.click(title);
+    expect(title).toHaveAttribute('aria-expanded','false');
+    expect(screen.queryByText('未分组')).not.toBeInTheDocument();
+    expect(region.style.height).toBe('');
+    expect(screen.getByRole('button',{name:'技能安装'})).toHaveAttribute('aria-expanded','true');
+    fireEvent.click(title);
+    expect(title).toHaveAttribute('aria-expanded','true');
+    expect(screen.getByText('未分组')).toBeInTheDocument();
+    expect(region).toHaveStyle({height:'240px'});
+  });
+
+  it("creates repository groups from the sidebar", () => {
+    renderSidebar();
+    expect(screen.queryByRole("button", { name: /新建分组/ })).not.toBeInTheDocument();
+    fireEvent.contextMenu(screen.getByRole("button",{name:"技能仓库"}));
+    expect(screen.getByRole("menuitem",{name:"新建分组"})).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /导入技能集/i })).not.toBeInTheDocument();
   });
 
@@ -338,7 +377,7 @@ describe("Sidebar", () => {
 
   it("highlights Skill Repository when on root route", () => {
     renderSidebar("/");
-    const resourceButton = screen.getByRole("button", { name: /技能仓库/ });
+    const resourceButton = screen.getByRole("button", { name: "技能仓库" });
     const centralButton = screen.getByRole("button", { name: /共享中心/ });
     expect(resourceButton.className).toContain("bg-hover-bg");
     expect(centralButton.className).not.toContain("bg-hover-bg");
@@ -457,7 +496,8 @@ describe("Sidebar", () => {
       })
     );
     renderSidebar();
-    expect(screen.getByRole("button", { name: "技能合集" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "技能分组" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tree",{name:"技能仓库"})).toBeInTheDocument();
   });
 
   it("highlights active collection route", () => {
@@ -476,20 +516,18 @@ describe("Sidebar", () => {
       </MemoryRouter>
     );
     // The collections icon button should be highlighted (exact match)
-    const colButton = screen.getByRole("button", { name: "技能合集" });
-    expect(colButton.className).toContain("bg-hover-bg");
+    fireEvent.click(screen.getByRole("button",{name:"Frontend 0"}));
+    expect(defaultCollectionState.selectGroup).toHaveBeenCalledWith("col-1");
   });
 
-  it("orders library nav as Skill Repository, Skill Bundles, then Shared Hub", () => {
+  it("nests groups under the repository root before Shared Hub", () => {
     renderSidebar();
     const resourceButton = screen.getByRole("button", { name: "技能仓库" });
-    const collectionsButton = screen.getByRole("button", { name: "技能合集" });
+    const collectionsButton = screen.getByRole("tree", { name: "技能仓库" });
     const centralButton = screen.getByRole("button", { name: "共享中心" });
 
-    expect(
-      resourceButton.compareDocumentPosition(collectionsButton) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
+    expect(collectionsButton).toContainElement(resourceButton);
+    expect(screen.queryByText("分组")).not.toBeInTheDocument();
     expect(
       collectionsButton.compareDocumentPosition(centralButton) &
         Node.DOCUMENT_POSITION_FOLLOWING
@@ -556,15 +594,15 @@ describe("Sidebar", () => {
       },
     });
 
-    const nestedListClass = "ml-3 border-l border-sidebar-border/70 pl-2";
+    const nestedListClass = "ml-6 border-l border-sidebar-border/70 pl-2";
     expect(screen.queryByText("龙虾类")).not.toBeInTheDocument();
     expect(screen.queryByText("编程类")).not.toBeInTheDocument();
     const openClawButton = screen.getByRole("button", { name: /OpenClaw/ });
     const claudeButton = screen.getByRole("button", { name: /Claude Code/ });
     const projectButton = screen.getByRole("button", { name: /Demo Project/ });
 
-    const platformList = openClawButton.closest("div.ml-3");
-    const projectList = projectButton.closest("div.ml-3");
+    const platformList = openClawButton.closest("div.ml-6");
+    const projectList = projectButton.closest("div.ml-6");
 
     expect(platformList).toHaveClass(...nestedListClass.split(" "));
     expect(platformList?.contains(claudeButton)).toBe(true);
@@ -655,7 +693,7 @@ describe("Sidebar", () => {
       },
     });
 
-    const collections = screen.getByRole("button", { name: /技能合集|Skill Bundles/i });
+    const collections = screen.getByRole("tree", { name: "技能仓库" });
     const central = screen.getByRole("button", { name: /共享中心|Shared Hub/i });
     const platformHeading = screen.getByText("软件平台");
     const projectHeading = screen.getByText("项目目录");
@@ -745,4 +783,25 @@ describe("Sidebar", () => {
       expect(mockExportDirectoryList).toHaveBeenCalledWith("D:\\exports\\skill-directory-list.csv");
     });
   });
+});
+
+it('uses a 40px collapsed rail and stacks theme above settings',()=>{
+ renderSidebar();fireEvent.click(screen.getByRole('button',{name:'折叠侧边栏'}));
+ expect(screen.getByRole('navigation',{name:'主导航'})).toHaveStyle({width:'40px'});
+ const theme=screen.getByRole('button',{name:/切换主题/});const settings=screen.getByRole('button',{name:'设置'});
+ expect(theme.parentElement).toBe(settings.parentElement);expect(theme.parentElement).toHaveClass('flex-col');
+ expect(theme).toHaveClass('size-8');expect(settings).toHaveClass('size-8');
+});
+
+it('resizes the repository region and retains its height',()=>{
+ useSidebarStore.setState({expanded:true});
+ localStorage.setItem('skillshub.sidebar.repositoryHeight','160');
+ renderSidebar();
+ const handle=screen.getByRole('separator',{name:'调整技能仓库区域高度'});
+ fireEvent.keyDown(handle,{key:'ArrowDown'});
+ expect(screen.getByTestId('repository-tree-region')).toHaveStyle({height:'176px'});
+ expect(localStorage.getItem('skillshub.sidebar.repositoryHeight')).toBe('176');
+ fireEvent.click(screen.getByRole('button',{name:'折叠侧边栏'}));
+ fireEvent.click(screen.getByRole('button',{name:'技能仓库'}));
+ expect(screen.getByRole('button',{name:'展开侧边栏'})).toBeInTheDocument();
 });

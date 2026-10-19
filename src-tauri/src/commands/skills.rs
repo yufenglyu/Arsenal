@@ -1985,6 +1985,7 @@ pub async fn get_resource_library_skills_impl(
 pub async fn export_resource_skill_directory_list(
     state: State<'_, AppState>,
     output_path: String,
+    skill_ids: Option<Vec<String>>,
 ) -> Result<usize, String> {
     let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
     super::repository_address::recover(&state.db).await?;
@@ -1993,6 +1994,7 @@ pub async fn export_resource_skill_directory_list(
     let mut rows: BTreeMap<String, Vec<SkillWithLinks>> = BTreeMap::new();
 
     for skill in skills {
+        if skill_ids.as_ref().is_some_and(|ids| !ids.contains(&skill.id)) { continue; }
         let Some(canonical_path) = skill.canonical_path.as_deref() else {
             continue;
         };

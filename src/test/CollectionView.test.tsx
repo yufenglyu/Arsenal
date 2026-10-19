@@ -107,8 +107,8 @@ const mockResourceSkills: SkillWithLinks[] = [
     id: "frontend-design",
     name: "frontend-design",
     description: "Build distinctive frontend UIs",
-    file_path: "~/.skillshub/library/frontend-design/SKILL.md",
-    canonical_path: "~/.skillshub/library/frontend-design",
+    file_path: "~/.arsenal/library/frontend-design/SKILL.md",
+    canonical_path: "~/.arsenal/library/frontend-design",
     is_central: false,
     scanned_at: "2026-04-09T00:00:00Z",
     linked_agents: [],
@@ -118,8 +118,8 @@ const mockResourceSkills: SkillWithLinks[] = [
     id: "code-reviewer",
     name: "code-reviewer",
     description: "Review code changes",
-    file_path: "~/.skillshub/library/code-reviewer/SKILL.md",
-    canonical_path: "~/.skillshub/library/code-reviewer",
+    file_path: "~/.arsenal/library/code-reviewer/SKILL.md",
+    canonical_path: "~/.arsenal/library/code-reviewer",
     is_central: false,
     scanned_at: "2026-04-09T00:00:00Z",
     linked_agents: [],
@@ -139,7 +139,7 @@ const mockUseResourceLibraryStore = vi.mocked(useResourceLibraryStore);
 
 function buildCollectionStoreState(overrides = {}) {
   return {
-    collections: [],
+    collections: [], activeCollectionId:null, groupDetails:[], selectedSkillIds:[], includeDescendants:true, selectGroup:vi.fn(), loadGroupDetails:vi.fn().mockResolvedValue(undefined), changeGroup:vi.fn().mockResolvedValue(undefined),
     currentDetail: mockCollectionDetail,
     isLoading: false,
     isLoadingDetail: false,
@@ -177,7 +177,7 @@ function buildResourceLibraryStoreState(overrides = {}) {
   return {
     skills: mockResourceSkills,
     agents: mockAgents,
-    resourceLibraryDir: "~/.skillshub/library",
+    resourceLibraryDir: "~/.arsenal/library",
     isLoading: false,
     isInstalling: false,
     isUpdatingSources: false,

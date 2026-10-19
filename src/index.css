@@ -461,3 +461,6 @@ summary.overview-section-title::-webkit-details-marker { display: none; }
 .notebook-properties > summary { list-style: none; font-weight: 400; }
 .notebook-properties > summary::-webkit-details-marker { display: none; }
 .notebook-properties summary svg { width: 1em; height: 1em; }
+.group-menu-item {
+  @apply flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:opacity-50;
+}

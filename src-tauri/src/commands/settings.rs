@@ -8,8 +8,8 @@ use crate::path_utils::{
 use crate::AppState;
 
 const GITHUB_LATEST_RELEASE_API: &str =
-    "https://api.github.com/repos/yufenglyu/skillshub/releases/latest";
-const GITHUB_LATEST_RELEASE_URL: &str = "https://github.com/yufenglyu/skillshub/releases/latest";
+    "https://api.github.com/repos/yufenglyu/Arsenal/releases/latest";
+const GITHUB_LATEST_RELEASE_URL: &str = "https://github.com/yufenglyu/Arsenal/releases/latest";
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -184,7 +184,7 @@ pub async fn check_app_update_impl(pool: &AppStore) -> Result<AppUpdateInfo, Str
         .get(GITHUB_LATEST_RELEASE_API)
         .header(
             reqwest::header::USER_AGENT,
-            format!("SkillsHub/{}", current_version),
+            format!("Arsenal/{}", current_version),
         )
         .header(reqwest::header::ACCEPT, "application/vnd.github+json");
 
@@ -523,14 +523,14 @@ mod tests {
     #[tokio::test]
     async fn test_add_scan_directory_expands_tilde() {
         let pool = setup_test_db().await;
-        let dir = add_scan_directory_impl(&pool, "~/.skillshub/custom-scan", None)
+        let dir = add_scan_directory_impl(&pool, "~/.arsenal/custom-scan", None)
             .await
             .unwrap();
         assert!(
             !dir.path.starts_with('~'),
             "tilde paths must be expanded before persistence"
         );
-        assert!(dir.path.contains(".skillshub"));
+        assert!(dir.path.contains(".arsenal"));
     }
 
     #[tokio::test]
@@ -832,8 +832,8 @@ mod json_directory_tests {
     #[tokio::test]
     async fn directory_copy_reopens_same_committed_data() {
         let fixture = tempfile::tempdir().unwrap();
-        let source = fixture.path().join("source/.skillshub");
-        let destination = fixture.path().join("target/.skillshub");
+        let source = fixture.path().join("source/.arsenal");
+        let destination = fixture.path().join("target/.arsenal");
         let store = Store::open(&source).unwrap();
         store
             .write(|d| {
@@ -870,8 +870,8 @@ mod json_directory_tests {
     #[tokio::test]
     async fn occupied_destination_does_not_publish_pointer() {
         let fixture = tempfile::tempdir().unwrap();
-        let store = Store::open(&fixture.path().join("source/.skillshub")).unwrap();
-        let destination = fixture.path().join("target/.skillshub");
+        let store = Store::open(&fixture.path().join("source/.arsenal")).unwrap();
+        let destination = fixture.path().join("target/.arsenal");
         let occupied = Store::open(&destination).unwrap();
         occupied
             .write(|d| {
@@ -901,10 +901,10 @@ mod json_directory_tests {
     #[tokio::test]
     async fn occupied_empty_destination_rejects_copy_before_writing() {
         let fixture = tempfile::tempdir().unwrap();
-        let source = fixture.path().join("source/.skillshub");
+        let source = fixture.path().join("source/.arsenal");
         let store = Store::open(&source).unwrap();
         std::fs::write(source.join("config.json"), b"{}").unwrap();
-        let destination = fixture.path().join("target/.skillshub");
+        let destination = fixture.path().join("target/.arsenal");
         let _occupied = Store::open(&destination).unwrap();
         let called = std::cell::Cell::new(false);
         assert!(
@@ -921,8 +921,8 @@ mod json_directory_tests {
     #[tokio::test]
     async fn corrupt_destination_does_not_publish_pointer() {
         let fixture = tempfile::tempdir().unwrap();
-        let store = Store::open(&fixture.path().join("source/.skillshub")).unwrap();
-        let destination = fixture.path().join("target/.skillshub");
+        let store = Store::open(&fixture.path().join("source/.arsenal")).unwrap();
+        let destination = fixture.path().join("target/.arsenal");
         std::fs::create_dir_all(destination.join("store")).unwrap();
         std::fs::write(destination.join("store/manifest.json"), b"corrupt").unwrap();
         let called = std::cell::Cell::new(false);

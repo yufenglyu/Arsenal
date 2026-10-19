@@ -664,7 +664,7 @@ describe("SkillDetailView", () => {
 
   it("shows collections section", () => {
     renderView();
-    expect(screen.getByRole("region", { name: /技能合集/i })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: /技能分组/i })).toBeInTheDocument();
   });
 
   it("shows Add to collection button", () => {

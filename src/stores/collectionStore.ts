@@ -40,6 +40,13 @@ export async function getCollectionDetails(ids: string[]): Promise<CollectionDet
 // ─── State ────────────────────────────────────────────────────────────────────
 
 interface CollectionState {
+  activeCollectionId: string | null;
+  groupDetails: CollectionDetail[];
+  selectedSkillIds: string[];
+  includeDescendants: boolean;
+  selectGroup: (id: string | null) => void;
+  loadGroupDetails: () => Promise<void>;
+  changeGroup: (request: CollectionGroupChange) => Promise<void>;
   collections: Collection[];
   currentDetail: CollectionDetail | null;
   isLoading: boolean;
@@ -64,8 +71,30 @@ interface CollectionState {
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 let detailRequest = 0;
+let groupRequest = 0;
+export interface CollectionGroupChange {
+  action: "create" | "rename" | "move" | "delete" | "assign" | "transfer" | "detach";
+  id?: string; name?: string; parentId?: string | null; beforeId?: string | null;
+  skillIds?: string[]; sourceCollectionId?: string;
+  includeDescendants?: boolean;
+}
 
 export const useCollectionStore = create<CollectionState>((set, get) => ({
+  activeCollectionId: null,
+  groupDetails: [], selectedSkillIds: [], includeDescendants: (()=>{try{return localStorage.getItem('skillshub.groups.includeDescendants')!=='false';}catch{return true;}})(),
+  selectGroup: id => set({activeCollectionId:id,selectedSkillIds:[]}),
+  loadGroupDetails: async () => {
+    const request=++groupRequest;
+    const details=await getCollectionDetails(get().collections.map(item=>item.id));
+    if(request===groupRequest)set({groupDetails:details});
+  },
+  changeGroup: async request => {
+    const collections=await invoke<Collection[]>("change_collection_group",{request:{includeDescendants:get().includeDescendants,...request}});
+    set({collections, ...(request.action==="delete" && !collections.some(item=>item.id===get().activeCollectionId) ? {activeCollectionId:null,currentDetail:null} : {})});
+    await get().loadGroupDetails();
+    const active=get().activeCollectionId;
+    if(active && collections.some(item=>item.id===active))await get().loadCollectionDetail(active);
+  },
   collections: [],
   currentDetail: null,
   isLoading: false,

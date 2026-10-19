@@ -1,3 +1,5 @@
+import {createPortal} from "react-dom";
+import {StatusBarSlot} from "./StatusBarSlot";
 import { GitHubUrlDrop } from "./GitHubUrlDrop";
 import { focusPageSearch } from "@/lib/focusPageSearch";
 import { SettingsView } from "@/pages/SettingsView";
@@ -15,6 +17,7 @@ import { usePlatformStore } from "@/stores/platformStore";
  * Triggers the initial platform scan on mount.
  */
 export function AppShell({ settingsOpen = false, onCloseSettings }: {settingsOpen?: boolean; onCloseSettings?: () => void}) {
+  const [statusSlot, setStatusSlot] = useState<HTMLDivElement | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const mainRef = useRef<HTMLElement | null>(null);
   const { pathname } = useLocation();
@@ -60,7 +63,7 @@ export function AppShell({ settingsOpen = false, onCloseSettings }: {settingsOpe
   useConfiguredHotkey("focusPageSearch", () => focusPageSearch(mainRef.current), {allowInEditable: true});
   useConfiguredHotkey("toggleSidebar", toggleSidebar);
   useConfiguredHotkey("goResources", () => navigate("/resources"));
-  useConfiguredHotkey("goCollections", () => navigate("/collections"));
+  useConfiguredHotkey("goCollections", () => {navigate("/resources");requestAnimationFrame(()=>document.querySelector<HTMLButtonElement>('[role="tree"] button')?.focus());});
   useConfiguredHotkey("goCentral", () => navigate("/central"));
   useConfiguredHotkey("goSettings", () => navigate("/settings"));
 
@@ -68,13 +71,13 @@ export function AppShell({ settingsOpen = false, onCloseSettings }: {settingsOpe
     <div className="flex h-screen bg-background text-foreground overflow-hidden">
       <GitHubUrlDrop />
       <Sidebar settingsOpen={settingsOpen} />
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <StatusBarSlot.Provider value={setStatusSlot}><div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <main ref={mainRef} className="flex-1 min-h-0 min-w-0 overflow-hidden">
           <div className="h-full" hidden={settingsOpen}><Outlet /></div>
           {settingsOpen && <SettingsView onClose={onCloseSettings} />}
         </main>
-        <AppStatusBar settingsOpen={settingsOpen} />
-      </div>
+        {statusSlot && !settingsOpen ? createPortal(<AppStatusBar />, statusSlot) : <AppStatusBar settingsOpen={settingsOpen} />}
+      </div></StatusBarSlot.Provider>
       <GlobalSearchDialog
         open={isSearchOpen}
         onOpenChange={setIsSearchOpen}

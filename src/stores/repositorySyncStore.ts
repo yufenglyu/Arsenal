@@ -66,6 +66,7 @@ interface RepositorySyncState {
   setRepositories: (repositories: string[] | null) => void;
 }
 
+class CheckPaused extends Error {}
 let previewRequest: Promise<void> | null = null;
 const activeRechecks = new Set<string>();
 
@@ -193,6 +194,18 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
       checkForUpdates: (repositories) => {
         if (previewRequest) return previewRequest;
         if (get().checkingRepository || get().migratingRepository) return Promise.resolve();
+        const existing = useTaskQueueStore.getState().tasks.find(task =>
+          !!get().reportGeneration && task.parentReportGeneration === get().reportGeneration && task.steps.length > 0 &&
+          task.steps.every(step => step.command === "preview_source_backed_resource_repository_updates") &&
+          (isTaskActive(task) || ["cancelled", "interrupted"].includes(task.status)));
+        if (existing) {
+          if (!isTaskActive(existing)) useTaskQueueStore.getState().retry(existing.id);
+          set({isChecking:true, error:null});
+          previewRequest = waitForTask(existing.id).then(() => {}).finally(() => {
+            set({isChecking:false}); previewRequest = null;
+          });
+          return previewRequest;
+        }
         if (!repositories?.length) {
           releaseSnapshots(get().preview?.repositories ?? []);
           useTaskQueueStore.getState().clearCheckHistory();
@@ -224,6 +237,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
               appliedRepositories: [],
             });
           } catch (error) {
+            if (error instanceof CheckPaused) return;
             set({ error: String(error) });
             toast.error(i18n.t("workflow.checkFailedNotification"), {action:{label:i18n.t("workflow.viewResults"),onClick:() => get().setOpen(true)}});
           } finally {
@@ -325,27 +339,34 @@ async function checkInBackground(
   repositories?: string[],
   parentReportGeneration?: string,
 ): Promise<RepositorySyncPreviewReport> {
-  const reportGeneration = useRepositorySyncStore.getState().reportGeneration;
+  const reportGeneration = getReportTaskGeneration();
+  const planned = repositories?.length ? repositories : isTauriRuntime()
+    ? await invoke<string[]>("plan_repository_update_check")
+    : [...new Set(useResourceLibraryStore.getState().skills.flatMap(skill => skill.source_repo ? [skill.source_repo.toLowerCase()] : []))];
+  const scopes = planned.length ? planned.map(repository => [repository]) : [null];
   const id = useTaskQueueStore
     .getState()
     .enqueue({
-      parentReportGeneration,
+      parentReportGeneration: parentReportGeneration ?? reportGeneration ?? undefined,
       key: `check:${repositories?.slice().sort().join(",") ?? "all"}:${reportGeneration ?? "legacy"}`,
       kind: "check",
       locks: repositories?.length ? repositories.map(repo => `repo:${repo.toLowerCase()}`) : ["repo:*"],
       label: repositories?.length ? i18n.t("workflow.checkRepositories", {count:repositories.length}) : i18n.t("workflow.allSourceRepositories"),
-      steps: [
-        {
-          label: i18n.t("workflow.recheck"),
-          command: "preview_source_backed_resource_repository_updates",
-          args: { repositories: repositories ?? null, reportGeneration },
-        },
-      ],
+      steps: scopes.map(scope => ({
+        label: scope?.[0] ?? i18n.t("workflow.recheck"),
+        command: "preview_source_backed_resource_repository_updates",
+        args: { repositories: scope, reportGeneration, plannedRepositories: planned },
+      })),
     });
   const task = await waitForTask(id);
+  if (task.status === "cancelled" || task.status === "interrupted") throw new CheckPaused();
   if (task.status !== "success" && task.status !== "partial")
     throw new Error(task.steps.find(step => step.error)?.error ?? i18n.t("workflow.operationFailed"));
-  return task.steps[0].result as RepositorySyncPreviewReport;
+  return task.steps.reduce<RepositorySyncPreviewReport>((report, step) => {
+    const result = step.result as RepositorySyncPreviewReport | undefined;
+    return result ? {repositories: [...report.repositories, ...result.repositories],
+      coverage: mergeCoverage(report.coverage, result.coverage)} : report;
+  }, {repositories: []});
 }
 registerTaskResult("apply_repository_update_item", async (step) => {
   useRepositorySyncStore.setState((state) => {
@@ -418,12 +439,17 @@ registerTaskResult(
     if ((step.args.reportGeneration ?? null) !== useRepositorySyncStore.getState().reportGeneration) return;
     const rawReport = result as RepositorySyncPreviewReport;
     if (!rawReport?.repositories) return;
+    const planned = step.args.plannedRepositories as string[] | undefined;
+    if (planned?.length && rawReport.coverage) rawReport.coverage = rawReport.coverage.map(row =>
+      row.reason === "outside_scope" && row.repository && planned.includes(row.repository.toLowerCase())
+        ? {...row, status: "pending", reason: undefined} : row);
     const scope = Array.isArray(step.args.repositories) ? new Set((step.args.repositories as string[]).map(repo => repo.toLowerCase())) : null;
     releaseSnapshots((useRepositorySyncStore.getState().preview?.repositories ?? []).filter(old => rawReport.repositories.some(next=>next.repository.toLowerCase()===old.repository.toLowerCase() && next.snapshotId!==old.snapshotId)));
     const report = {...rawReport, repositories:rawReport.repositories.filter(repo => !scope || scope.has(repo.repository.toLowerCase()))};
     useRepositorySyncStore.setState((state) => ({
       updateErrors: Object.fromEntries(Object.entries(state.updateErrors).filter(([key]) =>
         !report.repositories.some(repo => !repo.error && key.startsWith(`${repo.repository.toLowerCase()}:`)))),
+      reportCheckedAt: state.reportCheckedAt ?? Date.now(),
       checkedAt: {...state.checkedAt, ...Object.fromEntries(report.repositories.map(repo => [repo.repository.toLowerCase(), Date.now()]))},
       preview:
         step.args.repositories && state.preview
@@ -457,7 +483,7 @@ registerTaskResult(
 function mergeCoverage(previous: RepositorySyncPreviewReport["coverage"], incoming: RepositorySyncPreviewReport["coverage"]) {
   if (!previous) return incoming;
   // A partial recheck changes outcomes, never the frozen denominator.
-  return previous.map(item => incoming?.find(next => next.skillId === item.skillId && next.reason !== "outside_scope") ?? item);
+  return previous.map(item => incoming?.find(next => next.skillId === item.skillId && next.reason !== "outside_scope" && next.status !== "pending") ?? item);
 }
 registerTaskResult("apply_repository_snapshot", async step => {
   useRepositorySyncStore.setState(state => {

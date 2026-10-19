@@ -43,7 +43,9 @@
     "notebook": "Notebook"
   },
   "app": {
-    "name": "SkillsHub"
+    "name": "Arsenal",
+    "chineseName": "百器库",
+    "subtitle": "AI tools and capabilities management"
   },
   "topBar": {
     "cycleTheme": "Cycle theme, current: {{mode}}",
@@ -142,6 +144,8 @@
     "repositoryCounts": "{{count}} repositories"
   },
   "sidebar": {
+    "skillInstallation": "Skill installation",
+    "resizeRepositoryHeight": "Resize skill repository height",
     "byTool": "By Tool",
     "centralSkills": "Shared Hub",
     "resourceLibrary": "Skill Repository",
@@ -386,7 +390,7 @@
   },
   "resource": {
     "title": "Skill Repository",
-    "path": "~/.skillshub/library",
+    "path": "~/.arsenal/library",
     "searchPlaceholder": "Search skill repository...",
     "loading": "Loading skill repository skills...",
     "noSkills": "No skills in the skill repository yet. Import skills or add a local skill folder.",
@@ -750,7 +754,7 @@
     "removeDirLabel": "Remove directory {{path}}",
     "editDirLabel": "Edit directory {{name}}",
     "centralPathTitle": "Shared Hub directory",
-    "centralPathDesc": "Choose the canonical source directory managed by SkillsHub. Using a path outside ~/.agents/skills prevents compatible platforms from seeing every Shared Hub skill automatically.",
+    "centralPathDesc": "Choose the canonical source directory managed by Arsenal. Using a path outside ~/.agents/skills prevents compatible platforms from seeing every Shared Hub skill automatically.",
     "centralPathLabel": "Shared Hub path",
     "centralPathHint": "Saving triggers a rescan. Existing platform symlinks or copies are not migrated automatically; reinstall them as needed.",
     "centralPathSaved": "Shared Hub path updated",
@@ -766,9 +770,9 @@
     "configSaveFailed": "Could not save configuration. Check that config.json is writable.",
     "configLoadFailed": "Could not load configuration. Check that config.json is valid.",
     "configDirTitle": "Config folder",
-    "configDirDesc": "config.json stores app settings, software platforms, and project directories; JSON files in store/ store skill and installation data; platform/icons/ contains platform icons. All live in this .skillshub folder. Place it beside the executable for portable use.",
+    "configDirDesc": "config.json stores app settings, software platforms, and project directories; JSON files in store/ store skill and installation data; platform/icons/ contains platform icons. All live in this .arsenal folder. Place it beside the executable for portable use.",
     "configDirLabel": "Config folder path",
-    "configDirHint": "Restart the app after saving. If the new folder has no config yet, the current folder is copied there first. Choosing the exe directory uses a .skillshub folder beside it.",
+    "configDirHint": "Restart the app after saving. If the new folder has no config yet, the current folder is copied there first. Choosing the exe directory uses a .arsenal folder beside it.",
     "configDirSaved": "Config folder saved. Restart the app to use it.",
     "browseConfigDir": "Browse config folder path",
     "openConfigDir": "Open config folder path",
@@ -992,7 +996,7 @@
     "iconSaveFailed": "Unable to save icon. Please retry."
   },
   "empty": {
-    "welcomeTitle": "Welcome to SkillsHub!",
+    "welcomeTitle": "Welcome to Arsenal!",
     "welcomeDesc": "No skills found in ~/.agents/skills/. Get started by creating a SKILL.md file there, or add custom scan directories in Settings.",
     "createHint": "Create a skill directory at",
     "goToSettings": "Go to Settings"
@@ -1164,6 +1168,7 @@
     "githubPatSettingsHint": "Open Settings and save a GitHub Personal Access Token to use authenticated direct GitHub requests for this import flow."
   },
   "workflow": {
+    "updateRepositorySkills": "Update repository skills",
     "generateRepositoryNote": "Generate repository notes from README",
     "repositoryReadmeRequired": "No README is available. Import or update the repository documents first.",
     "githubDropHint": "Drop to import GitHub repositories",
@@ -1249,6 +1254,24 @@
     "resumeImport": "Continue import",
     "activityTitle": "Tasks",
     "taskPanel": {
+      "selectTaskNamed": "Select task: {{name}}",
+      "retryTaskNamed": "Retry task: {{name}}",
+      "retryFailed": "Retry failed items",
+      "retryUnfinished": "Retry unfinished items",
+      "processTitle": "Confirm processing",
+      "detailStatus": {
+        "all": "All",
+        "attention": "Needs action",
+        "failed": "Failed",
+        "finished": "Completed"
+      },
+      "searchDetails": "Search names…",
+      "selectVisible": "Select visible items",
+      "processSelected": "Process selected",
+      "retrySelected": "Retry selected",
+      "recheckBeforeSync": "Repositories with failed checks or expired snapshots will be checked again first. Review the new results before syncing.",
+      "reportDetails": "Check details",
+      "executionDetails": "Execution details",
       "tabs": {
         "import": "Skill imports",
         "update": "Skill updates"
@@ -1335,8 +1358,11 @@
     "confirmCheckTitle": "Update skills",
     "confirmFullCheck": "Scan the current skill library and check all source repositories for updates? This may take some time for a large library.",
     "confirmScopedCheck": "Check all repositories in the current result scope again?",
-    "viewLastCheck": "Last results",
-    "startCheck": "Check updates",
+    "viewLastCheck": "View last check results",
+    "viewLastCheckHint": "Open saved check results without checking again. Unavailable until results exist.",
+    "refreshRepositoryInfo": "Refresh repository info",
+    "refreshRepositoryInfoHint": "Refresh repository metadata, star counts and README documents without updating skill files.",
+    "startCheck": "Check skill updates",
     "refreshRepository": "Update repositories",
     "checkTimeUnknown": "Check time unavailable",
     "fullCheckTime": "Full-library check completed",
@@ -1349,6 +1375,9 @@
     },
     "noTasks": "No tasks",
     "stopping": "Stopping",
+    "pauseCheck": "Pause check",
+    "continueCheck": "Continue check",
+    "checkCheckpointHint": "Pauses after the current repository. Unfinished checks can be continued after restarting.",
     "stopTask": "Stop",
     "retryTask": "Retry",
     "stopAllTasks": "Stop all",
@@ -1457,13 +1486,13 @@
   "g": {
     "obsidian": {
       "settings": "Notes",
-      "settingsHint": "Linked note bodies live in Obsidian files, read and saved directly by SkillsHub. Open the vault in Obsidian first. The new-note folder is relative to the vault root; use \\Attachments\\SkillsHub or Attachments/SkillsHub. It is saved as Attachments/SkillsHub.",
+      "settingsHint": "Linked note bodies live in Obsidian files, read and saved directly by Arsenal. Open the vault in Obsidian first. The new-note folder is relative to the vault root; use \\Attachments\\SkillsHub or Attachments/SkillsHub. It is saved as Attachments/SkillsHub.",
       "vaultPath": "Local Obsidian vault directory",
       "noteFolder": "Folder for new notes",
       "chooseVault": "Choose vault",
       "registerProtocol": "Repair links",
       "protocolHint": "Windows releases register or repair skillshub:// on startup; the most recently started release handles links when multiple copies exist. Repair manually if links still fail. Vault paths stay on this device.",
-      "backupHint": "SkillsHub backups retain note links, but exclude Obsidian bodies and local vault paths. Back up your vault separately.",
+      "backupHint": "Arsenal backups retain note links, but exclude Obsidian bodies and local vault paths. Back up your vault separately.",
       "link": "Link Obsidian note",
       "linkHint": "New files copy the current draft; linking an existing file preserves its body. Keys in the property template are updated, while other properties remain. The old internal notebook is retained until explicitly cleared.",
       "create": "Create note",
@@ -1477,7 +1506,7 @@
       "noteName": "Note name",
       "inlineRenameHint": "{{path}}\nClick the title to rename. Enter or click outside to save; Escape to cancel. Save body drafts first.",
       "renameHint": "Keeps the current folder and all note content, and updates the linked path and Obsidian URI. Existing files are never overwritten.",
-      "stableLinkHint": "Stable note links require SkillsHub Link enabled in the corresponding Obsidian vault. SkillsHub can still read, edit and open notes without the plugin.",
+      "stableLinkHint": "Stable note links require Arsenal Link enabled in the corresponding Obsidian vault. Arsenal can still read, edit and open notes without the plugin.",
       "copyStableLink": "Copy link",
       "manageLink": "Manage Obsidian note link",
       "updateProperties": "Update properties",
@@ -1486,7 +1515,7 @@
       "unavailable": "The note is unavailable or its identity properties do not match. Your draft is retained. Check the vault directory or locate the file again.",
       "conflict": "The file changed externally. Saving over it has been blocked.",
       "compare": "Compare content",
-      "draft": "SkillsHub draft",
+      "draft": "Arsenal draft",
       "external": "Current file content",
       "discardDraft": "Discard your draft and load the current file?",
       "useExternal": "Use file version",
@@ -1496,7 +1525,7 @@
       "viewLegacy": "View legacy note",
       "clearLegacy": "Clear legacy note",
       "clearLegacyConfirm": "After checking that the external note is complete, clear the legacy internal note? This cannot be undone.",
-      "unlinkHint": "Unlinking never deletes the Obsidian file. Keep the old internal note or copy the current file body back to SkillsHub.",
+      "unlinkHint": "Unlinking never deletes the Obsidian file. Keep the old internal note or copy the current file body back to Arsenal.",
       "unlinkOnly": "Unlink only",
       "keepInternal": "Copy body and unlink",
       "openDirty": "There is an unsaved draft. Save before opening, or retain the draft and open the file.",
@@ -1505,7 +1534,7 @@
       "setupHint": "Configure your Obsidian vault in Settings first.",
       "propertyTemplate": "Property template",
       "resetTemplate": "Reset template",
-      "templateHint": "Enclose YAML properties in ---. Placeholders: {{noteId}}, {{obsidianUri}}, {{repositoryUid}}, {{skillshubUri}}, {{fullName}}, {{url}}, {{description}}, {{stars}}, {{tags}}, {{categories}}. Use each placeholder as a whole YAML value without quotes; text, numbers and lists are escaped and retain their types. Custom properties are supported. skillshub_schema, skillshub_repository_id and skillshub_uri are maintained by SkillsHub. Linking or explicitly updating properties applies template keys; other existing properties and the body are preserved. Removing a template key does not delete that property from existing files. Note ID, repository ID, navigation links and schema version are protected fields."
+      "templateHint": "Enclose YAML properties in ---. Placeholders: {{noteId}}, {{obsidianUri}}, {{repositoryUid}}, {{skillshubUri}}, {{fullName}}, {{url}}, {{description}}, {{stars}}, {{tags}}, {{categories}}. Use each placeholder as a whole YAML value without quotes; text, numbers and lists are escaped and retain their types. Custom properties are supported. skillshub_schema, skillshub_repository_id and skillshub_uri are maintained by Arsenal. Linking or explicitly updating properties applies template keys; other existing properties and the body are preserved. Removing a template key does not delete that property from existing files. Note ID, repository ID, navigation links and schema version are protected fields."
     },
     "notebook": "Notes",
     "emptyNotebook": "No notes yet",
@@ -1527,7 +1556,7 @@
     "cancel": "Cancel",
     "errors": {
       "operation": "Operation failed. See Updates & activity for details and retry.",
-      "desktopOnly": "This feature requires the SkillsHub desktop app.",
+      "desktopOnly": "This feature requires the Arsenal desktop app.",
       "network": "Network request failed. Check your connection or proxy.",
       "database": "Data operation failed.",
       "configRead": "Could not read settings.",
@@ -1545,7 +1574,7 @@
       "aiIncomplete": "AI response was incomplete. Previous notes were preserved.",
       "stalePreview": "Content changed. Check again.",
       "backup": "Backup operation failed.",
-      "backupFormat": "Unsupported backup or not a SkillsHub backup.",
+      "backupFormat": "Unsupported backup or not a Arsenal backup.",
       "proxy": "Invalid proxy URL.",
       "privateRepo": "Only public repositories are supported.",
       "repositoryChanged": "Repository identity changed. Original collection was preserved.",
@@ -1569,7 +1598,7 @@
       "notebookLinked": "Linked notes must be saved to the Obsidian file.",
       "obsidianOpen": "Unable to open Obsidian. Install it and open this vault first.",
       "protocolRegister": "Failed to register return links. Check system permissions.",
-      "protocolVerify": "The return link handler failed system verification and may have been replaced by another copy. Repair it from the SkillsHub copy you want to use.",
+      "protocolVerify": "The return link handler failed system verification and may have been replaced by another copy. Repair it from the Arsenal copy you want to use.",
       "protocolInstalledOnly": "On macOS, install the application to register return links.",
       "noteRepositoryMissing": "Repository is missing or has not been imported.",
       "noteUriPath": "Obsidian treats # and ^ as document locators. Rename this note manually before linking it.",
@@ -1581,10 +1610,31 @@
     "hint": "One Markdown notebook per repository. Linked notes are edited in the Obsidian file with revision checks. Use unquoted template placeholders.",
     "vault": "Obsidian vault directory",
     "folder": "New note folder",
+    "folderHint": "A path relative to the Obsidian vault directory, for example: 附件/SkillsHub. New notes are saved in this subfolder within the vault.",
     "template": "Property template",
     "browse": "Choose vault directory",
     "backup": "Backups include internal notes and binding identities. Back up external files with your Obsidian vault.",
     "reset": "Reset template",
     "repair": "Repair links"
-  }
+  },
+  "groups": {
+    "detachItem": "Remove from group",
+    "export": "Export group list",
+    "title": "Groups",
+    "create": "New group",
+    "createChild": "New subgroup",
+    "rename": "Rename",
+    "delete": "Delete group",
+    "deleteConfirm": "Delete “{{name}}” and its subgroups? Skill files are kept; only groups and memberships are removed.",
+    "name": "Group name",
+    "unfiled": "Ungrouped",
+    "addSelected": "Add selected skills",
+    "detachSelected": "Remove selected skills from group",
+    "includeChildren": "Include subgroup skills",
+    "expand": "Expand {{name}}",
+    "collapse": "Collapse {{name}}",
+    "expandAll": "Expand all",
+    "collapseAll": "Collapse all",
+    "operationFailed": "Group operation failed. Refresh and try again."
+}
 }

@@ -1,7 +1,9 @@
 @echo off
 setlocal EnableExtensions
 
-set "DEST=%USERPROFILE%\.skillshub"
+set "DEST=%USERPROFILE%\.arsenal"
+rem Let the application migrate existing data before seeding defaults.
+if exist "%USERPROFILE%\.skillshub\" exit /b 0
 set "SRC=%~dp0..\resources\packaged-config"
 if not exist "%SRC%\platform\" set "SRC=%~dp0resources\packaged-config"
 if not exist "%SRC%\platform\" set "SRC=%~dp0packaged-config"

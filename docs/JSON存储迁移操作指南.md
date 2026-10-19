@@ -14,7 +14,7 @@
 在项目根目录运行，路径请替换为实际配置目录：
 
 ```powershell
-python scripts/migrate-sqlite-to-json.py "D:\Example\.skillshub" --offline-confirmed
+python scripts/migrate-sqlite-to-json.py "D:\Example\.arsenal" --offline-confirmed
 ```
 
 `--offline-confirmed` 表示操作者已停止应用，不是工具自动停止应用。脚本不读取系统默认目录，也不自动访问实际用户数据。运行时先获取配置目录中的 `.store-access.lock` 排他锁，再创建 `.json-migration.lock`。新版应用使用同一操作系统锁，避免迁移发布与应用启动并发；遗留迁移标记存在时也拒绝启动。锁文件保留在原处，不能通过删除正在使用的锁文件解除占用。

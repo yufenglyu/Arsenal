@@ -17,6 +17,8 @@ use super::linker::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectionDetail {
     pub id: String,
+    pub parent_id: Option<String>,
+    pub sort_order: i64,
     pub name: String,
     pub description: Option<String>,
     pub created_at: String,
@@ -89,6 +91,8 @@ pub async fn get_collection_detail_impl(
 
     Ok(CollectionDetail {
         id: collection.id,
+        parent_id: collection.parent_id,
+        sort_order: collection.sort_order,
         name: collection.name,
         description: collection.description,
         created_at: collection.created_at,
@@ -1333,4 +1337,9 @@ mod tests {
         );
         assert!(central_dir.join("central-col").join("SKILL.md").exists());
     }
+}
+
+#[tauri::command]
+pub async fn change_collection_group(state: State<'_, AppState>, request: db::collection_tree::CollectionChange) -> Result<Vec<Collection>, String> {
+    db::collection_tree::change(&state.db, request).await
 }

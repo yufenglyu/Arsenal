@@ -33,7 +33,7 @@ coverage/
 .vitest/
 
 # Local databases and app data
-.skillshub/
+.arsenal/
 *.db
 *.db-shm
 *.db-wal
@@ -86,3 +86,12 @@ desktop.ini
 # Local agent instructions may include private workspace notes
 AGENTS.md
 HANDOFF.md
+
+# Legacy data remains private during migration
+.skillshub/
+
+.arsenal-migration.lock
+.arsenal-config-path
+arsenal-config-path
+.skillshub-config-path
+skillshub-config-path

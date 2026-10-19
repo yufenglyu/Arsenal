@@ -1,4 +1,6 @@
 import {RepositoryAddressButton} from "@/components/skill/RepositoryAddressButton";
+import {useCollectionStore} from "@/stores/collectionStore";
+import {collectionMembers,collectionScope,UNFILED_COLLECTION,SKILLS_DRAG,COLLECTION_SOURCE_DRAG} from "@/lib/collectionGroups";
 import { ActionIcon } from "@/components/ui/action-icon";
 import { RepositoryCheckConfirm } from "@/components/skill/RepositoryCheckConfirm";
 import { useTaskQueueStore } from "@/stores/taskQueueStore";
@@ -179,15 +181,26 @@ export function ResourceLibraryView() {
     return () => { active = false; };
   }, [loadResourceLibrary]);
 
+  const groupState=useCollectionStore(s=>s);
+  useEffect(()=>()=>useCollectionStore.setState({selectedSkillIds:[]}),[]);
+  const {collections:groupIndex,currentDetail:groupDetail,loadGroupDetails}=groupState;
+  const groupError=t('groups.operationFailed');
+  useEffect(()=>{void loadGroupDetails().catch(()=>toast.error(groupError));},[groupIndex,groupDetail,loadGroupDetails,groupError]);
+  const visibleSkills = useMemo(() => {
+    const active=groupState.activeCollectionId;
+    if(!active)return skills;
+    const assigned=collectionMembers(groupState.groupDetails,new Set(groupState.collections.map(item=>item.id)));
+    if(active===UNFILED_COLLECTION)return skills.filter(skill=>!assigned.has(skill.id));
+    const members=collectionMembers(groupState.groupDetails,collectionScope(groupState.collections,active,groupState.includeDescendants));
+    return skills.filter(skill=>members.has(skill.id));
+  },[skills,groupState.activeCollectionId,groupState.groupDetails,groupState.collections,groupState.includeDescendants]);
   const folderSplit = useMemo(
     () => splitResourceLibrarySkillsByFolder(skills, resourceLibraryDir),
     [resourceLibraryDir, skills]
   );
 
-  const folderGroupsByPath = useMemo(
-    () => new Map(folderSplit.groups.map((group) => [group.relativePath, group])),
-    [folderSplit.groups]
-  );
+  const scopedFolders = useMemo(()=>splitResourceLibrarySkillsByFolder(visibleSkills,resourceLibraryDir).groups,[visibleSkills,resourceLibraryDir]);
+  const folderGroupsByPath = useMemo(()=>new Map(scopedFolders.map(group=>[group.relativePath,group])),[scopedFolders]);
   useEffect(() => {
     const id = locationParams.get("locate");
     if (!id || isLoading || !locationReady) return;
@@ -248,10 +261,6 @@ export function ResourceLibraryView() {
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
   }, [skills]);
 
-  const visibleSkills = useMemo(
-    () => skills,
-    [skills]
-  );
   const filteredSkills = useMemo(() => {
     return visibleSkills.filter((skill) => {
       if (!matchesTags(skill.tags, selectedTags)) {
@@ -264,7 +273,9 @@ export function ResourceLibraryView() {
     });
   }, [normalizedSearchQuery, selectedTags, visibleSkills, folderSplit.groups, folderNotes, searchScopes]);
   const sortedSkills = useMemo(() => sortBySkillBrowserOrder(filteredSkills, sortField, sortDirection),[filteredSkills,sortField,sortDirection]);
-  const filteredFolders = useMemo(() => sortFoldersBySkillBrowserOrder(folderSplit.groups.filter(group=>group.skills.some(skill=>filteredSkills.some(match=>match.id===skill.id))),sortField,sortDirection),[folderSplit.groups,filteredSkills,sortField,sortDirection]);
+  const filteredFolders = useMemo(() => sortFoldersBySkillBrowserOrder(scopedFolders.filter(group=>group.skills.some(skill=>filteredSkills.some(match=>match.id===skill.id))),sortField,sortDirection),[scopedFolders,filteredSkills,sortField,sortDirection]);
+  const canDetachGroup=!!groupState.activeCollectionId&&groupState.activeCollectionId!==UNFILED_COLLECTION;
+  async function detachSkills(ids:string[]){if(!canDetachGroup)return;try{await groupState.changeGroup({action:'detach',id:groupState.activeCollectionId!,skillIds:ids});}catch{toast.error(t('groups.operationFailed'));}}
 
   const availableInstallAgents = useMemo(
     () => agents.filter(isInstallTargetAgent),
@@ -651,9 +662,9 @@ export function ResourceLibraryView() {
 
 
       <SidebarTagFilter hasSelection={selectedTags.length > 0} onClear={() => setSelectedTags([])}><TagFilters tags={availableTags} selected={selectedTags} onChange={setSelectedTags}/></SidebarTagFilter>
-      <SkillBrowserWorkspace onRefresh={handleRefresh} allowFlatView toolbar={viewControl => <SkillBrowserHeader viewControl={viewControl} title={<div>
+      <SkillBrowserWorkspace key={groupState.activeCollectionId??'all'} onSelectionChange={keys=>{const ids=new Set(keys.filter(key=>key.startsWith('skill:')).map(key=>key.slice(6)));for(const group of filteredFolders)if(keys.includes(`folder:${group.relativePath}`))for(const skill of group.skills)if(filteredSkills.some(item=>item.id===skill.id))ids.add(skill.id);useCollectionStore.setState({selectedSkillIds:[...ids]});}} onDragSkills={(event,ids)=>{event.dataTransfer.setData(SKILLS_DRAG,JSON.stringify(ids));event.dataTransfer.effectAllowed='copyMove';if(groupState.activeCollectionId&&groupState.activeCollectionId!==UNFILED_COLLECTION)event.dataTransfer.setData(COLLECTION_SOURCE_DRAG,groupState.activeCollectionId);}} onRefresh={handleRefresh} onDetachSkills={canDetachGroup ? detachSkills : undefined} toolbar={viewControl => <SkillBrowserHeader viewControl={viewControl} title={<div>
           <div className="flex items-center gap-2">
-            <h1 className="text-sm font-semibold">{t("resource.title")}</h1>
+            <h1 className="text-sm font-semibold">{groupState.activeCollectionId===UNFILED_COLLECTION?t('groups.unfiled'):groupState.collections.find(item=>item.id===groupState.activeCollectionId)?.name??t("resource.title")}</h1>
             <Button
               variant="ghost"
               size="icon"
@@ -724,7 +735,9 @@ export function ResourceLibraryView() {
                       onUpdate: group.skills.some(isSourceBackedSkill)
                         ? () => void handleUpdateFolderSources(group)
                         : undefined,
-                      updateLabel: t("resource.updateAction"),
+                      updateLabel: t("workflow.updateRepositorySkills"),
+                      onRefreshRepository: group.skills.some(skill=>!!resourceSkillSourceRepo(skill)) ? ()=>void useRepositorySyncStore.getState().refreshRepositories([...new Set(group.skills.map(resourceSkillSourceRepo).filter((repo):repo is string=>!!repo))]) : undefined,
+                      onDetachGroup: canDetachGroup ? ()=>void detachSkills(group.skills.map(skill=>skill.id)) : undefined,
                       isUpdating:
                         pendingFolderAction === "update" &&
                         pendingFolderActionKey === group.relativePath,
@@ -764,6 +777,7 @@ export function ResourceLibraryView() {
                     const normalizedSourceRepo = resourceSkillSourceRepo(skill);
                     return {
                       rowKey: skill.id,
+                      onDetachGroup: canDetachGroup ? ()=>void detachSkills([skill.id]) : undefined,
                       batchOperations: {
                         install: async (targets: string[]) => { const result=await installSkill(skill.id,targets,"auto"); await refreshSyncedInstallTargets(); return result; },
                         update: isSourceBackedSkill(skill) ? () => handleUpdateSingleSource(skill) : undefined,

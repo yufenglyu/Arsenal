@@ -12,7 +12,6 @@ import {
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   Loader2,
-  Layers,
   PanelLeft,
   Download,
   Monitor,
@@ -22,6 +21,8 @@ import {
   FolderOpen,
   FolderTree,
   AppWindow,
+  ChevronRight,
+  PackageCheck,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -38,6 +39,8 @@ import { isProjectAgentId } from "@/lib/projectTargets";
 import { useSidebarWidth } from "@/hooks/useSidebarWidth";
 import { SharedHubIcon, SkillRepositoryIcon } from "@/components/skill/SkillActionIcons";
 import { useSidebarStore } from "@/stores/sidebarStore";
+import { ICON_RAIL_WIDTH, ICON_RAIL_BUTTON } from "./iconRail";
+import { CollectionTree } from "@/components/collection/CollectionTree";
 
 // ─── Nav Item ────────────────────────────────────────────────────────────────
 
@@ -81,11 +84,12 @@ function NavItem({
         aria-label={accessibleLabel}
         aria-current={isActive ? "page" : undefined}
         className={cn(
-          "flex items-center w-full rounded-md transition-colors cursor-pointer",
+          "flex items-center rounded-md transition-colors cursor-pointer",
+          expanded ? "w-full" : "mx-auto",
           nested ? "font-normal" : "font-semibold",
           !isActive && "hover:bg-primary/15 hover:text-primary",
           isActive && "bg-hover-bg text-white",
-          expanded ? "gap-2.5 px-2.5 py-1.5 text-sm" : "justify-center py-2 px-1.5 text-sm"
+          expanded ? "gap-2.5 px-2.5 py-1.5 text-sm" : ICON_RAIL_BUTTON
         )}
       >
         <span className="shrink-0">{icon}</span>
@@ -130,6 +134,12 @@ function NavItem({
 // ─── Sidebar ────────────────────────────────────────────────────────────────
 
 export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {}) {
+  const repositoryRegion = useRef<HTMLDivElement>(null);
+  const [repositoryExpanded,setRepositoryExpanded]=useState(true);
+  const [installationCollapsed,setInstallationCollapsed]=usePersistentBoolean("skillshub.sidebar.installationCollapsed",false);
+  const installationExpansionKeys=useExpansionShortcuts(()=>setInstallationCollapsed(false),()=>setInstallationCollapsed(true),true);
+  const [repositoryHeight, setRepositoryHeight] = useState<number | undefined>(()=>{try{const value=Number(localStorage.getItem("skillshub.sidebar.repositoryHeight"));return value>=80?value:undefined;}catch{return undefined;}});
+  function resizeRepository(height:number){const next=Math.max(80,Math.min(Math.max(80,window.innerHeight-240),height));setRepositoryHeight(next);try{localStorage.setItem("skillshub.sidebar.repositoryHeight",String(next));}catch{/* Keep session state. */}}
   const SOFTWARE_COLLAPSED_KEY = "skills-manage:sidebar-software-platforms-collapsed";
   const PROJECTS_COLLAPSED_KEY = "skills-manage:sidebar-project-directories-collapsed";
   const navigate = useNavigate();
@@ -141,7 +151,7 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
   useEffect(() => { void loadScanDirectories(); }, [loadScanDirectories]);
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
 
-  const collections = useCollectionStore((s) => s.collections);
+  const selectGroup = useCollectionStore((s) => s.selectGroup);
   const loadCollections = useCollectionStore((s) => s.loadCollections);
 
   const resourceSkillsCount = useResourceLibraryStore((s) => s.skills.length);
@@ -184,7 +194,7 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
   }, [loadCentralSkills, loadCollections, loadResourceLibrary]);
 
   useEffect(() => {
-    const width = expanded ? sidebarWidth.width : 56;
+    const width = expanded ? sidebarWidth.width : ICON_RAIL_WIDTH;
     document.documentElement.style.setProperty("--app-sidebar-width", `${width}px`);
     return () => {
       document.documentElement.style.removeProperty("--app-sidebar-width");
@@ -225,7 +235,6 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
       isProjectAgentId(a.id) && a.is_enabled
   );
 
-  const isCollectionActive = pathname === "/collections";
   const softwareExpansionKeys = useExpansionShortcuts(() => setSoftwareCollapsed(false), () => setSoftwareCollapsed(true), true);
   const projectExpansionKeys = useExpansionShortcuts(() => setProjectsCollapsed(false), () => setProjectsCollapsed(true), true);
   const themeLabel = t("topBar.cycleTheme", {
@@ -233,9 +242,6 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
   });
   const ThemeIcon = themeMode === "system" ? Monitor : themeMode === "light" ? Sun : Moon;
 
-  function handleCollectionClick() {
-    navigate("/collections");
-  }
 
   function handleResourceContextMenu(event: ReactMouseEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -268,7 +274,7 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
         "relative flex flex-col shrink-0 h-full border-r border-border bg-sidebar text-sidebar-foreground transition-[width] duration-200"
       )}
       style={{
-        width: expanded ? sidebarWidth.width : 56,
+        width: expanded ? sidebarWidth.width : ICON_RAIL_WIDTH,
       }}
       aria-label={t("sidebar.mainNav")}
     >
@@ -280,14 +286,15 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
         )}
       >
         {expanded && (
-          <span className="text-sm font-semibold text-sidebar-primary">
-            {t("app.name")}
-          </span>
+          <div className="flex min-w-0 flex-1 items-center gap-2 pr-2">
+            <img src="/arsenal.svg" alt="" aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="truncate text-sm font-semibold leading-4 text-sidebar-primary">{t("app.name")}</span>
+          </div>
         )}
         <button
           onClick={() => setExpanded(!expanded)}
           className={cn(
-            "p-1 rounded-md transition-colors cursor-pointer",
+            ICON_RAIL_BUTTON,
             "text-muted-foreground hover:text-foreground hover:bg-muted/60"
           )}
           aria-label={expanded ? t("sidebar.collapseSidebar") : t("sidebar.expandSidebar")}
@@ -298,36 +305,38 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
       </div>
 
       {/* Scrollable nav items */}
-      <div className="flex-1 overflow-y-auto py-2 px-1.5 space-y-0.5">
+      <div className={cn("flex-1 overflow-y-auto py-2 space-y-0.5", expanded ? "px-1.5" : "px-0")}>
         {/* Skill Repository */}
-        <NavItem
+        {expanded ? <>
+          <div ref={repositoryRegion} className="overflow-y-auto" style={{height:repositoryExpanded?repositoryHeight:undefined,maxHeight:"calc(100vh - 240px)"}} data-testid="repository-tree-region"><CollectionTree onExpandedChange={setRepositoryExpanded} count={resourceSkillsCount} onExport={()=>void handleExportDirectoryList()}/></div>
+          <div role="separator" tabIndex={0} aria-label={t("sidebar.resizeRepositoryHeight")} aria-orientation="horizontal" aria-valuemin={80} aria-valuemax={Math.max(80,window.innerHeight-240)} aria-valuenow={repositoryHeight??repositoryRegion.current?.clientHeight??80} className={cn(!repositoryExpanded&&"hidden", "h-1.5 cursor-row-resize touch-none border-b border-border hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+            onPointerDown={event=>{event.preventDefault();event.currentTarget.setPointerCapture(event.pointerId);}}
+            onPointerMove={event=>{if(event.currentTarget.hasPointerCapture(event.pointerId)&&repositoryRegion.current)resizeRepository(event.clientY-repositoryRegion.current.getBoundingClientRect().top);}}
+            onPointerUp={event=>{if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);}}
+            onKeyDown={event=>{if(event.key==="ArrowUp"||event.key==="ArrowDown"){event.preventDefault();resizeRepository((repositoryHeight??repositoryRegion.current?.clientHeight??160)+(event.key==="ArrowDown"?16:-16));}}}/>
+        </> : <NavItem
           label={t("sidebar.resourceLibrary")}
-          isActive={pathname === "/resources" || pathname === "/"}
-          onClick={() => navigate("/resources")}
+          isActive={(pathname === "/resources" || pathname === "/")}
+          onClick={() => {selectGroup(null);navigate("/resources");}}
           onContextMenu={handleResourceContextMenu}
           icon={<SkillRepositoryIcon className="size-4" />}
           expanded={expanded}
           count={resourceSkillsCount}
-        />
-
-        {/* Skill Bundles */}
-        <NavItem
-          label={t("sidebar.collections")}
-          isActive={isCollectionActive}
-          onClick={handleCollectionClick}
-          icon={<Layers className="size-4" />}
-          expanded={expanded}
-          count={collections.length}
-        />
+        />}
 
         {/* Divider */}
-        <div className="border-t border-sidebar-border/70 my-2" />
+        <div className={cn("my-2", !expanded && "border-t border-sidebar-border/70")} />
 
-        {/* Shared Hub — same section shell as platforms / projects */}
+        <section aria-label={t("sidebar.skillInstallation")}>
+        {expanded && <button type="button" aria-expanded={!installationCollapsed} onKeyDown={installationExpansionKeys} onClick={()=>setInstallationCollapsed(!installationCollapsed)} className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-sm font-semibold hover:bg-primary/10 hover:text-primary">
+          <PackageCheck className="size-3.5 shrink-0"/><span>{t("sidebar.skillInstallation")}</span>
+        </button>}
+        {(!expanded || !installationCollapsed)&&<div className="space-y-0.5">
+        {/* Installation targets */}
         {expanded ? (
           <div
             data-testid="central-skills-heading"
-            className="flex items-center justify-between gap-1 rounded-lg border border-sidebar-border/60 bg-background/35 px-1 py-1"
+            className="flex items-center justify-between gap-1 py-1"
           >
             <button
               type="button"
@@ -336,13 +345,13 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
               aria-label={t("sidebar.centralSkills")}
               title={t("sidebar.centralSkills")}
               className={cn(
-                "flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-sm font-semibold transition-colors",
+                "flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-2 py-1 text-sm font-semibold transition-colors",
                 pathname === "/central"
                   ? "bg-hover-bg text-white"
                   : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
               )}
             >
-              <SharedHubIcon className="size-4 shrink-0" />
+              <SharedHubIcon className="size-3.5 shrink-0" />
               <span className="truncate min-w-0 flex-1 text-left">{t("sidebar.centralSkills")}</span>
               {centralSkillsCount > 0 && (
                 <span
@@ -374,17 +383,18 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
           <PlatformMenu onAdded={()=>{setSoftwareCollapsed(false);}}><div
             onKeyDown={softwareExpansionKeys}
             data-testid="software-platform-heading"
-            className="flex items-center justify-between gap-1 rounded-lg border border-sidebar-border/60 bg-background/35 px-1 py-1"
+            className="flex items-center justify-between gap-1 py-1"
           >
             <button
               type="button"
               onClick={() => setSoftwareCollapsed(!softwareCollapsed)}
               aria-expanded={!softwareCollapsed}
-              className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-md pl-1 pr-2 py-1 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
             >
+              <ChevronRight className={cn("size-3 shrink-0",!softwareCollapsed&&"rotate-90")}/>
               <AppWindow
                 data-testid="software-platform-heading-icon"
-                className="size-4 shrink-0"
+                className="size-3.5 shrink-0"
               />
               <span className="truncate text-left text-sm font-semibold">
                 {t("sidebar.softwarePlatforms")}
@@ -405,14 +415,14 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
           </div>
         ) : (
           <>
-            {!softwareCollapsed && platformAgents.length > 0 && (
-              <div onKeyDown={softwareExpansionKeys} className={expanded ? "ml-3 border-l border-sidebar-border/70 pl-2" : ""}>
+            {(!expanded || !softwareCollapsed) && platformAgents.length > 0 && (
+              <div onKeyDown={softwareExpansionKeys} className={expanded ? "ml-6 border-l border-sidebar-border/70 pl-2" : ""}>
                 {platformAgents.map((agent) => (
                   <PlatformMenu key={agent.id} platform={agent}><NavItem nested
                     label={agent.display_name}
                     isActive={pathname === `/platform/${encodeURIComponent(agent.id)}`}
                     onClick={() => navigate(`/platform/${encodeURIComponent(agent.id)}`)}
-                    icon={<PlatformIcon agentId={agent.id} brand displayName={agent.display_name} className={expanded ? "size-[1em]" : "size-5"} size={expanded ? 14 : 20} />}
+                    icon={<PlatformIcon agentId={agent.id} brand displayName={agent.display_name} className={expanded ? "size-[1em]" : "size-4"} size={expanded ? 14 : 16} />}
                     expanded={expanded}
                     count={skillsByAgent[agent.id] ?? 0}
                     status={{
@@ -433,15 +443,15 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
               <ProjectDirectoryMenu onAdded={() => { setProjectsCollapsed(false); }}><div
                 onKeyDown={projectExpansionKeys}
                 data-testid="project-directories-heading"
-                className="flex items-center justify-between gap-1 rounded-lg border border-sidebar-border/60 bg-background/35 px-1 py-1"
+                className="flex items-center justify-between gap-1 py-1"
               >
                 <button
                   type="button"
                   onClick={() => setProjectsCollapsed(!projectsCollapsed)}
                   aria-expanded={!projectsCollapsed}
-                  className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+                  className="flex min-w-0 flex-1 items-center gap-2 rounded-md pl-1 pr-2 py-1 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
                 >
-                  <FolderTree className="size-4 shrink-0" />
+                  <ChevronRight className={cn("size-3 shrink-0",!projectsCollapsed&&"rotate-90")}/><FolderTree className="size-3.5 shrink-0" />
                   <span className="truncate text-left text-sm font-semibold">
                     {t("sidebar.projectDirectories")}
                   </span><span className="ml-auto min-w-7 text-center text-xs tabular-nums">{projectAgents.length}</span>
@@ -450,8 +460,8 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
             ) : (
               <div className="border-t border-sidebar-border/40 my-1.5" />
             )}
-            {!projectsCollapsed && projectAgents.length > 0 && (
-              <div onKeyDown={projectExpansionKeys} className={expanded ? "ml-3 border-l border-sidebar-border/70 pl-2" : ""}>
+            {(!expanded || !projectsCollapsed) && projectAgents.length > 0 && (
+              <div onKeyDown={projectExpansionKeys} className={expanded ? "ml-6 border-l border-sidebar-border/70 pl-2" : ""}>
                 {projectAgents.map((agent) => (
                   <ProjectDirectoryMenu key={agent.id} agentId={agent.id}><NavItem nested
                     key={agent.id}
@@ -467,15 +477,16 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
             )}
           </>
         )}
-
+        </div>}
+        </section>
       </div>
 
       <div id="sidebar-tag-filter" className={cn("shrink-0", !expanded && "hidden")} />
 
       <div
         className={cn(
-          "flex h-10 shrink-0 items-center border-t border-border",
-          expanded ? "gap-1 px-1.5" : "justify-center"
+          "flex shrink-0 items-center border-t border-border",
+          expanded ? "h-10 gap-1 px-1.5" : "flex-col gap-2 px-1 py-2"
         )}
       >
         <button
@@ -483,7 +494,7 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
           onClick={cycleThemeMode}
           title={themeLabel}
           aria-label={themeLabel}
-          className={cn("inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/15 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", expanded ? "size-8" : "size-6")}
+          className={cn(ICON_RAIL_BUTTON, "text-muted-foreground")}
         >
           <ThemeIcon className="size-4" />
         </button>
@@ -494,8 +505,7 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
           aria-current={(settingsOpen || pathname === "/settings") ? "page" : undefined}
           onClick={() => navigate("/settings")}
           className={cn(
-            "inline-flex shrink-0 items-center justify-center rounded-md transition-colors hover:bg-primary/15 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            expanded ? "size-8" : "size-6",
+            ICON_RAIL_BUTTON,
             (settingsOpen || pathname === "/settings") ? "bg-primary/15 text-primary" : "text-muted-foreground"
           )}
         >

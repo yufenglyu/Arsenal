@@ -142,8 +142,8 @@ function Assert-Compatible-AppIdentity {
   if ($tauri.identifier -ne "com.iamzhihuix.skillsmanage") {
     throw "Refusing to package: Tauri identifier changed. Keeping com.iamzhihuix.skillsmanage preserves existing app data."
   }
-  if ($tauri.productName -ne "SkillsHub") {
-    throw "Refusing to package: productName must remain SkillsHub. Keep the identifier and upgrade code stable for older installs."
+  if ($tauri.productName -ne "Arsenal") {
+    throw "Refusing to package: productName must remain Arsenal. Keep the identifier and upgrade code stable for older installs."
   }
   if ($tauri.bundle.windows.wix.upgradeCode -ne "28d41c68-f4a4-5134-b959-34babea58f7f") {
     throw "Refusing to package: Windows Wix upgradeCode changed. Keeping it preserves MSI upgrades from older versions."
@@ -151,10 +151,10 @@ function Assert-Compatible-AppIdentity {
 
   $pathUtils = Read-TextFile (Join-Path $Root "src-tauri/src/path_utils.rs")
   $lib = Read-TextFile (Join-Path $Root "src-tauri/src/lib.rs")
-  if ($pathUtils -notmatch 'join\("\.skillshub"\)' -or $pathUtils -notmatch 'legacy_app_data_dir' -or
+  if ($pathUtils -notmatch 'join\("\.arsenal"\)' -or $pathUtils -notmatch 'legacy_app_data_dir' -or
       $lib -notmatch 'check_storage_migration' -or $lib -notmatch 'storage::store::Store::open' -or
       -not (Test-Path (Join-Path $Root 'scripts/migrate-sqlite-to-json.py'))) {
-    throw "Refusing to package: preserve the .skillshub location, JSON store startup, and explicit legacy migration support."
+    throw "Refusing to package: preserve the .arsenal location, JSON store startup, and explicit legacy migration support."
   }
 }
 
@@ -173,7 +173,7 @@ function Update-VersionFiles {
 
   Replace-Text `
     -Path (Join-Path $Root "src-tauri/Cargo.toml") `
-    -Pattern '(?ms)(\[package\]\s+name = "skillshub"\s+)version = "[^"]+"' `
+    -Pattern '(?ms)(\[package\]\s+name = "arsenal"\s+)version = "[^"]+"' `
     -Replacement "`${1}version = `"$NextVersion`""
 
   Replace-Text `
@@ -262,14 +262,14 @@ function Copy-WindowsAssets {
     $msi = $msiCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
   }
   Write-Host "Using MSI: $($msi.FullName) (LastWriteTime $($msi.LastWriteTime))" -ForegroundColor DarkGray
-  Copy-Item $msi.FullName (Join-Path $OutDir "skillshub_${NextVersion}_windows_x64.msi") -Force
+  Copy-Item $msi.FullName (Join-Path $OutDir "arsenal_${NextVersion}_windows_x64.msi") -Force
 
-  $exe = Join-Path $targetRoot "skillshub.exe"
+  $exe = Join-Path $targetRoot "arsenal.exe"
   $configDir = Join-Path $Root "src-tauri/resources/packaged-config"
   New-SkillshubPortableZip `
     -ExePath $exe `
     -ConfigDir $configDir `
-    -ZipPath (Join-Path $OutDir "skillshub_${NextVersion}_windows_x64.zip")
+    -ZipPath (Join-Path $OutDir "arsenal_${NextVersion}_windows_x64.zip")
 }
 
 function Invoke-PreparePackagedConfig {
@@ -280,7 +280,7 @@ function Invoke-PreparePackagedConfig {
   Write-Host ">> cargo run --manifest-path $manifest --bin prepare_config_dir --release --features prepare-config -- $dest" -ForegroundColor Cyan
   & cargo run --manifest-path $manifest --bin prepare_config_dir --release --features prepare-config -- $dest
   if ($LASTEXITCODE -ne 0) {
-    throw "Failed to prepare default .skillshub config directory"
+    throw "Failed to prepare default .arsenal config directory"
   }
 }
 
@@ -303,9 +303,9 @@ function New-SkillshubPortableZip {
   $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("skillshub-portable-" + [guid]::NewGuid().ToString("n"))
   New-Item -ItemType Directory -Force -Path $stage | Out-Null
   try {
-    Copy-Item $ExePath (Join-Path $stage "skillshub.exe") -Force
-    Copy-Item $ConfigDir (Join-Path $stage ".skillshub") -Recurse -Force
-    $keep = Join-Path $stage ".skillshub/.gitkeep"
+    Copy-Item $ExePath (Join-Path $stage "arsenal.exe") -Force
+    Copy-Item $ConfigDir (Join-Path $stage ".arsenal") -Recurse -Force
+    $keep = Join-Path $stage ".arsenal/.gitkeep"
     if (Test-Path $keep) {
       Remove-Item $keep -Force
     }
@@ -330,10 +330,10 @@ function New-SkillshubPortableZip {
 
 function Invoke-CleanArtifacts {
   param([string]$Root)
-# Safety: refuse to run outside the SkillsHub repo
+# Safety: refuse to run outside the Arsenal repo
 if (-not ((Test-Path (Join-Path $Root 'package.json')) -and (Test-Path (Join-Path $Root 'src-tauri\Cargo.toml')))) {
     Write-Host "ERROR: package.json / src-tauri/Cargo.toml not found under $Root"
-    Write-Host "       This script must run inside the SkillsHub repository."
+    Write-Host "       This script must run inside the Arsenal repository."
     exit 1
 }
 

@@ -1,9 +1,9 @@
 {
   "id": "skillshub-link",
-  "name": "SkillsHub Link",
+  "name": "Arsenal Link",
   "version": "0.2.0",
   "minAppVersion": "1.8.7",
-  "description": "Open SkillsHub notes by stable UUID after renaming or moving files.",
-  "author": "SkillsHub",
+  "description": "Open Arsenal notes by stable UUID after renaming or moving files.",
+  "author": "Arsenal",
   "isDesktopOnly": true
 }

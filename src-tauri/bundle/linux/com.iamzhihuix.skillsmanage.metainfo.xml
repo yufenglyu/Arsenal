@@ -3,13 +3,13 @@
   <id>com.iamzhihuix.skillsmanage</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>Apache-2.0</project_license>
-  <name>SkillsHub</name>
-  <summary>AI Agent Skills Hub</summary>
+  <name>Arsenal</name>
+  <summary>AI tools and capabilities management</summary>
   <description>
     <p>Manage resource libraries, central skills, platform installs, collections, and GitHub skill imports from a local-first Tauri desktop app.</p>
   </description>
   <launchable type="desktop-id">skills-manage.desktop</launchable>
-  <url type="homepage">https://github.com/yufenglyu/skillshub</url>
+  <url type="homepage">https://github.com/yufenglyu/Arsenal</url>
   <developer id="io.github.yufenglyu">
     <name>yufenglyu</name>
   </developer>
@@ -18,9 +18,11 @@
     <category>Utility</category>
   </categories>
   <provides>
-    <binary>skillshub</binary>
+    <binary>arsenal</binary>
   </provides>
   <releases>
+    <release version="1.3.0" date="2026-10-19"/>
+
     <release version="1.2.0" date="2026-10-10"/>
 
     <release version="1.1.1" date="2026-09-23"/>

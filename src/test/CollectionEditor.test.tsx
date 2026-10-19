@@ -20,6 +20,7 @@ const mockUseCollectionStore = vi.mocked(useCollectionStore);
 function buildStoreState(overrides = {}) {
   return {
     collections: [],
+    activeCollectionId:null, groupDetails:[], selectedSkillIds:[], includeDescendants:true, selectGroup:vi.fn(), loadGroupDetails:vi.fn().mockResolvedValue(undefined), changeGroup:vi.fn().mockResolvedValue(undefined),
     currentDetail: null,
     isLoading: false,
     isLoadingDetail: false,
@@ -68,7 +69,7 @@ describe("CollectionEditor", () => {
 
   it("renders create mode when no collection is passed", () => {
     renderEditor({ collection: null });
-    expect(screen.getByText(/新建合集/i)).toBeInTheDocument();
+    expect(screen.getByText(/新建分组/i)).toBeInTheDocument();
   });
 
   it("renders edit mode when a collection is passed", () => {

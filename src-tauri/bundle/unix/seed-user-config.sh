@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copy the packaged default .skillshub tree into the installing user's home.
+# Copy the packaged default .arsenal tree into the installing user's home.
 # Existing user data is left untouched; the app initializes JSON under its lock.
 set -eu
 
@@ -12,6 +12,10 @@ esac
 find_src() {
   script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
   for candidate in \
+    "/usr/lib/arsenal/packaged-config" \
+    "/usr/lib/Arsenal/packaged-config" \
+    "/usr/lib/arsenal/resources/packaged-config" \
+    "/usr/lib/Arsenal/resources/packaged-config" \
     "/usr/share/skillshub/packaged-config" \
     "/usr/lib/skillshub/packaged-config" \
     "/usr/lib/SkillsHub/packaged-config" \
@@ -67,12 +71,12 @@ resolve_dest() {
     target_user=$(lookup_install_user || true)
     if [ -z "$target_user" ]; then
       # Package managers often run as root without SUDO_USER; skip rather than
-      # writing into /root. First launch still seeds ~/.skillshub.
+      # writing into /root. First launch still seeds ~/.arsenal.
       return 1
     fi
     home=$(lookup_home "$target_user")
     if [ -n "$home" ]; then
-      printf '%s\n' "$home/.skillshub"
+      printf '%s\n' "$home/.arsenal"
       return 0
     fi
     return 1
@@ -81,7 +85,7 @@ resolve_dest() {
   if [ -z "${HOME:-}" ]; then
     return 1
   fi
-  printf '%s\n' "$HOME/.skillshub"
+  printf '%s\n' "$HOME/.arsenal"
 }
 
 copy_missing() {
@@ -103,6 +107,7 @@ copy_missing() {
 
 src=$(find_src) || exit 0
 dest=$(resolve_dest) || exit 0
+[ ! -d "$(dirname "$dest")/.skillshub" ] || exit 0
 copy_missing "$src" "$dest"
 
 if [ "$(id -u)" -eq 0 ]; then

@@ -588,25 +588,25 @@ describe("settingsStore", () => {
   });
 
   it("loadConfigDir reads the current config folder", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce("/Users/test/.skillshub");
+    vi.mocked(invoke).mockResolvedValueOnce("/Users/test/.arsenal");
 
     await useSettingsStore.getState().loadConfigDir();
 
     expect(invoke).toHaveBeenCalledWith("get_app_data_dir");
-    expect(useSettingsStore.getState().configDir).toBe("/Users/test/.skillshub");
+    expect(useSettingsStore.getState().configDir).toBe("/Users/test/.arsenal");
     expect(useSettingsStore.getState().isLoadingConfigDir).toBe(false);
   });
 
   it("updateConfigDir persists the config folder", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce("D:/Apps/SkillsHub/.skillshub");
+    vi.mocked(invoke).mockResolvedValueOnce("D:/Apps/SkillsHub/.arsenal");
 
     const updated = await useSettingsStore.getState().updateConfigDir("D:/Apps/SkillsHub");
 
     expect(invoke).toHaveBeenCalledWith("update_app_data_dir", {
       path: "D:/Apps/SkillsHub",
     });
-    expect(updated).toBe("D:/Apps/SkillsHub/.skillshub");
-    expect(useSettingsStore.getState().configDir).toBe("D:/Apps/SkillsHub/.skillshub");
+    expect(updated).toBe("D:/Apps/SkillsHub/.arsenal");
+    expect(useSettingsStore.getState().configDir).toBe("D:/Apps/SkillsHub/.arsenal");
   });
 });
 

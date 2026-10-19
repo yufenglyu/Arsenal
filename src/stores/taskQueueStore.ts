@@ -279,7 +279,13 @@ export const useTaskQueueStore = create<State>()(
         tasks: [
           ...s.tasks.filter(t => t.status !== "success" && !t.clearRequested),
           ...s.tasks.filter((t) => t.status === "success").slice(-100),
-        ].map(task => ({...task, importProgress: undefined})),
+        ].map(task => ({...task, importProgress: undefined, steps: task.steps.map(step => {
+          if (step.command !== "preview_source_backed_resource_repository_updates" || !step.result) return step;
+          // Coverage is the whole library for every repository. The report store
+          // persists it once; duplicating it in each checkpoint exhausts WebView storage.
+          const {coverage: _coverage, ...result} = step.result as Record<string, unknown>;
+          return {...step, result};
+        })})),
       }),
       merge: (persisted, current) => {
         const tasks = (persisted as { tasks?: BackgroundTask[] })?.tasks ?? [];

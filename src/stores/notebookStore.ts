@@ -1,3 +1,4 @@
+import { openInFileManager } from "@/lib/openPath";
 import { create } from "zustand";
 import { invoke, listen, isTauriRuntime } from "@/lib/tauri";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -37,6 +38,7 @@ interface NotebookState {
   watchNotebook: (onChange: () => void) => Promise<() => void>;
   visit: (url: string) => Promise<void>;
   saveConfig: (vaultPath: string, folder: string, template: string) => Promise<boolean>;
+  openVault: (path: string) => Promise<void>;
   chooseVault: () => Promise<string | null>;
   registerProtocol: () => Promise<void>;
   notebookNavigation: (navigate: (uid: string) => Promise<void>) => Promise<() => void>;
@@ -60,6 +62,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => {
       return (await task(async () => { await invoke("save_internal_notebook", { id, body, expectedBody }); await get().load(); return true; })) === true;
     },
     chooseNotebook: async () => task(async () => { const path = await open({ multiple: false, filters: [{ name: "Markdown", extensions: ["md"] }] }); return typeof path === "string" ? path : null; }),
+    openVault: async path => { await task(() => openInFileManager(path)); },
     chooseVault: async () => task(async () => { const path = await open({ directory: true, multiple: false }); return typeof path === "string" ? path : null; }),
     inspectNotebook: path => task(() => invoke<NotebookFile>("inspect_notebook", { path })),
     previewNotebookProperties: id => task(() => invoke<string>("preview_notebook_properties", { id })),

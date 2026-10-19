@@ -1,3 +1,4 @@
+import { HintIcon } from "@/components/ui/hint-icon";
 import { NotebookSettings } from "@/components/notebook/NotebookSettings";
 import { ActionIcon } from "@/components/ui/action-icon";
 import { PlatformIcon } from "@/components/platform/PlatformIcon";
@@ -6,7 +7,7 @@ import { X } from "lucide-react";
 import { AiPromptSettings } from "@/components/settings/AiPromptSettings";
 import { useCollectionStore } from "@/stores/collectionStore";
 import { ChangeEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Trash2, Pencil, Loader2, FolderOpen, AppWindow, Info, Database, Globe, Bot, MessageSquareText, ChevronDown, ChevronRight, KeyRound, Download, Upload, RefreshCw, ExternalLink, CircleHelp, Save, Keyboard, RotateCcw, Plug } from "lucide-react";
+import { Plus, Trash2, Pencil, Loader2, FolderOpen, AppWindow, Info, Database, Globe, Bot, MessageSquareText, ChevronDown, ChevronRight, KeyRound, Download, Upload, RefreshCw, ExternalLink, Save, Keyboard, RotateCcw, Plug } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
@@ -47,31 +48,14 @@ import { useShortcutStore } from "@/stores/shortcutStore";
 
 // ─── App constants ────────────────────────────────────────────────────────────
 
-export const APP_VERSION = "1.2.0";
-const CONFIG_DIR_FALLBACK = "~/.skillshub";
+export const APP_VERSION = "1.3.0";
+const CONFIG_DIR_FALLBACK = "~/.arsenal";
 const COMPLETE_BACKUP_OPTIONS: BackupOptions = {
   includeResourceLibrary: true,
   includeCentralLibrary: false,
   includeAppConfig: true,
   includeInstallations: true,
 };
-
-function HintIcon({ text, className }: { text: string; className?: string }) {
-  return (
-    <span
-      tabIndex={0}
-      title={text}
-      aria-label={text}
-      className={cn(
-        "inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        className
-      )}
-    >
-      <CircleHelp className="size-4" />
-    </span>
-  );
-}
-
 
 interface DirectoryPathFieldProps {
   id: string;
@@ -605,7 +589,7 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
       configDir
         ? formatPathForDisplay(configDir)
         : homeDir
-          ? joinPathForDisplay(homeDir, ".skillshub")
+          ? joinPathForDisplay(homeDir, ".arsenal")
           : CONFIG_DIR_FALLBACK,
     [configDir, homeDir]
   );
@@ -1163,7 +1147,6 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
       {/* Content */}
       <div className="flex-1 overflow-auto p-4 space-y-4">
 
-        <NotebookSettings />
         {/* Section 1: Path settings */}
         <Card>
           <details className="group/settings-section">
@@ -1282,6 +1265,8 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
           onRefreshLocations={handleRefreshPlatformsAndProjects}
           isRefreshingLocations={isRefreshingLocations || isRefreshingSkills}
         />
+
+        <NotebookSettings />
 
         <ShortcutsSettingsCard />
 
@@ -1669,16 +1654,25 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
 
         {/* ── Section 5: About ────────────────────────────────────────────── */}
         <Card>
+          <details className="group/settings-section">
+          <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
           <CardHeader>
-            <CardTitle className="font-semibold">{t("settings.about")}</CardTitle>
+            <div className="flex items-center gap-2">
+              <Info className="size-[1em] shrink-0 text-muted-foreground" />
+              <CardTitle role="heading" aria-level={2} className="flex items-center gap-2">
+                {t("settings.about")}
+                <ChevronRight className="size-[1em] shrink-0 group-open/settings-section:rotate-90" />
+              </CardTitle>
+            </div>
           </CardHeader>
-          <CardContent>
+          </summary>
+          <CardContent className="pt-4">
             <div className="space-y-3">
               <div className="flex items-center gap-3">
                 <Info className="size-4 text-muted-foreground shrink-0" />
                 <div>
                   <div className="text-xs text-muted-foreground">{t("settings.appVersion")}</div>
-                  <div className="text-sm font-medium">SkillsHub v{APP_VERSION}</div>
+                  <div className="text-sm font-semibold">{t("app.name")} v{APP_VERSION}</div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -1760,6 +1754,7 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
               </div>
             </div>
           </CardContent>
+          </details>
         </Card>
       </div>
 

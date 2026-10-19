@@ -70,7 +70,7 @@ const end = Buffer.alloc(22);
 end.writeUInt32LE(0x06054b50); end.writeUInt16LE(3, 8); end.writeUInt16LE(3, 10);
 end.writeUInt32LE(central.length, 12); end.writeUInt32LE(offset, 16);
 mkdirSync(output, { recursive: true });
-const dest = join(output, `skillshub_${app.version}_obsidian-plugin.zip`);
+const dest = join(output, `arsenal_${app.version}_obsidian-plugin.zip`);
 const temp = `${dest}.${process.pid}.tmp`;
 try {
   writeFileSync(temp, Buffer.concat([...chunks, central, end]));

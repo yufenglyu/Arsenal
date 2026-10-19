@@ -1,4 +1,3 @@
-import { NotebookPen } from "lucide-react";
 import { ActionIcon } from "@/components/ui/action-icon";
 import { useEffect, useRef, useState } from "react";
 import { useRepositoryDocumentStore } from "@/stores/repositoryDocumentStore";
@@ -55,7 +54,7 @@ export function FolderNotesEditor({ skillIds, directory }: { skillIds: string[];
         </p>
       )}
       <label className="block text-xs text-muted-foreground">
-        <span className="mb-3 flex items-center gap-2 text-sm font-semibold"><NotebookPen className="size-4 shrink-0" aria-hidden="true"/>{t("workflow.folderNotes")}</span>
+        <span className="mb-3 flex items-center gap-2 text-sm font-semibold"><ActionIcon action="remark"/>{t("workflow.folderNotes")}</span>
         <Textarea
           className="mt-0"
           value={value}

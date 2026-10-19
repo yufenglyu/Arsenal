@@ -1,7 +1,6 @@
-import {RepositoryAddressButton} from "./RepositoryAddressButton";
+import {StatusBarSlot} from "@/components/layout/StatusBarSlot";
 import { useNotebookStore } from "@/stores/notebookStore";
 import { RepositoryNotebook } from "@/components/notebook/RepositoryNotebook";
-import { BookOpen } from "lucide-react";
 import { RepositoryDocument } from "./RepositoryDocument";
 import { useRepositoryDocumentStore } from "@/stores/repositoryDocumentStore";
 import { ActionIcon } from "@/components/ui/action-icon";
@@ -10,7 +9,7 @@ import { Link, useLocation } from "react-router-dom";
 import { buildMembershipInstallSummary } from "@/lib/installSummary";
 import { useExpansionShortcuts } from "@/hooks/useExpansionShortcuts";
 import { useConfiguredHotkey } from "@/hooks/useConfiguredHotkey";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelRight, FolderOpen, List, FolderTree, Info, ChevronRight } from "lucide-react";
 import { SkillBrowserTable, InstallSummaryCell, type SkillBrowserTableProps, type FolderTableItem, type SkillTableItem } from "./SkillBrowserTable";
@@ -19,9 +18,10 @@ import { skillSourceLinks } from "@/lib/skillSourceLinks";
 import { Button } from "@/components/ui/button";
 import { useSkillTableColumns } from "@/hooks/useSkillTableColumns";
 import { cn } from "@/lib/utils";
+import { ICON_RAIL_WIDTH, ICON_RAIL_BUTTON } from "@/components/layout/iconRail";
 
 type Tab = "overview" | "document" | "notebook";
-type Props = Omit<SkillBrowserTableProps, "kind" | "visibleColumns"> & { storageKey: string; searchActive?: boolean; agentId?: string; loading?: boolean; toolbar?: ReactNode | ((viewControl: ReactNode) => ReactNode); onRefresh?: () => void | Promise<unknown>; collectionsMode?: boolean; allowFlatView?: boolean };
+type Props = Omit<SkillBrowserTableProps, "kind" | "visibleColumns"> & { storageKey: string; searchActive?: boolean; agentId?: string; loading?: boolean; toolbar?: ReactNode | ((viewControl: ReactNode) => ReactNode); onRefresh?: () => void | Promise<unknown>; collectionsMode?: boolean; allowFlatView?: boolean; forceFlat?: boolean };
 function readPreference<T>(key: string, fallback: T): T {
   try { return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback; } catch { return fallback; }
 }
@@ -35,14 +35,15 @@ function readWidth(): number {
 }
 function writePreference(key: string, value: unknown) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* Keep in-memory state. */ } }
 
-export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], searchActive = false, agentId, loading = false, toolbar, collectionsMode = false, allowFlatView = true, onRefresh, ...tableProps }: Props) {
+export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], searchActive = false, agentId, loading = false, toolbar, collectionsMode = false, allowFlatView = true, forceFlat = false, onRefresh, ...tableProps }: Props) {
   const { t } = useTranslation();
+  const statusSlot = useContext(StatusBarSlot);
   const { pathname } = useLocation();
   const notebooks = useNotebookStore(state => state.rows);
   useEffect(() => { void useNotebookStore.getState().load(); }, []);
   const key = `skillshub.browser.${storageKey}.${agentId ?? ""}`;
   const [flatPreference, setFlatPreference] = useState(() => readPreference(`${key}.flat`, false));
-  const flat = allowFlatView && flatPreference;
+  const flat = forceFlat || (allowFlatView && flatPreference);
   const scrollPositions = useRef<{key: string; tree?: number; flat?: number}>({key});
   const pendingScroll = useRef<number | null>(null);
   const switchView = () => {
@@ -67,7 +68,8 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
     return () => window.removeEventListener("skillshub-open-notebook", open);
   }, []);
   const [width, setWidth] = useState(readWidth);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, updateCollapsed] = useState(()=>readPreference("skillshub.browser.collapsed",false));
+  const setCollapsed = (value:boolean) => {updateCollapsed(value);writePreference("skillshub.browser.collapsed",value);};
   const root = useRef<HTMLDivElement>(null);
   const listScroll = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -153,19 +155,19 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
   const highlightedSkillKey = skills.find(s => s.highlighted)?.rowKey;
   const highlightedFolderKey = folders.find(f => f.highlighted)?.key;
   useEffect(() => {
-    if (highlightedSkillKey) { setSelectedRowKeys([`skill:${highlightedSkillKey}`]); setSelected({kind:"skill",key:highlightedSkillKey}); setCollapsed(false); }
-    else if (highlightedFolderKey) { setSelectedRowKeys([`folder:${highlightedFolderKey}`]); setSelected({kind:"folder",key:highlightedFolderKey}); setCollapsed(false); }
+    if (highlightedSkillKey) { setSelectedRowKeys([`skill:${highlightedSkillKey}`]); setSelected({kind:"skill",key:highlightedSkillKey}); }
+    else if (highlightedFolderKey) { setSelectedRowKeys([`folder:${highlightedFolderKey}`]); setSelected({kind:"folder",key:highlightedFolderKey}); }
   }, [highlightedSkillKey, highlightedFolderKey]);
-  const chooseSkill = (skill: SkillTableItem) => { setSelectedRowKeys([`skill:${id(skill)}`]); setSelected({kind:"skill",key:id(skill)}); setCollapsed(false); };
+  const chooseSkill = (skill: SkillTableItem) => { setSelectedRowKeys([`skill:${id(skill)}`]); setSelected({kind:"skill",key:id(skill)}); };
   const toggle = (folderKey: string) => setExpanded(previous => { const next = new Set(previous); if(next.has(folderKey)) next.delete(folderKey); else next.add(folderKey); writePreference(`${key}.expanded`, [...next]); return next; });
   const treeRows = groups.map(folder => ({ ...folder,
     hasNotebook: canUseNotebook(folder) && notebooks.some(note => (note.notebook.trim() || note.obsidian) && folder.children?.some(child => note.skillIds.includes(child.detailRequest?.skillId ?? child.rowKey ?? ""))),
-    onNotebook: !canUseNotebook(folder) ? undefined : () => { setSelectedRowKeys([`folder:${folder.key}`]); setSelected({kind:"folder",key:folder.key}); setCollapsed(false); setTab("notebook"); },
+    onNotebook: !canUseNotebook(folder) ? undefined : () => { setSelectedRowKeys([`folder:${folder.key}`]); setSelected({kind:"folder",key:folder.key}); setTab("notebook"); },
     highlighted: selectedFolder?.key === folder.key,
     scrollToRow: folder.highlighted,
     expanded: folder.expandable !== false && (searchActive || expanded.has(folder.key) || Boolean(folder.children?.some(s => s.highlighted))),
     onToggle: folder.expandable === false ? undefined : () => toggle(folder.key),
-    onOpen: () => { setSelectedRowKeys([`folder:${folder.key}`]); setSelected({kind:"folder",key:folder.key}); setCollapsed(false); folder.onSelect?.(); },
+    onOpen: () => { setSelectedRowKeys([`folder:${folder.key}`]); setSelected({kind:"folder",key:folder.key}); folder.onSelect?.(); },
     children: folder.children?.map(skill => ({ ...skill, scrollToRow: skill.highlighted, highlighted: selectedSkill && id(selectedSkill) === id(skill), onDetail: () => chooseSkill(skill) })),
   }));
   const folderSources = [...new Map((selectedFolder?.children ?? []).filter(skill => skill.sourceRepo || skill.sourceUrl).map(skill => {
@@ -194,10 +196,14 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
     <section tabIndex={0} onKeyDown={expansionKeys} onMouseDown={event => { if (!(event.target as HTMLElement).closest("button,input,textarea,select,a")) event.currentTarget.focus({preventScroll:true}); }} className="flex min-w-0 flex-1 flex-col overflow-hidden outline-none" aria-label={t("browser.list")}>
       <div className="flex h-11 shrink-0 items-center border-b border-border [&>header]:h-full [&>header]:flex-1 [&>header]:border-b-0" style={{paddingRight: scrollbarWidth}}>{typeof toolbar === "function" ? toolbar(viewControl) : <div className="flex h-full items-center gap-1 px-2">{toolbar}{viewControl}</div>}</div>
       <div ref={listScroll} className="skill-browser-list min-h-0 flex-1 overflow-y-auto overflow-x-hidden [overflow-anchor:none]">
-        {loading && !groups.length ? <p className="p-8 text-center text-sm text-muted-foreground">{t("common.loading")}</p> : groups.length ? <SkillBrowserTable {...tableProps} onSelectionChange={setSelectedRowKeys} statusPath={pathname} statusCollections={collectionsMode} kind={flat ? "skill" : "folder"} tree visibleColumns={collectionsMode ? new Set([...visibleColumns].filter(column => !["skillCount", "githubStars", "installSummary"].includes(column))) : visibleColumns} skills={skills.map(skill => ({...skill, highlighted: selectedSkill && id(selectedSkill) === id(skill), onDetail: () => chooseSkill(skill)}))} folders={treeRows} onToggleColumn={toggleColumn} onResetColumns={resetColumns} stickyHeaderTop="0px" className="rounded-none border-0 shadow-none"/> : <p className="p-8 text-center text-sm text-muted-foreground">{t("browser.noMatches")}</p>}
+        {loading && !groups.length ? <p className="p-8 text-center text-sm text-muted-foreground">{t("common.loading")}</p> : groups.length ? <SkillBrowserTable {...tableProps} onSelectionChange={keys=>{setSelectedRowKeys(keys);tableProps.onSelectionChange?.(keys);}} statusPath={pathname} statusCollections={collectionsMode} kind={flat ? "skill" : "folder"} tree visibleColumns={collectionsMode ? new Set([...visibleColumns].filter(column => !["skillCount", "githubStars", "installSummary"].includes(column))) : visibleColumns} skills={skills.map(skill => ({...skill, highlighted: selectedSkill && id(selectedSkill) === id(skill), onDetail: () => chooseSkill(skill)}))} folders={treeRows} onToggleColumn={toggleColumn} onResetColumns={resetColumns} stickyHeaderTop="0px" className="rounded-none border-0 shadow-none"/> : <p className="p-8 text-center text-sm text-muted-foreground">{t("browser.noMatches")}</p>}
       </div>
+      <div ref={statusSlot} className="shrink-0" data-testid="browser-status-slot"/>
     </section>
-    {collapsed && <div className="shrink-0 border-l border-border"><div className="flex h-11 items-center border-b border-transparent px-4"><Button className="text-muted-foreground hover:text-foreground" size="icon-sm" variant="ghost" aria-label={t("browser.showPreview")} onClick={()=>setCollapsed(false)}><PanelRight className="size-4 shrink-0"/></Button></div></div>}
+    {collapsed && <aside style={{width:ICON_RAIL_WIDTH}} className="shrink-0 border-l border-border bg-sidebar" aria-label={t("browser.preview")}>
+      <div className="flex h-11 items-center justify-center border-b border-border"><button className={cn(ICON_RAIL_BUTTON,"text-muted-foreground")} title={t("browser.showPreview")} aria-label={t("browser.showPreview")} onClick={()=>setCollapsed(false)}><PanelRight/></button></div>
+      <div className="flex flex-col items-center gap-2 py-2">{(["overview","document","notebook"] as Tab[]).map(value=><button key={value} className={cn(ICON_RAIL_BUTTON,"text-muted-foreground disabled:opacity-50",activeTab===value&&"bg-primary/15 text-primary")} title={t(`browser.${value}`)} aria-label={t(`browser.${value}`)} disabled={value==="notebook" ? !canUseNotebook(selectedFolder) : value==="document" && !selectedSkill && (!selectedFolder || collectionsMode)} onClick={()=>{setTab(value);writePreference("skillshub.browser.tab",value);}}><ActionIcon action={value==="notebook"?"notebook":value==="document"?"document":"info"}/></button>)}</div>
+    </aside>}
     {!collapsed && <>
       <div role="separator" tabIndex={0} aria-label={t("browser.resize")} aria-orientation="vertical" aria-valuenow={Math.round(width)} aria-valuemin={30} aria-valuemax={70} className="relative w-1.5 shrink-0 cursor-col-resize touch-none bg-background after:pointer-events-none after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-border hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         onPointerDown={e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);}}
@@ -206,7 +212,7 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
         onKeyDown={e=>{if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();const next=Math.min(70,Math.max(30,width+(e.key==="ArrowLeft"?2:-2)));setWidth(next);writePreference("skillshub.browser.width",next);}}}/>
       <aside style={{flexBasis:`${width}%`}} className="flex min-w-0 shrink-0 flex-col overflow-hidden" aria-label={t("browser.preview")}>
         <div role="tablist" className="flex h-11 shrink-0 items-stretch gap-4 border-b border-border px-4">
-          {((selectedSkill ? ["overview","document"] : !collectionsMode && selectedFolder ? ["overview","document", ...(canUseNotebook(selectedFolder) ? ["notebook"] : [])] : ["overview"]) as Tab[]).map(value=><button role="tab" aria-selected={activeTab===value} key={value} onClick={()=>{setTab(value);writePreference("skillshub.browser.tab",value);}} className={cn("inline-flex items-center gap-2 border-b-2 border-transparent px-1 text-sm font-semibold text-muted-foreground",activeTab===value&&"border-primary text-primary")}>{value === "notebook" ? <BookOpen className="size-[1em]"/> : <ActionIcon action={value === "document" ? "document" : "info"}/>}{t(`browser.${value}`)}</button>)}
+          {((selectedSkill ? ["overview","document"] : !collectionsMode && selectedFolder ? ["overview","document", ...(canUseNotebook(selectedFolder) ? ["notebook"] : [])] : ["overview"]) as Tab[]).map(value=><button role="tab" aria-selected={activeTab===value} key={value} onClick={()=>{setTab(value);writePreference("skillshub.browser.tab",value);}} className={cn("inline-flex items-center gap-2 border-b-2 border-transparent px-1 text-sm font-semibold text-muted-foreground",activeTab===value&&"border-primary text-primary")}>{value === "notebook" ? <ActionIcon action="notebook"/> : <ActionIcon action={value === "document" ? "document" : "info"}/>}{t(`browser.${value}`)}</button>)}
           <Button className="my-auto ml-auto text-muted-foreground hover:text-foreground" size="icon-sm" variant="ghost" aria-label={t("browser.hidePreview")} onClick={()=>setCollapsed(true)}><PanelRight className="size-4 shrink-0"/></Button>
         </div>
         {selectedSkill && request ? <>
@@ -225,14 +231,13 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
               </div>
               </details>
             </section>}
-            {pathname === "/resources" && selectedFolder.sourceRepo && <RepositoryAddressButton repository={selectedFolder.sourceRepo}/>}
             {selectedFolder.notesEditor}
             {installationSummary}
             <section aria-label={t("browser.skillList")}>
               <details open className="group/overview-section"><summary className="overview-section-title"><List className="size-4 shrink-0" aria-hidden="true"/>{t("browser.skillList")}<ChevronRight className="size-4 shrink-0 group-open/overview-section:rotate-90" aria-hidden="true"/></summary>
               <div className="overflow-hidden rounded-lg border border-border/70">
                 {selectedFolder.skillListLoading ? <p className="p-3 text-sm text-muted-foreground">{t("common.loading")}</p> : (
-                  <SkillBrowserTable key={selectedFolder.key} onSelectionChange={setSelectedRowKeys} compactList kind="skill" className="border-0 bg-transparent shadow-none [&_thead]:bg-transparent [&_th]:bg-transparent" visibleColumns={new Set(["index", "name"])} skills={(selectedFolder.children ?? []).map(skill => ({
+                  <SkillBrowserTable key={selectedFolder.key} onSelectionChange={keys=>{setSelectedRowKeys(keys);tableProps.onSelectionChange?.(keys);}} compactList kind="skill" className="border-0 bg-transparent shadow-none [&_thead]:bg-transparent [&_th]:bg-transparent" visibleColumns={new Set(["index", "name"])} skills={(selectedFolder.children ?? []).map(skill => ({
                     ...skill,
                     onDetail: () => {
                       if (selectedFolder.expandable !== false) setExpanded(previous => new Set([...previous, selectedFolder.key]));

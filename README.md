@@ -1,146 +1,43 @@
-<div align="center">
+# Arsenal
 
-[简体中文](README_CN.md) · [English](README.md)
+AI tools and capabilities management. Skills are supported today; templates, workflows and knowledge are future directions.
 
-# SkillsHub
+[简体中文](README_CN.md) · [Download](https://github.com/yufenglyu/Arsenal/releases) · [Changelog](CHANGELOG.md)
 
-### One skill library. Your AI tools and projects, connected.
+![Library and nested groups](docs/images/v1.3/library.png)
 
-Import, organize, update and distribute `SKILL.md` skills to Claude Code, Codex CLI, Cursor and other tools from one desktop app.
+Screenshots show actual v1.3.0 frontend components in Chinese with fictional demonstration data, not bundled content.
 
-[![Release](https://img.shields.io/github/v/release/yufenglyu/skillshub)](https://github.com/yufenglyu/skillshub/releases)
-[![License](https://img.shields.io/github/license/yufenglyu/skillshub)](LICENSE)
-![Tauri 2](https://img.shields.io/badge/Tauri-2-24c8db)
-![Local first](https://img.shields.io/badge/Local--first-SKILL.md-5865f2)
+## Organize and install
 
-[Download](https://github.com/yufenglyu/skillshub/releases) · [Get started](#get-started) · [Changelog](CHANGELOG.md) · [Report an issue](https://github.com/yufenglyu/skillshub/issues)
+Import from GitHub or local folders. The library remains the primary storage. Shared skills, software platforms and project directories are grouped under Skill installation. Installation prefers links, with copying as a fallback.
 
-</div>
+Manage nested groups directly beneath the library. Drag skills or repositories into groups, reorder groups, use Shift to move membership, and use selection and expansion shortcuts. Groups support both skill and repository views. Removing membership does not delete the source skill. Create groups through the context menu.
 
-![SkillsHub repository with folder browsing, tags and notes](docs/images/en/library.jpg)
+Click section titles to collapse or expand. Resize the library section vertically. Clicking navigation icons keeps collapsed sidebars collapsed. Tables support configurable columns, widths and sorting; the skill-count column is not sortable.
 
-*Screenshots show the UI from the current v1.2.0 source, using fictional repositories, skills and paths. The example content is not bundled with the app.*
+## Updates and tasks
 
-## Why SkillsHub?
+![Update dialog](docs/images/v1.3/update.png)
 
-Skills end up scattered across tool folders. Starting a new project means copying them again. As your collection grows, keeping track of what each skill does, where it is installed and whether it has changed becomes its own task. SkillsHub brings that work into one place.
+Refresh repository information updates metadata, stars and documentation without updating skill files. Check skill updates inspects upstream changes for review before synchronization. Open Tasks from the status bar to view previous results, filter failures and retry selected work.
 
-| What you need | How SkillsHub helps |
-| --- | --- |
-| Use a skill across multiple AI tools | Keep it in one repository, install by platform or project, and add everyday skills to Shared Hub. |
-| Keep up with upstream changes | Review added, modified and removed skills, inspect file changes, then apply selected updates. |
-| Find useful skills in a growing library | Combine tags, search names, descriptions and notes, and assign tags with drag and drop. |
-| Prepare a toolkit for each workflow | Build bundles for development, research or writing and install them to multiple targets. |
-| Understand skills and record your judgment | Read their documents, write notes, or edit AI-generated notes and tags before saving. |
-| Keep your library across devices | Use local files, ZIP backups, WebDAV repository sync and portable mode. |
+Checks save progress per repository. Pause finishes the current repository before stopping. After restarting, choose Continue check in Tasks to skip completed repositories. A repository interrupted before completion is checked again. Keep the task record if you intend to resume it.
 
-## Collect once, use across tools
+## Notes and portable data
 
-**The Skill Repository is the primary store; you choose where each skill is used.** Import from GitHub or a local folder, then install to a platform, a project, or Shared Hub.
+Use tags, remarks and AI-assisted suggestions to organize skills. Obsidian notes retain stable identifiers. The new-note subdirectory is relative to the vault, for example `附件/SkillsHub`.
 
-```text
-GitHub / Local folders
-        ↓
-  Skill Repository ── Skill Bundles: organize by workflow
-        ├── Software platforms: tool-specific skill directories
-        ├── Project directories: <project>/.agents/skills
-        └── Shared Hub: ~/.agents/skills
-```
+Windows portable installations need `arsenal.exe` and `.arsenal`. Close the old application before upgrading and preserve your existing data directory. Never overwrite it with packaged defaults.
 
-- **Shared Hub** links back to repository skills. Removing a skill from the hub removes the link and keeps the original files. Whether a tool can use the shared directory depends on its own support and configuration.
-- **Software platforms** support custom names and skill paths. Right-click in the sidebar to add, edit, disable or remove them. Missing directories automatically disable the corresponding platform; disabled platforms are hidden from the sidebar.
-- **Project directories** keep skill choices scoped to individual projects and can be managed from sidebar context menus.
-- **Visible installation relationships** show where skills are used and distinguish Shared Hub from independent installations. Platform installation prefers links and falls back to copying when needed.
+Migration rewrites legacy `.skillshub` paths and installed links, validates them, then removes the compatibility directory. Two independent data directories block migration. Backups remain under `.arsenal/migrations`. Existing protocols, note properties and upgrade identifiers remain compatible.
 
-## Know what changes before you update
+## Development
 
-The **Update skills** dialog offers **Last results / Check updates / Update stars / Cancel**. Checks start only after confirmation. Updating stars fetches repository statistics without downloading skills or replacing the last update report.
+Run `pnpm install`, then `pnpm dev` for the frontend or `pnpm tauri dev` for the desktop application.
 
-![Update skills: check changes or refresh stars independently](docs/images/en/update-actions.jpg)
+Validate with `pnpm test`, `pnpm typecheck` and `cargo test --manifest-path src-tauri/Cargo.toml`.
 
-The status bar provides one **Tasks** entry with running and pending counts, available from every page. **Skill imports / Skill updates** show tasks by repository or batch on the left, with progress, results and actions on the right. Filter active tasks, items needing attention, failures or completed tasks. Checks finish with a lightweight notification; start new checks from **Update skills** in the main toolbar.
+Package Windows with `pnpm package:release:windows`; see [packaging instructions](scripts/README.md) for other platforms. Available release attachments are authoritative; local Windows builds do not verify macOS or Linux.
 
-![Tasks: skill update details and batch actions (fictional data)](docs/images/en/tasks-updates-preview.jpg)
-
-- Results default to actionable changes. Filters appear as Needs attention / Failed / Updated / Unchanged / Ignored / All, with All last and including complete results. Select skills to update; source deletions require additional confirmation.
-- Root skills moved into repository subdirectories retain their original identity for content comparison and updates, avoiding false deletion reports. Renames and uncertain matches still require manual confirmation.
-- Ignore a detected version; a later upstream change makes it eligible for review again.
-- Starting a full check clears previous check reports and records; scoped checks preserve other repositories. Delete failed or interrupted task records individually, or dismiss failed repository check results. These actions keep skill files intact.
-- Recheck selected repositories from the footer without losing other results. Failed repository rows also offer individual recheck and dismiss actions.
-- Review replacements under remote deletions and select them and use Delete & reimport in the footer; ambiguous matches require manual pairing.
-- Resize the dialog as needed; switching tasks or tabs preserves update selections. Clear check results removes reports and check records without deleting skills or stopping imports and updates. Batch tasks appear as one operation. Clearing finished records affects only completed or stopped groups in the current tab and preserves active batches and unresolved failures.
-- Imports, update checks, applied updates and AI generation run through a background queue with progress, results, manual stop, retries and manual cleanup. Running tasks stop after the current step finishes.
-- After starting a GitHub import, clicking outside the Add Skills dialog moves repository checks and subsequent imports to the background. Review skill details and errors under Skill imports; resolve name conflicts with Continue import. Clicking Cancel still cancels the current dialog operation.
-- Navigating away or closing a dialog does not interrupt a task. Tasks run while the app is open; interrupted tasks can be retried after restarting.
-
-![Tasks: skill import results and record management (fictional data)](docs/images/en/tasks-imports.jpg)
-
-## Build your own skill toolkit
-
-**Tags help you find skills; bundles help you reuse them.** Label skills by purpose, group the ones you use together, and install a bundle when starting a project.
-
-![Skill Bundles with their included skills](docs/images/en/collections.jpg)
-
-- Click a tag to filter, then click it again to clear. Use `Ctrl / Cmd` to select multiple tags and match their intersection.
-- Drag selected skills onto a tag to add it. Hold `Shift` while dropping to remove only that tag.
-- The filter button inside the search field lets you search repository names, skill names, descriptions and notes. Repository folders can have their own notes. The filter closes on focus loss, an outside click or Escape.
-- Switch grouped/flat views from the toolbar button immediately after Open directory in the library, bundles, shared hub and platform/project lists (default F3). Flat view includes a sortable Repository column with owner/repository and repository@owner formats; sorting follows the displayed format. F5 refreshes the current list. Customize both shortcuts in Settings. The name header no longer has an expand-all icon; use + / - with the list focused to expand or collapse all groups.
-- GitHub downloads and preparation can be cancelled. Atomic commits finish safely before stopping. Stopping records can be deleted while active writes retain their locks.
-- The detail pane provides overview, documents and installation information. Tables support sorting, column visibility, reordering and resizing. Switch between `owner/repository` and `repository@owner` from the right of the name header; name sorting follows the displayed format.
-- Skill notes and tags use **AI / Save / Clear** controls. Each AI request produces an editable suggestion. Tag suggestions are appended and deduplicated, preserving existing tags; changes are written only when saved. Configure your own AI service and prompts.
-
-![Flat view: sortable repositories and repository name formats](docs/images/en/library-flat.jpg)
-
-## Get started
-
-1. Download an installer or portable archive for your system from [Releases](https://github.com/yufenglyu/skillshub/releases), then launch SkillsHub.
-2. Check platform directories in Settings, or add your own platforms and projects from the sidebar.
-3. In Skill Repository, choose **Add skills** and enter a GitHub `owner/repo`, repository URL, or local skill folder.
-4. Read the skill, add tags or notes, organize it into a bundle, then install it to the platforms, projects or Shared Hub you need.
-5. Use **Update skills** to check upstream changes and **Tasks** to review results and follow execution.
-
-The toolbar uses distinct icons: a package with a plus for adding skills, two circular arrows for updating, and a single rotating arrow for refreshing the list. Hover for labels. GitHub imports only flag overwrites at the actual destination; matching IDs in different repositories remain independent.
-
-![Add skills from GitHub or a local folder](docs/images/en/import.jpg)
-
-## Your data and backups
-
-Local and WebDAV repository backups preserve cached GitHub star counts and their timestamps. Directory CSV exports also include star counts.
-
-Skills stay on your machine. The default repository is `~/.skillshub/library`; portable mode keeps `.skillshub` next to the executable so the application and its data can travel together.
-
-| Option | Purpose |
-| --- | --- |
-| Local ZIP backup | Export and restore data according to the selected backup scope. |
-| WebDAV repository sync | Transfer repository content and bundles, using the receiving device's paths and preserving its settings and installation targets. |
-| Bundle import / export | Reuse a collection of skills. |
-
-GitHub import and updates, WebDAV, and optional AI features connect to their respective services. AI generation sends the relevant skill content to your configured provider. Treat the configuration directory as private local data; backups exclude API keys, tokens and passwords.
-
-## Download and development
-
-See [Releases](https://github.com/yufenglyu/skillshub/releases) for the artifacts actually available for each release. The repository includes Windows, macOS and Linux packaging scripts; Windows packaging produces an MSI and a portable ZIP.
-
-Development requires Node.js, pnpm, Rust and the system dependencies for Tauri v2.
-
-```bash
-pnpm install
-pnpm tauri dev       # Full desktop application
-pnpm dev             # Browser frontend preview
-pnpm build           # Type checking and frontend build
-pnpm test
-pnpm lint
-cd src-tauri && cargo test
-```
-
-Packaging commands: `pnpm package:release:windows`, `pnpm package:release:macos`, `pnpm package:release:linux`. Distribution artifacts are written to `release-assets/`.
-
-Built with **Tauri 2 · Rust · SQLite · React · TypeScript**. The interface supports English, Simplified Chinese, light/dark themes and configurable accent colors.
-
-## Contributing and license
-
-Issues and focused improvements are welcome. Include your version, operating system and reproduction steps, and use screenshots without private information.
-
-SkillsHub is an independent, unofficial project and is not affiliated with or endorsed by the vendors of supported tools.
-
-[Apache License 2.0](LICENSE)
+Licensed under [Apache-2.0](LICENSE).

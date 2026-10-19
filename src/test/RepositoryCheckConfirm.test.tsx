@@ -10,27 +10,20 @@ it("starts a check only after explicit confirmation",()=>{
   expect(check).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button",{name:"取消"}));
   expect(check).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button",{name:"检查更新"}));
+  fireEvent.click(screen.getByRole("button",{name:"检查技能更新"}));
   expect(check).toHaveBeenCalledExactlyOnceWith(undefined);
 });
-it("opens saved results without scanning or checking",()=>{
-  store.setState({preview:{repositories:[]}});
-  const check=vi.spyOn(store.getState(),"checkForUpdates").mockResolvedValue();
-  render(<RepositoryCheckConfirm open onOpenChange={vi.fn()}/>);
-  fireEvent.click(screen.getByRole("button",{name:"上次结果"}));
-  expect(store.getState().open).toBe(true);
-  expect(check).not.toHaveBeenCalled();
-});
-it("keeps four icon actions in order and refreshes stars independently",()=>{
+it("keeps three right-aligned actions and leaves history in the task center",()=>{
   const refresh=vi.spyOn(store.getState(),"refreshRepositories").mockResolvedValue();
   const check=vi.spyOn(store.getState(),"checkForUpdates").mockResolvedValue();
   const {container}=render(<RepositoryCheckConfirm open onOpenChange={vi.fn()}/>);
   const footer=document.querySelector('[data-slot="dialog-footer"]')!;
-  expect(Array.from(footer.querySelectorAll('button')).map(button=>button.textContent)).toEqual(["上次结果","检查更新","更新仓库","取消"]);
-  expect(footer.querySelectorAll('button svg')).toHaveLength(4);
-  expect(screen.getByRole("button",{name:"上次结果"})).toBeDisabled();
+  expect(Array.from(footer.querySelectorAll('button')).map(button=>button.textContent)).toEqual(["刷新仓库信息","检查技能更新","取消"]);
+  expect(footer.querySelectorAll('button svg')).toHaveLength(3);
+  expect(screen.queryByRole("button",{name:"查看上次检查结果"})).not.toBeInTheDocument();
+  expect(footer).toHaveClass("justify-end");
   expect(screen.getByRole("heading",{name:"更新技能"}).querySelector('svg')).not.toBeNull();
-  fireEvent.click(screen.getByRole("button",{name:"更新仓库"}));
+  fireEvent.click(screen.getByRole("button",{name:"刷新仓库信息"}));
   expect(refresh).toHaveBeenCalledExactlyOnceWith(undefined);
   expect(check).not.toHaveBeenCalled();
   expect(container).toBeInTheDocument();

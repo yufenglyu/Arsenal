@@ -1,3 +1,4 @@
+import {useCollectionStore as groups} from "@/stores/collectionStore";
 import { openRowActions } from "./rowActions";
 import { AppStatusBar } from "@/components/layout/AppStatusBar";
 import { useRepositorySyncStore } from "@/stores/repositorySyncStore";
@@ -76,8 +77,8 @@ const defaultSkills: SkillWithLinks[] = [
     id: "resource-demo",
     name: "resource-demo",
     description: "Resource demo",
-    file_path: "~/.skillshub/library/example/resource-demo/SKILL.md",
-    canonical_path: "~/.skillshub/library/example/resource-demo",
+    file_path: "~/.arsenal/library/example/resource-demo/SKILL.md",
+    canonical_path: "~/.arsenal/library/example/resource-demo",
     is_central: false,
     scanned_at: "2026-07-14T00:00:00Z",
     created_at: "2026-07-14T00:00:00Z",
@@ -100,7 +101,7 @@ vi.mock("@/stores/resourceLibraryStore", () => ({
     selector({
       skills: resourceSkills,
       agents,
-      resourceLibraryDir: "~/.skillshub/library",
+      resourceLibraryDir: "~/.arsenal/library",
       isLoading: false,
       isUpdatingSources: false,
       togglingAgentId: null,
@@ -175,6 +176,7 @@ describe("ResourceLibraryView delete", () => {
   }
 
   beforeEach(() => {
+    groups.setState({activeCollectionId:null,collections:[],groupDetails:[],includeDescendants:true,selectedSkillIds:[],loadGroupDetails:vi.fn().mockResolvedValue(undefined)});
     useRepositorySyncStore.setState({ preview: null, open: false, applied: false, appliedRepositories: [], checkingRepository: null, isChecking: false, error: null, includeAdded: true, removeDeleted: false, repositories: null });
     resourceSkills = defaultSkills;
     mockLoadResourceLibrary.mockReset();
@@ -196,7 +198,7 @@ describe("ResourceLibraryView delete", () => {
       bundle: {
         name: "example",
         relativePath: "example",
-        path: "~/.skillshub/library/example",
+        path: "~/.arsenal/library/example",
         isSymlink: false,
         skillCount: 1,
         linkedAgentCount: 1,
@@ -209,7 +211,7 @@ describe("ResourceLibraryView delete", () => {
     mockDeleteResourceBundle.mockReset();
     mockDeleteResourceBundle.mockResolvedValue({
       relativePath: "example",
-      removedBundlePath: "~/.skillshub/library/example",
+      removedBundlePath: "~/.arsenal/library/example",
       removedKind: "directory",
       removedSkillIds: ["resource-demo"],
       uninstalledAgents: ["cursor"],
@@ -218,7 +220,7 @@ describe("ResourceLibraryView delete", () => {
     mockDeleteResourceSkill.mockReset();
     mockDeleteResourceSkill.mockResolvedValue({
       skillId: "resource-demo",
-      removedCanonicalPath: "~/.skillshub/library/example/resource-demo",
+      removedCanonicalPath: "~/.arsenal/library/example/resource-demo",
       uninstalledAgents: ["cursor"],
       skippedReadOnlyAgents: [],
     });
@@ -233,7 +235,7 @@ describe("ResourceLibraryView delete", () => {
     mockListen.mockReset();
     mockListen.mockResolvedValue(mockUnlisten);
     vi.mocked(invoke).mockReset();
-    vi.mocked(invoke).mockResolvedValue(undefined);
+    vi.mocked(invoke).mockImplementation(async command => command === "plan_repository_update_check" ? [] : undefined);
     window.localStorage.removeItem("skills-manage.skillListViewMode.resource-library");
   });
 
@@ -246,13 +248,13 @@ describe("ResourceLibraryView delete", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "在文件管理器中打开: ~/.skillshub/library",
+        name: "在文件管理器中打开: ~/.arsenal/library",
       })
     );
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("open_in_file_manager", {
-        path: "~/.skillshub/library",
+        path: "~/.arsenal/library",
       });
     });
   });
@@ -267,7 +269,7 @@ describe("ResourceLibraryView delete", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "在文件管理器中打开: ~/.skillshub/library",
+        name: "在文件管理器中打开: ~/.arsenal/library",
       })
     );
 
@@ -332,7 +334,7 @@ describe("ResourceLibraryView delete", () => {
     const view = render(<MemoryRouter><ResourceLibraryView /><AppStatusBar /></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", { name: /更新技能|Update skills/i }));
     expect(mockPreviewRepositorySync).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", {name:"检查更新"}));
+    fireEvent.click(screen.getByRole("button", {name:"检查技能更新"}));
     await waitFor(()=>expect(mockPreviewRepositorySync).toHaveBeenCalledTimes(1));
     view.rerender(<MemoryRouter><AppStatusBar /></MemoryRouter>);
     expect(screen.getByRole("button", {name: /任务/})).toHaveTextContent(/运行 1/);
@@ -421,8 +423,8 @@ describe("ResourceLibraryView delete", () => {
         ...defaultSkills[0],
         id: "old-skill",
         name: "old-skill",
-        file_path: "~/.skillshub/library/zeta/repo/old-skill/SKILL.md",
-        canonical_path: "~/.skillshub/library/zeta/repo/old-skill",
+        file_path: "~/.arsenal/library/zeta/repo/old-skill/SKILL.md",
+        canonical_path: "~/.arsenal/library/zeta/repo/old-skill",
         created_at: "2026-07-10T00:00:00Z",
         updated_at: "2026-07-10T00:00:00Z",
       },
@@ -430,8 +432,8 @@ describe("ResourceLibraryView delete", () => {
         ...defaultSkills[0],
         id: "new-skill",
         name: "new-skill",
-        file_path: "~/.skillshub/library/alpha/repo/new-skill/SKILL.md",
-        canonical_path: "~/.skillshub/library/alpha/repo/new-skill",
+        file_path: "~/.arsenal/library/alpha/repo/new-skill/SKILL.md",
+        canonical_path: "~/.arsenal/library/alpha/repo/new-skill",
         created_at: "2026-07-11T00:00:00Z",
         updated_at: "2026-07-12T00:00:00Z",
       },
@@ -470,16 +472,16 @@ describe("ResourceLibraryView delete", () => {
         id: "design-skill",
         name: "design-skill",
         tags: ["design"],
-        file_path: "~/.skillshub/library/alpha/repo/design-skill/SKILL.md",
-        canonical_path: "~/.skillshub/library/alpha/repo/design-skill",
+        file_path: "~/.arsenal/library/alpha/repo/design-skill/SKILL.md",
+        canonical_path: "~/.arsenal/library/alpha/repo/design-skill",
       },
       {
         ...defaultSkills[0],
         id: "backend-skill",
         name: "backend-skill",
         tags: ["backend"],
-        file_path: "~/.skillshub/library/zeta/repo/backend-skill/SKILL.md",
-        canonical_path: "~/.skillshub/library/zeta/repo/backend-skill",
+        file_path: "~/.arsenal/library/zeta/repo/backend-skill/SKILL.md",
+        canonical_path: "~/.arsenal/library/zeta/repo/backend-skill",
       },
     ];
 
@@ -600,19 +602,27 @@ describe("ResourceLibraryView delete", () => {
 
     await switchBrowserViewMode("folders");
     const folderRow = await screen.findByRole("row", { name: /owner\/repo/i });
+    fireEvent.click(within(folderRow).getByRole('button',{name:'owner/repo'}));
+    expect(screen.queryByRole('button',{name:'修改仓库地址'})).not.toBeInTheDocument();
+    const refresh=vi.spyOn(useRepositorySyncStore.getState(),'refreshRepositories').mockResolvedValue(undefined);
+    const menu=openRowActions(folderRow);
+    expect(menu.getAllByRole('separator').length).toBeGreaterThan(0);
+    fireEvent.click(menu.getByRole('menuitem',{name:'刷新仓库信息'}));
+    expect(refresh).toHaveBeenCalledWith(['owner/repo']);refresh.mockRestore();
     fireEvent.click(openRowActions(folderRow).getByRole("menuitem", {name:"修改仓库地址"}));
     expect(screen.getByLabelText("新仓库地址")).toHaveValue("owner/repo");
     fireEvent.click(screen.getByRole("button", {name:/取消|Cancel/i}));
-    fireEvent.click(openRowActions(folderRow).getByRole("menuitem", { name: /^更新$|^Update$/i }));
+    fireEvent.click(openRowActions(folderRow).getByRole("menuitem", { name: "更新仓库技能" }));
 
     await waitFor(() => {
       expect(mockPreviewRepositorySync).toHaveBeenCalledWith(["owner/repo"]);
     });
     expect(mockSyncSourceBackedSkills).not.toHaveBeenCalled();
-    vi.mocked(invoke).mockResolvedValue(undefined);
+    vi.mocked(invoke).mockImplementation(async command => command === "plan_repository_update_check" ? [] : undefined);
     fireEvent.click(screen.getByRole("button", {name: /任务/}));
     // Legacy fixture reports must be rechecked before a strict repository write.
-    expect(await screen.findByRole("button", {name:"同步整仓"})).toBeDisabled();
+    expect((await screen.findAllByRole("button", {name:"重新检查"})).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", {name:"同步整仓"})).not.toBeInTheDocument();
     expect(invoke).not.toHaveBeenCalledWith("apply_repository_update_item", expect.anything());
 
   });
@@ -708,6 +718,32 @@ describe("ResourceLibraryView delete", () => {
   });
 
 
+
+  it("detaches a repository's scoped members without deleting files and allows both views",async()=>{
+    const one={...defaultSkills[0],id:'one',name:'One'};const two={...defaultSkills[0],id:'two',name:'Two'};
+    resourceSkills=[one,two];const parent={id:'parent',name:'Parent',created_at:'',updated_at:''};const change=vi.fn().mockResolvedValue(undefined);
+    groups.setState({collections:[parent],groupDetails:[{...parent,skills:[one]}],activeCollectionId:'parent',changeGroup:change});
+    render(<MemoryRouter><ResourceLibraryView/></MemoryRouter>);
+    await switchBrowserViewMode('folders');
+    const row=screen.getByRole('button',{name:'example'}).closest('tr')!;
+    fireEvent.click(openRowActions(row).getByRole('menuitem',{name:'移出分组'}));
+    expect(change).toHaveBeenCalledWith({action:'detach',id:'parent',skillIds:['one']});
+    expect(mockDeleteResourceBundle).not.toHaveBeenCalled();
+    await switchBrowserViewMode('all');
+    expect(screen.getByRole('button',{name:'查看 One 的详情'})).toBeInTheDocument();
+    expect(screen.queryByRole('button',{name:'查看 Two 的详情'})).not.toBeInTheDocument();
+  });
+
+  it("filters the repository by group including descendants and keeps ungrouped skills accessible",()=>{
+    const one={...defaultSkills[0],id:'one',name:'One'};const two={...defaultSkills[0],id:'two',name:'Two'};const three={...defaultSkills[0],id:'three',name:'Three'};
+    resourceSkills=[one,two,three];
+    const parent={id:'parent',name:'Parent',created_at:'',updated_at:''};const child={id:'child',name:'Child',parent_id:'parent',created_at:'',updated_at:''};
+    groups.setState({collections:[parent,child],groupDetails:[{...parent,skills:[one]},{...child,skills:[two]}],activeCollectionId:'parent'});
+    const view=render(<MemoryRouter><ResourceLibraryView/></MemoryRouter>);
+    expect(screen.getByRole('button',{name:'查看 One 的详情'})).toBeInTheDocument();expect(screen.getByRole('button',{name:'查看 Two 的详情'})).toBeInTheDocument();expect(screen.queryByRole('button',{name:'查看 Three 的详情'})).not.toBeInTheDocument();
+    view.unmount();groups.setState({activeCollectionId:'__unfiled__'});render(<MemoryRouter><ResourceLibraryView/></MemoryRouter>);
+    expect(screen.getByRole('button',{name:'查看 Three 的详情'})).toBeInTheDocument();expect(screen.queryByRole('button',{name:'查看 One 的详情'})).not.toBeInTheDocument();
+  });
 });
 
 function render(...args: Parameters<typeof rtlRender>) {

@@ -1,4 +1,5 @@
 pub mod backup;
+pub mod collection_tree;
 pub mod explanations;
 pub mod imports;
 pub mod metadata;
@@ -881,6 +882,8 @@ pub async fn create_collection(
     let now = Utc::now().to_rfc3339();
     let row = Collection {
         id: Uuid::new_v4().to_string(),
+        parent_id: None,
+        sort_order: Utc::now().timestamp_millis(),
         name: name.into(),
         description: description.map(str::to_owned),
         created_at: now.clone(),
@@ -894,7 +897,7 @@ pub async fn create_collection(
 pub async fn get_all_collections(pool: &AppStore) -> Result<Vec<Collection>, String> {
     pool.read(|d| {
         let mut v = rows::<Collection>(d, "collections")?;
-        v.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        v.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then(a.created_at.cmp(&b.created_at)));
         Ok(v)
     })
 }
@@ -924,13 +927,7 @@ pub async fn update_collection(
 }
 
 pub async fn delete_collection(pool: &AppStore, collection_id: &str) -> Result<(), String> {
-    pool.write(|d| {
-        d.table_mut("collection_skills")
-            .retain(|_, r| field(r, "collection_id") != collection_id);
-        d.table_mut("collections").remove(collection_id);
-        Ok(())
-    })
-    .await
+    collection_tree::change(pool, collection_tree::CollectionChange {action:"delete".into(),id:Some(collection_id.into()),name:None,parent_id:None,before_id:None,skill_ids:None,source_collection_id:None,include_descendants:None}).await.map(|_|())
 }
 
 pub async fn add_skill_to_collection(

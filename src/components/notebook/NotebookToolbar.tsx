@@ -1,5 +1,6 @@
+import { ActionIcon } from "@/components/ui/action-icon";
 import type { ReactNode } from "react";
-import { BookOpen, Bold, Italic, Heading, List, Link, Code, Pencil, Eye, Save } from "lucide-react";
+import { Bold, Italic, Heading, List, Link, Code, Pencil, Eye, Save } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 
@@ -23,7 +24,7 @@ export function NotebookToolbar({ title, preview, unavailable = false, onToggleP
 }) {
   const { t } = useTranslation();
   return <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
-    <h1 className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold"><BookOpen className="size-[1em] shrink-0"/><span className="min-w-0 flex-1 truncate">{title}</span></h1>
+    <h1 className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold"><ActionIcon action="notebook"/><span className="min-w-0 flex-1 truncate">{title}</span></h1>
     <div className="flex shrink-0 items-center gap-2">
     <Button variant="ghost" size="icon-sm" disabled={saveDisabled} onClick={onSave}
       title={t("g.save")} aria-label={t("g.save")}><Save /></Button>

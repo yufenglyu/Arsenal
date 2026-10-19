@@ -6,7 +6,6 @@ import { PlatformView } from "@/pages/PlatformView";
 import { CentralSkillsView } from "@/pages/CentralSkillsView";
 import { ResourceLibraryView } from "@/pages/ResourceLibraryView";
 import { SkillDetailPage } from "@/pages/SkillDetailPage";
-import { CollectionsListView } from "@/pages/CollectionsListView";
 import { SettingsView } from "@/pages/SettingsView";
 
 function App() {
@@ -30,7 +29,7 @@ function App() {
         {/* Skill detail page */}
         <Route path="skill/:skillId" element={<SkillDetailPage />} />
         {/* Skill Bundles */}
-        <Route path="collections" element={<CollectionsListView />} />
+        <Route path="collections" element={<Navigate to="/resources" replace />} />
         {/* Settings */}
         <Route path="settings" element={<SettingsView />} />
       </Route>

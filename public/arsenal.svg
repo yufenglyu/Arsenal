@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Arsenal</title>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="#18283B"/>
+  <path fill="#F0F5FA" fill-rule="evenodd" d="M226 120h60l132 272h-76l-30-66H200l-30 66H94L226 120Zm30 84-34 76h68l-34-76Z"/>
+  <rect x="199" y="278" width="114" height="48" rx="10" fill="#57D9C2"/>
+  <rect x="237" y="292" width="38" height="8" rx="4" fill="#18283B"/>
+</svg>

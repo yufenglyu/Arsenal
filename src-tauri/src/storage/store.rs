@@ -56,6 +56,7 @@ impl<'de> Deserialize<'de> for Data {
     }
 }
 impl Data {
+    pub fn table_names(&self) -> Vec<String> { self.tables.keys().cloned().collect() }
     pub fn table(&self, name: &str) -> &Table {
         static EMPTY: LazyLock<Table> = LazyLock::new(Table::default);
         self.tables.get(name).map(Arc::as_ref).unwrap_or(&EMPTY)

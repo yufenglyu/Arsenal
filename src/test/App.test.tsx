@@ -28,9 +28,9 @@ vi.mock("../stores/platformStore", () => ({
 
 // Mock collectionStore to prevent real Tauri invoke calls during tests
 vi.mock("../stores/collectionStore", () => ({
-  useCollectionStore: vi.fn().mockImplementation((selector?: unknown) => {
+  useCollectionStore: Object.assign(vi.fn().mockImplementation((selector?: unknown) => {
     const state = {
-      collections: [],
+      collections: [], activeCollectionId:null, groupDetails:[], selectedSkillIds:[], includeDescendants:true, selectGroup:vi.fn(), loadGroupDetails:vi.fn().mockResolvedValue(undefined), changeGroup:vi.fn().mockResolvedValue(undefined),
       currentDetail: null,
       isLoading: false,
       isLoadingDetail: false,
@@ -50,7 +50,7 @@ vi.mock("../stores/collectionStore", () => ({
       return selector(state);
     }
     return state;
-  }),
+  }), {setState:vi.fn()}),
 }));
 
 // Mock centralSkillsStore to prevent async state updates that cause act() warnings
@@ -77,7 +77,7 @@ vi.mock("../stores/resourceLibraryStore", () => ({
     const state = {
       skills: [],
       agents: [],
-      resourceLibraryDir: "~/.skillshub/library",
+      resourceLibraryDir: "~/.arsenal/library",
       isLoading: false,
       isUpdatingSources: false,
       togglingAgentId: null,
@@ -106,6 +106,7 @@ describe("App", () => {
       );
     });
 
+    expect(screen.getByTestId("browser-status-slot")).toContainElement(screen.getByRole("contentinfo"));
     expect(screen.getAllByText("技能仓库").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByRole("heading", { name: "共享中心" })).not.toBeInTheDocument();
   });
@@ -118,7 +119,7 @@ describe("App", () => {
         </MemoryRouter>
       );
     });
-    expect(screen.getByText("SkillsHub")).toBeInTheDocument();
+    expect(screen.getByText("Arsenal")).toBeInTheDocument();
   });
 
   it("renders sidebar with icon-only navigation", async () => {

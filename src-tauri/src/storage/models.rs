@@ -90,6 +90,10 @@ pub struct Agent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Collection {
     pub id: String,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub sort_order: i64,
     pub name: String,
     pub description: Option<String>,
     pub created_at: String,

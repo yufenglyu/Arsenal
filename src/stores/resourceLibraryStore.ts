@@ -27,8 +27,8 @@ const BROWSER_RESOURCE_SKILLS: SkillWithLinks[] = [
     id: "fixture-resource-skill",
     name: "fixture-resource-skill",
     description: "Browser validation fixture for the Skill Repository.",
-    file_path: "~/.skillshub/library/example/skills/fixture-resource-skill/SKILL.md",
-    canonical_path: "~/.skillshub/library/example/skills/fixture-resource-skill",
+    file_path: "~/.arsenal/library/example/skills/fixture-resource-skill/SKILL.md",
+    canonical_path: "~/.arsenal/library/example/skills/fixture-resource-skill",
     is_central: false,
     source: "browser-fixture",
     source_author: "example",
@@ -66,7 +66,7 @@ interface ResourceLibraryState {
   ) => Promise<SkillSourceUpdateReport>;
   updateSourceBackedSkill: (skillId: string) => Promise<string>;
   importGitHubRepoSnapshot: (input: GitHubSnapshotImportInput) => Promise<GitHubRepoImportResult>;
-  exportDirectoryList: (outputPath: string) => Promise<number>;
+  exportDirectoryList: (outputPath: string, skillIds?: string[]) => Promise<number>;
   addLocalSkills: (input: AddLocalResourceSkillsInput) => Promise<AddLocalResourceSkillsResult>;
   createManualSkill: (input: CreateManualResourceSkillInput) => Promise<SkillWithLinks>;
   previewDeleteResourceBundle: (relativePath: string) => Promise<CentralSkillBundleDeletePreview>;
@@ -103,7 +103,7 @@ export const useResourceLibraryStore = create<ResourceLibraryState>((set, get) =
         set({
           skills: BROWSER_RESOURCE_SKILLS,
           agents: BROWSER_FIXTURE_AGENTS,
-          resourceLibraryDir: "~/.skillshub/library",
+          resourceLibraryDir: "~/.arsenal/library",
           isLoading: false,
         });
         return;
@@ -277,11 +277,11 @@ export const useResourceLibraryStore = create<ResourceLibraryState>((set, get) =
     }
   },
 
-  exportDirectoryList: async (outputPath) => {
+  exportDirectoryList: async (outputPath, skillIds) => {
     if (!isTauriRuntime()) {
-      return get().skills.length;
+      return get().skills.filter(skill=>!skillIds||skillIds.includes(skill.id)).length;
     }
-    return await invoke<number>("export_resource_skill_directory_list", { outputPath });
+    return await invoke<number>("export_resource_skill_directory_list", { outputPath, ...(skillIds ? {skillIds} : {}) });
   },
 
   addLocalSkills: async (input) => {
@@ -328,8 +328,8 @@ export const useResourceLibraryStore = create<ResourceLibraryState>((set, get) =
         id: input.skillId,
         name: input.name,
         description: input.description ?? undefined,
-        file_path: `~/.skillshub/library/${input.skillId}/SKILL.md`,
-        canonical_path: `~/.skillshub/library/${input.skillId}`,
+        file_path: `~/.arsenal/library/${input.skillId}/SKILL.md`,
+        canonical_path: `~/.arsenal/library/${input.skillId}`,
         is_central: false,
         source: "manual",
         source_url: input.sourceUrl ?? null,
@@ -366,7 +366,7 @@ export const useResourceLibraryStore = create<ResourceLibraryState>((set, get) =
         bundle: {
           name: relativePath.split(/[\\/]/).pop() || relativePath,
           relativePath,
-          path: `~/.skillshub/library/${relativePath}`,
+          path: `~/.arsenal/library/${relativePath}`,
           isSymlink: false,
           skillCount: skills.length,
           linkedAgentCount: 0,
@@ -388,7 +388,7 @@ export const useResourceLibraryStore = create<ResourceLibraryState>((set, get) =
     if (!isTauriRuntime()) {
       const result: DeleteCentralSkillBundleResult = {
         relativePath,
-        removedBundlePath: `~/.skillshub/library/${relativePath}`,
+        removedBundlePath: `~/.arsenal/library/${relativePath}`,
         removedKind: "directory",
         removedSkillIds: [],
         uninstalledAgents: [],
@@ -420,7 +420,7 @@ export const useResourceLibraryStore = create<ResourceLibraryState>((set, get) =
     if (!isTauriRuntime()) {
       const result: DeleteResourceSkillResult = {
         skillId,
-        removedCanonicalPath: `~/.skillshub/library/${skillId}`,
+        removedCanonicalPath: `~/.arsenal/library/${skillId}`,
         uninstalledAgents: [],
         skippedReadOnlyAgents: [],
       };

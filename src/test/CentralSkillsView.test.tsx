@@ -658,7 +658,7 @@ describe("CentralSkillsView", () => {
     );
 
     expect(screen.getByText("没有匹配的技能")).toBeInTheDocument();
-    expect(screen.queryByText(/欢迎使用 SkillsHub/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/欢迎使用 Arsenal/)).not.toBeInTheDocument();
   });
 
   it("shows loading state", () => {

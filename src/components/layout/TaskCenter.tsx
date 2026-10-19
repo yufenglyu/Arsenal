@@ -1,6 +1,8 @@
+import {TaskDetailFilters, type DetailFilter} from "./TaskDetailFilters";
+import {HintIcon} from "@/components/ui/hint-icon";
 import {ActionIcon} from "@/components/ui/action-icon";
 import {useEffect, useRef, useState} from "react";
-import {Download, RefreshCw} from "lucide-react";
+import {ChevronRight, Download, RefreshCw} from "lucide-react";
 import {useTranslation} from "react-i18next";
 import {useTaskQueueStore, isTaskActive, taskErrorMessage, type TaskStep, type BackgroundTask} from "@/stores/taskQueueStore";
 import {useRepositorySyncStore} from "@/stores/repositorySyncStore";
@@ -53,34 +55,51 @@ function RepositoryCheckDetails({step}: {step: TaskStep}) {
 
 function TaskDetails({items}: {items: BackgroundTask[]}) {
   const {t} = useTranslation();
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState<DetailFilter>("all");
+  const [search, setSearch] = useState("");
   const imports = items[0]?.kind === "import";
-  const rows = importDetailRows(items).filter(row =>
-    (filter === "all" || filter === "failed" && ["failed", "partial", "interrupted"].includes(row.status) ||
-      filter === "attention" && row.status === "awaiting_input" || filter === "finished" && ["imported", "skipped", "success"].includes(row.status)));
+  const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
+  const allRows = importDetailRows(items);
+  const matches = (row:typeof allRows[number], value:DetailFilter) => value === "all"
+    || value === "failed" && ["failed", "partial", "interrupted"].includes(row.status)
+    || value === "attention" && ["awaiting_input", "ready", "failed", "partial", "interrupted", "cancelled"].includes(row.status)
+    || value === "finished" && ["imported", "skipped", "success"].includes(row.status);
+  const matchesTask = (task:BackgroundTask, value:DetailFilter) => matches({key:task.id,name:task.label,status:task.status},value);
+  const counts = Object.fromEntries((["all", "attention", "failed", "finished"] as const).map(value=>[value,imports ? allRows.filter(row=>matches(row,value)).length : items.filter(task=>matchesTask(task,value)).length])) as Record<DetailFilter,number>;
+  const visibleTasks = items.filter(task=>matchesTask(task,filter) && [task.label,...task.steps.map(step=>step.label)].some(label=>label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())));
+  const retryable = (task:BackgroundTask) => ["failed","partial","interrupted","cancelled"].includes(task.status);
+  const selected = visibleTasks.filter(task=>selectedTasks.has(task.id) && retryable(task));
+  const rows = allRows.filter(row=>matches(row,filter) && row.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   return <>
-    {imports && <div className="shrink-0 space-y-3 px-4 pb-3">
-      <div className="flex flex-wrap gap-1" aria-label={t("workflow.taskPanel.detailFilter")}>
-        {(["all", "attention", "failed", "finished"] as const).map(value => <Button key={value} size="sm" variant="ghost" aria-pressed={filter === value}
-          className={cn("text-xs", filter === value && "bg-primary/10 font-semibold text-primary")} onClick={() => setFilter(value)}>{t(`workflow.taskPanel.importFilter.${value}`)}</Button>)}
-      </div>
-    </div>}
+    <div className="shrink-0 px-4 py-3">
+      <TaskDetailFilters value={filter} onChange={value=>{setFilter(value);setSelectedTasks(new Set());}} counts={counts} search={search} onSearch={value=>{setSearch(value);setSelectedTasks(new Set());}}/>
+    </div>
     <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
       {imports ? <table className="w-full table-fixed text-left text-sm">
         <thead className="sticky top-0 bg-popover text-muted-foreground"><tr><th className="border-b py-2 font-medium">{t("skillBrowser.columns.name")}</th><th className="w-28 border-b py-2 font-medium">{t("workflow.taskPanel.status")}</th></tr></thead>
         <tbody>{rows.map(row => <tr key={row.key}><td className="border-b border-border/70 py-3 pr-3"><span className="break-all">{row.name}</span>{row.error && <p className="mt-1 text-destructive">{taskErrorMessage(row.error, "import")}</p>}</td>
           <td className={cn("border-b border-border/70 py-3 align-top", ["partial", "failed", "interrupted"].includes(row.status) ? "text-destructive" : "text-muted-foreground")}>{t(row.status === "imported" ? "status.importedLabel" : row.status === "skipped" ? "status.skippedLabel" : row.status === "ready" ? "workflow.taskPanel.readyToImport" : `workflow.taskStatus.${row.status}`)}</td></tr>)}</tbody>
-      </table> : items.map(task => <section key={task.id} className="border-b border-border py-3 text-sm">
-        <p className="mb-2 font-medium">{task.label} · {t(`workflow.taskStatus.${task.status}`)}</p>
+      </table> : visibleTasks.map(task => <section key={task.id} className="border-b border-border py-3 text-sm">
+        <div className="mb-3 flex items-center gap-2">
+          <input type="checkbox" aria-label={t("workflow.taskPanel.selectTaskNamed",{name:task.label})} disabled={!retryable(task)} checked={selectedTasks.has(task.id) && retryable(task)} onChange={event=>{const checked=event.target.checked;setSelectedTasks(previous=>{const next=new Set(previous);if(checked)next.add(task.id);else next.delete(task.id);return next;});}}/>
+          <span className="min-w-0 flex-1 break-all">{task.label}</span>
+          <span className={cn("text-xs",retryable(task) ? "text-destructive" : "text-muted-foreground")}>{t(`workflow.taskStatus.${task.status}`)}</span>
+          {retryable(task) && <Button variant="outline" aria-label={t("workflow.taskPanel.retryTaskNamed",{name:task.label})} onClick={()=>useTaskQueueStore.getState().retry(task.id)}><ActionIcon action="retry"/>{t(task.kind === "check" && ["cancelled", "interrupted"].includes(task.status) ? "workflow.continueCheck" : "workflow.retryTask")}</Button>}
+        </div>
         {task.steps.map((step, index) => <div key={index} className="mb-2">
-          <p>{step.label} · {t(`workflow.taskStatus.${step.status ?? "queued"}`)}</p>
+          {task.steps.length > 1 && <p>{step.label} · {t(`workflow.taskStatus.${step.status ?? "queued"}`)}</p>}
           {step.error && <p className="mt-1 text-destructive">{taskErrorMessage(step.error, task.kind)}</p>}
           {step.command === "preview_source_backed_resource_repository_updates" && <RepositoryCheckDetails step={step}/>}
           {task.kind === "ai" && step.status === "success" && <p className="mt-2 select-text whitespace-pre-wrap">{typeof step.result === "string" ? step.result : Array.isArray(step.result) && step.result.every(item => typeof item === "string") ? step.result.join(", ") : ""}</p>}
         </div>)}
       </section>)}
-      {imports && !rows.length && <p className="py-8 text-center text-xs text-muted-foreground">{t(items.some(isTaskActive) ? "workflow.taskPanel.importPreparing" : "workflow.noFilteredCheckResults")}</p>}
+      {!imports && !visibleTasks.length && <p className="py-8 text-center text-xs text-muted-foreground">{t("workflow.noFilteredCheckResults")}</p>}
+      {imports && !rows.length && <p className="py-8 text-center text-xs text-muted-foreground">{t(!allRows.length && items.some(isTaskActive) ? "workflow.taskPanel.importPreparing" : "workflow.noFilteredCheckResults")}</p>}
     </div>
+    {!imports && <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border px-4 py-3">
+      <label className="mr-auto inline-flex items-center gap-2 text-xs"><input type="checkbox" aria-label={t("workflow.taskPanel.selectVisible")} disabled={!visibleTasks.some(retryable)} checked={visibleTasks.some(retryable) && visibleTasks.filter(retryable).every(task=>selectedTasks.has(task.id))} ref={input=>{if(input)input.indeterminate=selected.length>0 && selected.length<visibleTasks.filter(retryable).length;}} onChange={event=>setSelectedTasks(new Set(event.target.checked ? visibleTasks.filter(retryable).map(task=>task.id) : []))}/>{t("workflow.taskPanel.selectVisible")}{selected.length>0 && <span>{t("workflow.selectedCompact",{count:selected.length})}</span>}</label>
+      <Button variant="outline" disabled={!selected.length} onClick={()=>{selected.forEach(task=>useTaskQueueStore.getState().retry(task.id));setSelectedTasks(new Set());}}><ActionIcon action="retry"/>{t("workflow.taskPanel.retrySelected")}</Button>
+    </div>}
   </>;
 }
 
@@ -109,7 +128,7 @@ export function TaskCenter() {
     id:group.id, label:group.items[0].kind === "import" ? importRepository(group.items) ?? group.label : group.label, tab:taskTab(group.items[0]), status:groupStatus(group.items), createdAt:group.items[0].createdAt, items:group.items,
   }));
   if (hasReport) entries.push({id:"report",label:t(state.repositories?.length ? "workflow.taskPanel.scopedCheck" : "workflow.taskPanel.fullCheck"),tab:"update",
-    status:reportActive.length ? groupStatus(reportActive) : updatePending || state.error ? "awaiting_input" : "success",createdAt:state.reportCheckedAt ?? 0,items:[]});
+    status:reportActive.length ? groupStatus(reportActive) : reportTasks.some(task => ["cancelled", "interrupted"].includes(task.status) && task.steps.some(step => step.status !== "success")) ? "interrupted" : state.error || state.preview?.repositories.some(repo=>repo.error || state.updateErrors[`mirror:${repo.snapshotId}`]) ? "partial" : updatePending ? "awaiting_input" : "success",createdAt:state.reportCheckedAt ?? 0,items:[]});
   if (importResult?.kind && importResult.status !== "idle" && !tasks.some(task => task.id === importResult.id)) entries.push({
     id:`status:${importResult.id}`,label:importResult.label,tab:importResult.kind,
     status:importResult.status === "running" ? "running" : importResult.status === "error" ? "partial" : "success",
@@ -207,26 +226,25 @@ export function TaskCenter() {
     <Button size="status" variant="ghost" onClick={() => state.setOpen(true)}><ActionIcon action="tasks"/>{t("workflow.activityTitle")} · {t("workflow.activitySummary", {running:tasks.filter(isTaskActive).length,pending})}</Button>
     <Dialog open={state.open} onOpenChange={state.setOpen}>
       <DialogContent className="flex resize flex-col gap-0 overflow-hidden p-0" style={{width:"min(72rem, calc(100vw - 2rem))",height:"min(46rem, calc(100dvh - 2rem))",minWidth:"min(40rem, calc(100vw - 2rem))",minHeight:"min(28rem, calc(100dvh - 2rem))",maxWidth:"calc(100vw - 2rem)",maxHeight:"calc(100dvh - 2rem)"}}>
-        <DialogHeader className="shrink-0 px-4 pt-4 pb-3 pr-12"><div className="flex items-center gap-1"><DialogTitle className="flex items-center gap-2"><ActionIcon action="tasks"/>{t("workflow.activityTitle")}</DialogTitle><Button type="button" size="icon-sm" variant="ghost" className="text-muted-foreground" title={t("workflow.taskPanel.backgroundHint")} aria-label={t("workflow.taskPanel.backgroundHint")}><ActionIcon action="info"/></Button></div></DialogHeader>
-        <div role="tablist" aria-label={t("workflow.taskPanel.taskType")} className="flex shrink-0 gap-2 border-b border-border px-4 pb-3">
-          {(["import", "update"] as const).map(value => <Button key={value} role="tab" aria-selected={tab === value} tabIndex={tab === value ? 0 : -1} aria-controls={`task-panel-${value}`} id={`task-tab-${value}`} size="sm" variant="ghost"
+        <DialogHeader className="m-0 shrink-0 px-4 py-2 pr-12"><div className="flex items-center gap-1"><DialogTitle className="flex items-center gap-2"><ActionIcon action="tasks"/>{t("workflow.activityTitle")}</DialogTitle><Button type="button" size="icon-sm" variant="ghost" className="text-muted-foreground" title={t("workflow.taskPanel.backgroundHint")} aria-label={t("workflow.taskPanel.backgroundHint")}><ActionIcon action="info"/></Button></div></DialogHeader>
+        <div role="tablist" aria-label={t("workflow.taskPanel.taskType")} className="flex shrink-0 gap-4 border-b border-border px-4">
+          {(["import", "update"] as const).map(value => <button type="button" key={value} role="tab" aria-label={`${t(`workflow.taskPanel.tabs.${value}`)} ${t("workflow.taskPanel.runningCount",{count:entries.filter(entry => entry.tab === value && matchesTaskFilter(entry.status,"active")).length})}`} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1} aria-controls={`task-panel-${value}`} id={`task-tab-${value}`}
             onKeyDown={event => {if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {event.preventDefault();const next=event.key === "Home" ? "import" : event.key === "End" ? "update" : value === "import" ? "update" : "import";setTab(next);document.getElementById(`task-tab-${next}`)?.focus({preventScroll:true});}}}
-            className={cn(tab === value && "bg-primary/10 font-semibold text-primary")} onClick={() => setTab(value)}>
-            {value === "import" ? <Download className="size-4"/> : <RefreshCw className="size-4"/>}{t(`workflow.taskPanel.tabs.${value}`)}
-            <span className="text-xs font-normal">{t("workflow.taskPanel.runningCount",{count:entries.filter(entry => entry.tab === value && matchesTaskFilter(entry.status,"active")).length})}</span>
-          </Button>)}
+            className={cn("inline-flex min-h-10 items-center gap-2 border-b-2 border-transparent text-sm font-semibold text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",tab === value && "border-primary text-primary")} onClick={() => setTab(value)}>
+            {value === "import" ? <Download className="size-[1em] shrink-0"/> : <RefreshCw className="size-[1em] shrink-0"/>}{t(`workflow.taskPanel.tabs.${value}`)}
+            <span className="text-xs font-normal">{entries.filter(entry => entry.tab === value && matchesTaskFilter(entry.status,"active")).length || null}</span>
+          </button>)}
         </div>
         <div className="flex min-h-0 flex-1" role="tabpanel" id={`task-panel-${tab}`} aria-labelledby={`task-tab-${tab}`}>
-          <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-muted/20 sm:w-64" aria-label={t("workflow.taskPanel.taskList")}>
-            <div className="shrink-0 p-3"><select className="h-8 w-full rounded-md border border-border bg-popover px-2 text-xs" aria-label={t("workflow.taskPanel.filterTasks")} value={filters[tab]} onChange={event => setFilters(previous => ({...previous,[tab]:event.target.value as TaskFilter}))}>
+          <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-sidebar sm:w-64" aria-label={t("workflow.taskPanel.taskList")}>
+            <div className="shrink-0 p-3"><select className="h-8 w-full rounded-md border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none" aria-label={t("workflow.taskPanel.filterTasks")} value={filters[tab]} onChange={event => setFilters(previous => ({...previous,[tab]:event.target.value as TaskFilter}))}>
               {(["all", "active", "attention", "failed", "finished"] as const).map(value => <option key={value} value={value}>{t(`workflow.taskPanel.filter.${value}`)} {entries.filter(entry => entry.tab === tab && matchesTaskFilter(entry.status,value)).length}</option>)}
             </select></div>
-            <div className="min-h-0 flex-1 space-y-1 overflow-auto px-2 pb-3">
+            <div className="min-h-0 flex-1 overflow-auto pb-3">
               {visible.map(entry => <button key={entry.id} type="button" aria-pressed={current?.id === entry.id} onClick={() => setSelection(previous => ({...previous,[tab]:entry.id}))}
-                className={cn("w-full rounded-md border border-transparent p-3 text-left hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",current?.id === entry.id && "border-primary/20 bg-primary/10")}>
-                <span className="mb-1.5 flex items-center justify-between gap-2 text-xs"><span className={statusColor(entry.status)}>{statusLabel(entry.status)}</span><span className="shrink-0 text-muted-foreground">{entry.createdAt ? new Date(entry.createdAt).toLocaleTimeString(i18n.language,{hour:"2-digit",minute:"2-digit"}) : "—"}</span></span>
-                <span className="block truncate text-sm font-semibold" title={entry.label}>{entry.label}</span>
-                <span className="mt-1 block text-xs text-muted-foreground">{entry.id === "report" ? t("workflow.taskPanel.pendingChanges",{count:updatePending}) : entry.items.length ? t("workflow.taskSteps",{completed:entry.items.reduce((sum,task) => sum+task.steps.filter(step => step.status === "success").length,0),total:entry.items.reduce((sum,task) => sum+task.steps.length,0)}) : t("workflow.taskPanel.skillDetails")}</span>
+                className={cn("w-full border-l-2 border-transparent px-4 py-3 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",current?.id === entry.id && "border-l-primary bg-accent text-accent-foreground")}>
+                <span className="block truncate text-sm font-semibold" title={`${entry.label} · ${entry.createdAt ? new Date(entry.createdAt).toLocaleString(i18n.language) : "—"}`}>{entry.label}</span>
+                <span className="mt-1 flex items-center gap-2 text-xs"><span className={statusColor(entry.status)}>{entry.id === "report" && entry.status === "awaiting_input" && updatePending > 0 ? t("workflow.taskPanel.pendingChanges",{count:updatePending}) : statusLabel(entry.status)}</span></span>
               </button>)}
               {!visible.length && <p className="px-3 py-10 text-center text-xs text-muted-foreground">{t("workflow.noTasks")}</p>}
             </div>
@@ -235,29 +253,34 @@ export function TaskCenter() {
           <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={t("workflow.taskPanel.skillDetails")}>
             {hasReport && <div hidden={current?.id !== "report"} className={current?.id === "report" ? "flex min-h-0 flex-1 flex-col" : "hidden"}><UpdateCenter key={state.reportGeneration ?? "initial"} embedded taskLayout/></div>}
             {current?.items.length ? <>
-              <div className="shrink-0 px-4 py-4">
-                <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0 flex-1"><h3 className="break-all text-sm font-semibold">{current.label}</h3><p className="mt-1 text-xs text-muted-foreground">{t(`workflow.taskKind.${current.items[0].kind}`)} · {new Date(current.createdAt).toLocaleString(i18n.language)} · <span className={statusColor(current.status)}>{statusLabel(current.status)}</span></p></div>
+              <div className="shrink-0 border-b border-border p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0 flex-1"><h3 className="break-all text-sm font-semibold">{current.label}</h3><p className="mt-1 text-xs text-muted-foreground" title={new Date(current.createdAt).toLocaleString(i18n.language)}><span className={statusColor(current.status)}>{statusLabel(current.status)}</span></p></div>
                   <div className="flex flex-wrap items-center gap-1">
                     {reviewTask && <Button size="sm" onClick={() => setReviewTaskId(reviewTask.id)}>{t("workflow.resumeImport")}</Button>}
-                    {active.length > 0 ? <Button size="sm" variant="outline" disabled={stopping} onClick={() => active.forEach(task => useTaskQueueStore.getState().cancel(task.id))}><ActionIcon action="stop"/>{t("workflow.stopTask")}</Button>
-                      : current.items.some(task => needsAttention(task) && task.status !== "awaiting_input" || task.status === "cancelled") && <Button size="sm" variant="outline" onClick={() => current.items.filter(task => needsAttention(task) && task.status !== "awaiting_input" || task.status === "cancelled").forEach(task => useTaskQueueStore.getState().retry(task.id))}><ActionIcon action="retry"/>{t("workflow.retryTask")}</Button>}
+                    {active.length > 0 ? <Button size="sm" variant="outline" disabled={stopping} onClick={() => active.forEach(task => useTaskQueueStore.getState().cancel(task.id))}><ActionIcon action="stop"/>{t(current.items.every(task => task.steps.every(step => step.command === "preview_source_backed_resource_repository_updates")) ? "workflow.pauseCheck" : "workflow.stopTask")}</Button>
+                      : current.items.some(task => needsAttention(task) && task.status !== "awaiting_input" || task.status === "cancelled") && <Button size="sm" variant="outline" onClick={() => current.items.filter(task => needsAttention(task) && task.status !== "awaiting_input" || task.status === "cancelled").forEach(task => useTaskQueueStore.getState().retry(task.id))}><ActionIcon action="retry"/>{t(current.items.every(task => task.steps.every(step => step.command === "preview_source_backed_resource_repository_updates")) && current.items.some(task => ["cancelled", "interrupted"].includes(task.status)) ? "workflow.continueCheck" : current.items.length>1 ? (current.items.some(task=>task.status==="cancelled") ? "workflow.taskPanel.retryUnfinished" : "workflow.taskPanel.retryFailed") : "workflow.retryTask")}</Button>}
                     {(!active.length || stopping) && <Button size="sm" variant="ghost" aria-label={t("workflow.deleteTaskRecord",{name:current.label})} onClick={() => current.items.forEach(task => useTaskQueueStore.getState().remove(task.id))}><ActionIcon action="delete"/>{t("workflow.deleteRecord")}</Button>}
                   </div>
                 </div>
                 <p className="mt-3 text-xs text-muted-foreground">{importRows.length ? t("workflow.taskPanel.importSummary",{total:importRows.length,imported:importRows.filter(row => row.status === "imported" || row.status === "success").length,skipped:importRows.filter(row => row.status === "skipped").length}) : t("workflow.taskSteps",{completed,total})}</p>
                 {current.tab === "import" && active.length > 0 && (repository || importingTask) && <div role="status" aria-live="polite" className="mt-3 space-y-1 text-xs">
-                  {repository && <p>{t("workflow.taskPanel.currentRepository",{repository})}</p>}
                   <p className="text-primary">{t(active.some(task => task.status === "running") ? `workflow.taskPanel.importStage.${importStage}` : "workflow.taskStatus.queued")}</p>
+                  <details className="group">
+                    <summary className="flex cursor-pointer list-none items-center gap-2 text-muted-foreground [&::-webkit-details-marker]:hidden">{t("workflow.taskPanel.executionDetails")}<ChevronRight className="size-[1em] shrink-0 group-open:rotate-90"/></summary>
+                    <div className="mt-3 space-y-2">
+                      {repository && <p>{t("workflow.taskPanel.currentRepository",{repository})}</p>}
                   {importProgress?.currentSkill && <p className="break-all font-medium">{t("workflow.taskPanel.currentSkill",{name:importProgress.currentSkill})}</p>}
                   {importProgress?.currentPath && <p className="break-all text-muted-foreground">{t("workflow.taskPanel.currentFile",{path:importProgress.currentPath})}</p>}
                   {!!importProgress?.totalFiles && <p className="text-muted-foreground">{t("workflow.taskPanel.fileProgress",{completed:importProgress.completedFiles,total:importProgress.totalFiles})}</p>}
+                    </div>
+                  </details>
                 </div>}
                 {current.items.length > 1 && <p className="mt-2 text-xs text-muted-foreground">{t("workflow.batchProgress",{completed:current.items.filter(task => task.status === "success").length,running:current.items.filter(task => task.status === "running").length,queued:current.items.filter(task => task.status === "queued").length,failed:current.items.filter(task => needsAttention(task) && task.status !== "awaiting_input").length})}</p>}
                 {active.length > 0 && <div role="progressbar" aria-label={current.label} aria-valuemin={0} aria-valuenow={determinate ? progressCompleted : undefined} aria-valuemax={progressTotal} className="mt-3 h-1 overflow-hidden rounded-full bg-muted"><div className={cn("h-full bg-primary",!determinate && "animate-pulse")} style={{width:!determinate ? "33%" : `${Math.min(1,progressCompleted/progressTotal)*100}%`}}/></div>}
                 {stopping && <p className="mt-3 text-xs text-muted-foreground">{t("workflow.stopAfterStep")}</p>}
               </div>
               <TaskDetails key={current.id} items={current.items}/>
-              <div className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs text-muted-foreground"><span>{t("workflow.taskPanel.recordsHint")}</span>
+              <div className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs text-muted-foreground"><HintIcon text={t("workflow.taskPanel.recordsHint")}/>
                 <Button size="sm" variant="outline" disabled={!tasks.some(task => taskTab(task) === tab && isTaskActive(task) && !task.cancelRequested)} onClick={() => tasks.filter(task => taskTab(task) === tab && isTaskActive(task)).forEach(task => useTaskQueueStore.getState().cancel(task.id))}><ActionIcon action="stop"/>{t("workflow.stopAllTasks")}</Button>
               </div>
             </> : current?.id.startsWith("status:") && importResult ? <>

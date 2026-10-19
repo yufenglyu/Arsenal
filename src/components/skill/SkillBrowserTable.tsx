@@ -10,7 +10,6 @@ import { createPortal } from "react-dom";
 import { ActionMenuContext } from "@/components/ui/action-menu-context";
 import { isProjectAgentId } from "@/lib/projectTargets";
 import {
-  BookOpen,
   Check,
   ArrowLeftRight,
   ArrowUpDown,
@@ -23,6 +22,8 @@ import {
   Plus,
   LocateFixed,
   FolderOpen,
+  FolderMinus,
+  FolderSync,
   Link2,
   Loader2,
   PackageMinus,
@@ -77,6 +78,8 @@ type InstallationSource = "independent" | "shared";
 
 export interface FolderTableItem {
   onChangeRepositoryAddress?: () => void;
+  onRefreshRepository?: () => void;
+  onDetachGroup?: () => void;
   onNotebook?: () => void;
   hasNotebook?: boolean;
   sourceRepo?: string | null;
@@ -136,6 +139,7 @@ export interface FolderTableItem {
 }
 
 export interface SkillTableItem extends UnifiedSkillCardProps {
+  onDetachGroup?: () => void;
   batchOperations?: BatchOperations;
   detailRequest?: { skillId: string; agentId?: string; rowId?: string };
   onSearch?: () => void;
@@ -158,6 +162,8 @@ export interface SkillTableItem extends UnifiedSkillCardProps {
 }
 
 export interface SkillBrowserTableProps {
+  onDetachSkills?: (ids:string[]) => void;
+  onDragSkills?: (event: React.DragEvent, skillIds: string[]) => void;
   statusPath?: string;
   statusCollections?: boolean;
   onSelectionChange?: (rowKeys: string[]) => void;
@@ -304,6 +310,8 @@ function ActionButton({
   );
 }
 
+function ActionSeparator(){return useContext(ActionMenuContext)?<div role="separator" className="my-1 w-full border-t border-border"/>:null;}
+
 function SkillActions({ skill }: { skill: SkillTableItem }) {
   const { t } = useTranslation();
   const busy = !!skill.isLoading;
@@ -368,6 +376,7 @@ function SkillActions({ skill }: { skill: SkillTableItem }) {
   }
 
   if (skill.onUpdateFromSource || skill.updateFromSourceLabel) {
+    if(actions.length)actions.push(<ActionSeparator key="update-separator"/>);
     actions.push(
       <ActionButton
         key="update"
@@ -381,6 +390,10 @@ function SkillActions({ skill }: { skill: SkillTableItem }) {
   }
 
 
+  if(skill.onDetachGroup || skill.onDeleteFromCentral || skill.onRemove){
+    if(actions.length)actions.push(<ActionSeparator key="remove-separator"/>);
+    if(skill.onDetachGroup)actions.push(<ActionButton key="detach" label={t("groups.detachItem")} onClick={skill.onDetachGroup}><FolderMinus className="size-4"/></ActionButton>);
+  }
   if (skill.onDeleteFromCentral) {
     actions.push(
       skill.deleteFromCentralRequiresDialog ? (
@@ -497,6 +510,7 @@ function FolderActions({ folder }: {folder: FolderTableItem}) {
                                 )}
                               </ActionButton>
                             ) : null}
+                            {(folder.onUpdate || folder.onRefreshRepository || folder.onChangeRepositoryAddress) && (folder.onInstall || folder.onAddToCentral || folder.onRemoveFromCentral || folder.onUninstall) && <ActionSeparator/>}
                             {folder.onChangeRepositoryAddress && <ActionButton label={t("workflow.address.title")} onClick={folder.onChangeRepositoryAddress}><Link2 className="size-4"/></ActionButton>}
                             {folder.onUpdate || folder.updateLabel ? (
                               <ActionButton
@@ -511,6 +525,9 @@ function FolderActions({ folder }: {folder: FolderTableItem}) {
                                 )}
                               </ActionButton>
                             ) : null}
+                            {folder.onRefreshRepository && <ActionButton label={t("workflow.refreshRepositoryInfo")} onClick={folder.onRefreshRepository}><FolderSync className="size-4"/></ActionButton>}
+                            {(folder.onDetachGroup || folder.onDelete) && <ActionSeparator/>}
+                            {folder.onDetachGroup && <ActionButton label={t("groups.detachItem")} onClick={folder.onDetachGroup}><FolderMinus className="size-4"/></ActionButton>}
                             {folder.onDelete ? (
                               folder.deleteRequiresConfirmation ? (
                                 <InlineConfirmAction
@@ -687,7 +704,7 @@ function readColumnWidths(kind: SkillTableKind) {
 }
 
 function isSortableColumn(column: string, kind: SkillTableKind): column is SkillSortField {
-  if (kind === "folder") return column === "skillCount" || column === "githubStars" || column === "name" || column === "createdAt" || column === "updatedAt";
+  if (kind === "folder") return column === "githubStars" || column === "name" || column === "createdAt" || column === "updatedAt";
   return column === "name" || column === "source" || column === "repository" || column === "createdAt" || column === "updatedAt";
 }
 
@@ -705,6 +722,8 @@ function sortHeaderLabel(
 }
 
 export function SkillBrowserTable({
+  onDragSkills,
+  onDetachSkills,
   statusPath,
   statusCollections = false,
   onSelectionChange,
@@ -1153,15 +1172,28 @@ export function SkillBrowserTable({
       <div className="overflow-x-visible">
         <table
           ref={tableRef}
+          onDragStart={event=>{
+            if(!onDragSkills||event.defaultPrevented)return;
+            const row=(event.target as HTMLElement).closest('tbody tr');
+            if(!row)return;
+            const index=Array.from(event.currentTarget.querySelectorAll('tbody > tr')).indexOf(row);
+            const current=visibleRows[index];if(!current)return;
+            const selected=effectiveSelection.has(current.key)?visibleRows.filter(item=>effectiveSelection.has(item.key)):[current];
+            const members=selected.flatMap(item=>item.skill?[item.skill]:item.folder?.children??[]);
+            const ids=[...new Set(members.filter(item=>!item.isReadOnly).map(item=>item.detailRequest?.skillId??item.rowKey??item.name))];
+            if(ids.length)onDragSkills(event,ids);
+          }}
           onKeyDown={event => {
+            if (!event.nativeEvent.isComposing && !shouldIgnoreShortcutTarget(event.target) && (event.ctrlKey||event.metaKey) && !event.altKey && event.key.toLowerCase()==='a') {event.preventDefault();event.stopPropagation();setSelectedRows(new Set(visibleKeys));return;}
             if (event.nativeEvent.isComposing || shouldIgnoreShortcutTarget(event.target)
-              || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
+              || event.altKey
               || !["ArrowUp", "ArrowDown", "ArrowLeft", "Home", "End"].includes(event.key)) return;
             const current = (event.target as HTMLElement).closest("tr");
             const rows = Array.from(event.currentTarget.querySelectorAll<HTMLTableRowElement>("tbody > tr"));
             const index = rows.indexOf(current as HTMLTableRowElement);
             if (index < 0) return;
             if (event.key === "ArrowLeft") {
+              if(event.ctrlKey||event.metaKey||event.shiftKey)return;
               if (!tree || kind !== "folder" || !visibleRows[index]?.skill) return;
               let parentIndex = index - 1;
               while (parentIndex >= 0 && !visibleRows[parentIndex].folder) parentIndex--;
@@ -1193,7 +1225,8 @@ export function SkillBrowserTable({
             const next = rows[nextIndex];
             if (!next) return;
             const action = next.querySelector<HTMLButtonElement>("button[data-row-activate]");
-            (action ?? next).click();
+            if(event.shiftKey||event.ctrlKey||event.metaKey)next.dispatchEvent(new MouseEvent('click',{bubbles:true,shiftKey:event.shiftKey,ctrlKey:event.ctrlKey,metaKey:event.metaKey}));
+            else (action ?? next).click();
             next.focus({preventScroll:true});
             next.scrollIntoView?.({block:"nearest", inline:"nearest"});
           }}
@@ -1280,7 +1313,7 @@ export function SkillBrowserTable({
               ? skills.map((skill, index) => renderSkillRow(skill, index))
               : folders.map((folder, folderIndex) => (
                   <Fragment key={folder.key}>
-                  <tr onMouseDownCapture={preventModifiedTextSelection} aria-selected={effectiveSelection.has(`folder:${folder.key}`)} onClickCapture={event=>selectRow(event,`folder:${folder.key}`)} tabIndex={0} onContextMenu={event => openRowMenu(event, "folder", folder.key)} onKeyDown={event => {
+                  <tr draggable={!!onDragSkills} onMouseDownCapture={preventModifiedTextSelection} aria-selected={effectiveSelection.has(`folder:${folder.key}`)} onClickCapture={event=>selectRow(event,`folder:${folder.key}`)} tabIndex={0} onContextMenu={event => openRowMenu(event, "folder", folder.key)} onKeyDown={event => {
                     if (tree && folder.onToggle && !event.nativeEvent.isComposing && !shouldIgnoreShortcutTarget(event.target)
                       && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
                       && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
@@ -1319,7 +1352,7 @@ export function SkillBrowserTable({
                           </td>
                         );
                       }
-                      if (column === "notebook") return <td key={column} className="px-3 py-2">{folder.hasNotebook && folder.onNotebook && <Button variant="ghost" size="icon" title={t("g.notebook")} aria-label={t("g.notebook")} onClick={e => { e.stopPropagation(); folder.onNotebook?.(); }}><BookOpen/></Button>}</td>;
+                      if (column === "notebook") return <td key={column} className="px-3 py-2">{folder.hasNotebook && folder.onNotebook && <Button variant="ghost" size="icon" title={t("g.notebook")} aria-label={t("g.notebook")} onClick={e => { e.stopPropagation(); folder.onNotebook?.(); }}><ActionIcon action="notebook"/></Button>}</td>;
                       if (column === "source" || column === "notes") return <td key={column} />;
                       if (column === "githubStars") {
                         return <td key={column} className="px-3 py-2 tabular-nums text-muted-foreground">{folder.githubStars == null ? "" : folder.githubStars.toLocaleString()}</td>;
@@ -1378,6 +1411,7 @@ export function SkillBrowserTable({
             {effectiveSelection.size > 1 ? <div>
               <p className="px-2.5 py-1 text-xs text-muted-foreground">{t("browser.selectedRows",{count:effectiveSelection.size})}</p>
               {(["install","update","uninstall","delete"] as BatchAction[]).filter(action=>batchEntries.some(entry=>entry.operations?.[action])).map(action=><ActionButton key={action} label={t(`browser.batch.${action}`)} destructive={action==="delete"||action==="uninstall"} onClick={()=>setBatchRequest({action,entries:batchEntries})}>{action==="install"?<PackagePlus className="size-4"/>:action==="update"?<RefreshCw className="size-4"/>:action==="uninstall"?<PackageMinus className="size-4"/>:<Trash2 className="size-4"/>}</ActionButton>)}
+              {onDetachSkills&&<><ActionSeparator/><ActionButton label={t("groups.detachItem")} onClick={()=>onDetachSkills([...new Set(visibleRows.filter(row=>effectiveSelection.has(row.key)).flatMap(row=>row.skill?[row.skill]:row.folder?.children??[]).map(skill=>skill.detailRequest?.skillId??skill.rowKey??skill.name))])}><FolderMinus className="size-4"/></ActionButton></>}
             </div> : menuSkill ? <SkillActions skill={menuSkill}/> : menuFolder ? <FolderActions folder={menuFolder}/> : null}
           </div>
         </ActionMenuContext.Provider>, document.body)}

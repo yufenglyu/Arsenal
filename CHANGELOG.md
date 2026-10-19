@@ -2,6 +2,16 @@
 
 [English](CHANGELOG.md) | [简体中文](CHANGELOG.zh.md)
 
+## 1.3.0 - 2026-10-19
+
+- Rebrand as Arsenal with a new icon and simplified brand header.
+- Integrate nested groups, drag and drop, and multiple selection into the skill library.
+- Group shared skills, platforms and projects under Skill installation.
+- Refine sidebars, context menus, update confirmation and task dialogs.
+- Pause update checks and continue unfinished repositories after restarting.
+- Migrate configuration and installed links to `.arsenal`, preserving backups and upgrade compatibility.
+- Refresh documentation and screenshots with fictional demonstration data.
+
 ## 1.2.0 - 2026-10-10
 
 - Redesign Tasks with Skill imports / Skill updates tabs, a task list and a details pane. Keep the existing theme, add title/help/cleanup icons, and retain selections across tabs. Start checks from the main toolbar; closing the dialog keeps tasks running.

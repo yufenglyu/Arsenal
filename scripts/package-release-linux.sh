@@ -169,8 +169,8 @@ assert_compatible_app_identity() {
     echo "Refusing to package: Tauri identifier changed. Keeping com.iamzhihuix.skillsmanage preserves existing app data." >&2
     exit 1
   fi
-  if [[ "$product_name" != "SkillsHub" ]]; then
-    echo "Refusing to package: productName must remain SkillsHub. Keep the identifier stable for older installs." >&2
+  if [[ "$product_name" != "Arsenal" ]]; then
+    echo "Refusing to package: productName must remain Arsenal. Keep the identifier stable for older installs." >&2
     exit 1
   fi
   if [[ "$upgrade_code" != "28d41c68-f4a4-5134-b959-34babea58f7f" ]]; then
@@ -178,8 +178,8 @@ assert_compatible_app_identity() {
     exit 1
   fi
 
-  grep -q 'join("\.skillshub")' "$root/src-tauri/src/path_utils.rs" || {
-    echo "Refusing to package: app data must default to ~/.skillshub." >&2
+  grep -q 'join("\.arsenal")' "$root/src-tauri/src/path_utils.rs" || {
+    echo "Refusing to package: app data must default to ~/.arsenal." >&2
     exit 1
   }
   grep -q 'legacy_app_data_dir' "$root/src-tauri/src/path_utils.rs" || {
@@ -200,7 +200,7 @@ update_version_files() {
 
   replace_text "$root/package.json" '("version"\s*:\s*)"[^"]+"' "\${1}\"$next_version\""
   replace_text "$root/src-tauri/tauri.conf.json" '("version"\s*:\s*)"[^"]+"' "\${1}\"$next_version\""
-  replace_text "$root/src-tauri/Cargo.toml" '(\[package\]\s+name = "skillshub"\s+)version = "[^"]+"' "\${1}version = \"$next_version\""
+  replace_text "$root/src-tauri/Cargo.toml" '(\[package\]\s+name = "arsenal"\s+)version = "[^"]+"' "\${1}version = \"$next_version\""
   replace_text "$root/src/pages/SettingsView.tsx" 'const APP_VERSION = "[^"]+";' "const APP_VERSION = \"$next_version\";"
 
   local metainfo_path="$root/src-tauri/bundle/linux/com.iamzhihuix.skillsmanage.metainfo.xml"
@@ -301,13 +301,13 @@ copy_linux_assets() {
   fi
 
   mkdir -p "$out_dir"
-  cp -f "$deb" "$out_dir/skillshub-v${next_version}-Linux-${arch}.deb"
-  cp -f "$rpm" "$out_dir/skillshub-v${next_version}-Linux-${arch}.rpm"
-  cp -f "$appimage" "$out_dir/skillshub-v${next_version}-Linux-${arch}.AppImage"
+  cp -f "$deb" "$out_dir/arsenal-v${next_version}-Linux-${arch}.deb"
+  cp -f "$rpm" "$out_dir/arsenal-v${next_version}-Linux-${arch}.rpm"
+  cp -f "$appimage" "$out_dir/arsenal-v${next_version}-Linux-${arch}.AppImage"
   create_linux_portable_tar \
     "$appimage" \
     "$config_dir" \
-    "$out_dir/skillshub-v${next_version}-Linux-${arch}.tar.gz"
+    "$out_dir/arsenal-v${next_version}-Linux-${arch}.tar.gz"
 }
 
 prepare_packaged_config() {
@@ -320,7 +320,7 @@ prepare_packaged_config() {
 
 copy_packaged_config() {
   local config_dir="$1"
-  local dest="$2/.skillshub"
+  local dest="$2/.arsenal"
   if [[ ! -f "$config_dir/config.json" ]]; then
     echo "Packaged config directory not found at $config_dir. Run prepare_config_dir first." >&2
     return 1
@@ -341,11 +341,11 @@ create_linux_portable_tar() {
 
   if ! (
     set -euo pipefail
-    cp "$appimage_path" "$stage/skillshub.AppImage"
-    chmod +x "$stage/skillshub.AppImage"
+    cp "$appimage_path" "$stage/arsenal.AppImage"
+    chmod +x "$stage/arsenal.AppImage"
     copy_packaged_config "$config_dir" "$stage"
     rm -f "$tar_path"
-    tar -C "$stage" -czf "$tar_path" "skillshub.AppImage" ".skillshub"
+    tar -C "$stage" -czf "$tar_path" "arsenal.AppImage" ".arsenal"
   ); then
     status=1
   fi
@@ -355,10 +355,10 @@ create_linux_portable_tar() {
 
 clean_artifacts() {
   local ROOT="$1"
-# Safety: refuse to run outside the SkillsHub repo
+# Safety: refuse to run outside the Arsenal repo
 if [ ! -f "$ROOT/package.json" ] || [ ! -f "$ROOT/src-tauri/Cargo.toml" ]; then
   echo "ERROR: package.json / src-tauri/Cargo.toml not found under $ROOT"
-  echo "       This script must run inside the SkillsHub repository."
+  echo "       This script must run inside the Arsenal repository."
   exit 1
 fi
 

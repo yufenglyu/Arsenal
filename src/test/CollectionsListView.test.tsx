@@ -157,8 +157,8 @@ const mockResourceSkills: SkillWithLinks[] = [
     id: "frontend-design",
     name: "frontend-design",
     description: "Build distinctive frontend UIs",
-    file_path: "~/.skillshub/library/frontend-design/SKILL.md",
-    canonical_path: "~/.skillshub/library/frontend-design",
+    file_path: "~/.arsenal/library/frontend-design/SKILL.md",
+    canonical_path: "~/.arsenal/library/frontend-design",
     is_central: false,
     scanned_at: "2026-04-09T00:00:00Z",
     linked_agents: [],
@@ -224,7 +224,7 @@ function buildResourceLibraryStoreState() {
   return {
     skills: mockResourceSkills,
     agents: mockAgents,
-    resourceLibraryDir: "~/.skillshub/library",
+    resourceLibraryDir: "~/.arsenal/library",
     isLoading: false,
     isInstalling: false,
     isUpdatingSources: false,
@@ -349,7 +349,7 @@ describe("CollectionsListView", () => {
 
   it("shows a refresh button next to the collections title", () => {
     renderList();
-    expect(screen.getByRole("button", { name: "刷新技能合集" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刷新技能分组" })).toBeInTheDocument();
   });
 
   it("reloads collections, the selected detail, and the skill repository on refresh", async () => {
@@ -359,7 +359,7 @@ describe("CollectionsListView", () => {
     mockLoadResourceLibrary.mockClear();
     mockRefreshCounts.mockClear();
 
-    fireEvent.click(screen.getByRole("button", { name: "刷新技能合集" }));
+    fireEvent.click(screen.getByRole("button", { name: "刷新技能分组" }));
 
     await waitFor(() => {
       expect(mockLoadCollections).toHaveBeenCalled();
@@ -391,7 +391,7 @@ describe("CollectionsListView", () => {
     expect(screen.queryByRole("button", { name: /^导出$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "平铺" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "目录" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /新建合集/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /新建分组/i })).toBeInTheDocument();
     const list = screen.getByLabelText("技能列表", {selector:"section"});
     expect(within(list).getAllByRole("row")).toHaveLength(4);
     const menu = openRowActions(screen.getByRole("button", {name:"Frontend"}).closest("tr")!);

@@ -208,6 +208,33 @@ pub fn symlink_target_path(from_dir: &Path, to_path: &Path) -> PathBuf {
     make_relative_path(from_dir, to_path)
 }
 
+/// Retarget only a verified link. The caller persists the plan before invoking
+/// this, so an interrupted replacement can resume when the link is absent.
+pub fn migrate_installation_link(path: &Path, previous: &Path, target: &Path, staging: &Path) -> Result<(), String> {
+    let same_target = |value: &Path| {
+        let a = value.to_string_lossy().trim_start_matches("\\\\?\\").replace('\\', "/");
+        let b = target.to_string_lossy().trim_start_matches("\\\\?\\").replace('\\', "/");
+        if cfg!(windows) { a.eq_ignore_ascii_case(&b) } else { a == b }
+    };
+    let current = std::fs::read_link(path);
+    if current.as_deref().ok().is_some_and(same_target) { return Ok(()); }
+    if std::fs::symlink_metadata(path).is_ok() && current.as_deref().ok() != Some(previous) {
+        return Err("Installation entry changed during migration; no files were replaced".into());
+    }
+    if std::fs::symlink_metadata(staging).is_ok() {
+        if !std::fs::read_link(staging).as_deref().ok().is_some_and(same_target) { return Err("Migration staging entry is not the expected link".into()); }
+    } else {
+        #[cfg(windows)]
+        let created = if target.is_file() { std::os::windows::fs::symlink_file(target, staging).map_err(|e| e.to_string()) }
+            else { create_symlink(target, staging).or_else(|_| crate::config_dir_migration::compatibility_link(target, staging)) };
+        #[cfg(not(windows))]
+        let created = create_symlink(target, staging);
+        created.map_err(|_| "Cannot prepare replacement installation link")?;
+    }
+    if std::fs::symlink_metadata(path).is_ok() { remove_symlink_path(path).map_err(|_| "Cannot remove the verified old installation link")?; }
+    std::fs::rename(staging, path).map_err(|_| "Installation link migration interrupted; restart to resume".to_string())
+}
+
 fn relative_skill_path_for_install(skill_id: &str) -> PathBuf {
     PathBuf::from(skill_id)
 }

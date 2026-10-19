@@ -291,6 +291,8 @@ export interface DeleteCentralSkillBundleResult {
 
 export interface Collection {
   id: string;
+  parent_id?: string | null;
+  sort_order?: number;
   name: string;
   description?: string;
   created_at: string;

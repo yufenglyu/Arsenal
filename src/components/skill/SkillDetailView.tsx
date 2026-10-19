@@ -22,7 +22,6 @@ import {
   FolderOpen,
   Lock,
   Info,
-  NotebookPen,
   Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -1091,7 +1090,7 @@ export function SkillDetailView({
                   {detail && !detail.is_read_only && (
                     <>
                     <section hidden={variant === "inspector" && inspectorTab === "document"} aria-label={t("detail.notesRegion")}>
-                      <SectionLabel icon={<NotebookPen className="size-4 shrink-0" aria-hidden="true"/>}>{t("detail.notes")}</SectionLabel>
+                      <SectionLabel icon={<ActionIcon action="remark"/>}>{t("detail.notes")}</SectionLabel>
                       <div className="space-y-3 rounded-lg border border-border/70 bg-background p-3">
                         <div className="space-y-2">
                           <Textarea

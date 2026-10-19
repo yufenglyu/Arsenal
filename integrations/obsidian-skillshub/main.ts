@@ -18,7 +18,7 @@ function properties(text: string): Record<string, unknown> {
 }
 
 /** Read-only integration: file names are never used as identity or modified by this plugin. */
-export default class SkillsHubLink extends Plugin {
+export default class ArsenalLink extends Plugin {
   private index: Map<string, TFile[]> | null = null;
   private generation = 0;
   private ready!: Promise<void>;
@@ -31,20 +31,20 @@ export default class SkillsHubLink extends Plugin {
     this.registerEvent(this.app.vault.on("delete", invalidate));
     this.registerEvent(this.app.vault.on("rename", invalidate));
     this.registerObsidianProtocolHandler("skillshub-note", params => {
-      void this.openNote(params.id).catch(() => new Notice("SkillsHub: Unable to open the note / 无法打开笔记。"));
+      void this.openNote(params.id).catch(() => new Notice("Arsenal: Unable to open the note / 无法打开笔记。"));
     });
     this.addCommand({
       id: "copy-stable-note-link", name: "Copy stable note link / 复制稳定笔记链接",
-      callback: () => { void this.copyLink().catch(() => new Notice("SkillsHub: Unable to copy link / 无法复制链接。")); },
+      callback: () => { void this.copyLink().catch(() => new Notice("Arsenal: Unable to copy link / 无法复制链接。")); },
     });
     this.addCommand({
-      id: "return-to-skillshub", name: "Open repository in SkillsHub / 返回 SkillsHub 仓库",
-      callback: () => { void this.returnToSkillsHub().catch(() => new Notice("SkillsHub: Unable to read properties / 无法读取属性。")); },
+      id: "return-to-skillshub", name: "Open repository in Arsenal / 返回 Arsenal 仓库",
+      callback: () => { void this.returnToArsenal().catch(() => new Notice("Arsenal: Unable to read properties / 无法读取属性。")); },
     });
     this.addCommand({ id: "rebuild-note-index", name: "Rebuild note index / 重建笔记索引", callback: () => {
       invalidate();
-      void this.buildIndex().then(() => new Notice("SkillsHub: Index rebuilt / 索引已重建。"))
-        .catch(() => new Notice("SkillsHub: Unable to index this vault / 无法为此库建立索引。"));
+      void this.buildIndex().then(() => new Notice("Arsenal: Index rebuilt / 索引已重建。"))
+        .catch(() => new Notice("Arsenal: Unable to index this vault / 无法为此库建立索引。"));
     } });
   }
 
@@ -68,20 +68,20 @@ export default class SkillsHubLink extends Plugin {
 
   private async openNote(value: unknown): Promise<void> {
     const id = identity(value);
-    if (!id) { new Notice("SkillsHub: Invalid note ID / 笔记 ID 无效。"); return; }
+    if (!id) { new Notice("Arsenal: Invalid note ID / 笔记 ID 无效。"); return; }
     const index = this.index ?? await this.buildIndex();
     const files = index.get(id) ?? [];
     if (files.length !== 1) {
       new Notice(files.length > 1
-        ? "SkillsHub: Duplicate note ID. Resolve the copied notes first / 笔记 ID 重复，请先处理副本。"
-        : "SkillsHub: Note not found. Open its vault and enable SkillsHub Link / 未找到笔记，请打开所属库并启用 SkillsHub Link。");
+        ? "Arsenal: Duplicate note ID. Resolve the copied notes first / 笔记 ID 重复，请先处理副本。"
+        : "Arsenal: Note not found. Open its vault and enable Arsenal Link / 未找到笔记，请打开所属库并启用 Arsenal Link。");
       return;
     }
     const file = files[0];
     if (this.app.vault.getAbstractFileByPath(file.path) !== file ||
         identity(properties(await this.app.vault.cachedRead(file)).skillshub_note_id) !== id) {
       this.index = null;
-      new Notice("SkillsHub: Note changed. Try the link again / 笔记已变化，请重试链接。");
+      new Notice("Arsenal: Note changed. Try the link again / 笔记已变化，请重试链接。");
       return;
     }
     await this.app.workspace.getLeaf(false).openFile(file);
@@ -89,7 +89,7 @@ export default class SkillsHubLink extends Plugin {
 
   private async activeProperties(): Promise<Record<string, unknown> | null> {
     const file = this.app.workspace.getActiveFile();
-    if (!file || file.extension !== "md") { new Notice("SkillsHub: Open a linked Markdown note first / 请先打开已关联笔记。"); return null; }
+    if (!file || file.extension !== "md") { new Notice("Arsenal: Open a linked Markdown note first / 请先打开已关联笔记。"); return null; }
     return properties(await this.app.vault.cachedRead(file));
   }
 
@@ -97,16 +97,16 @@ export default class SkillsHubLink extends Plugin {
     const data = await this.activeProperties();
     if (!data) return;
     const id = identity(data.skillshub_note_id);
-    if (!id) { new Notice("SkillsHub: Open this note in SkillsHub to initialize its ID / 请先在 SkillsHub 中打开笔记以初始化 ID。"); return; }
+    if (!id) { new Notice("Arsenal: Open this note in Arsenal to initialize its ID / 请先在 Arsenal 中打开笔记以初始化 ID。"); return; }
     await navigator.clipboard.writeText(`obsidian://skillshub-note?id=${id}`);
-    new Notice("SkillsHub: Stable link copied / 稳定链接已复制。");
+    new Notice("Arsenal: Stable link copied / 稳定链接已复制。");
   }
 
-  private async returnToSkillsHub(): Promise<void> {
+  private async returnToArsenal(): Promise<void> {
     const data = await this.activeProperties();
     if (!data) return;
     const id = identity(data.skillshub_repository_id);
-    if (!id) { new Notice("SkillsHub: Repository ID missing / 缺少仓库 ID。"); return; }
+    if (!id) { new Notice("Arsenal: Repository ID missing / 缺少仓库 ID。"); return; }
     // Construct a known navigation URI; never execute arbitrary front matter URLs.
     window.open(`skillshub://repository/${id}?tab=notebook`);
   }
