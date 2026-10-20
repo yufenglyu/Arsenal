@@ -346,7 +346,7 @@ export function TaskCenter() {
           <DialogDescription className="sr-only">
             {t("workflow.taskPanel.backgroundHint")}
           </DialogDescription>
-          <header className="flex shrink-0 flex-wrap items-center gap-4 border-b border-border p-4 pr-12">
+          <header className="flex min-h-16 shrink-0 flex-wrap items-center gap-4 border-b border-border p-4 pr-12">
             <DialogTitle className="flex items-center gap-2">
               <ListTodo className="size-[1em]" />
               {t("workflow.activityTitle")}
@@ -399,16 +399,7 @@ export function TaskCenter() {
                 </button>
               ))}
             </div>
-            <Button
-              variant="ghost"
-              className={cn("ml-auto", tab !== "history" && "invisible pointer-events-none")}
-              aria-hidden={tab !== "history"}
-              tabIndex={tab === "history" ? 0 : -1}
-              disabled={tab !== "history" || !historyCount}
-              onClick={clearHistory}
-            >
-              {t("workflow.clearFinished")}
-            </Button>
+
           </header>
           <div
             role="tabpanel"
@@ -594,10 +585,11 @@ export function TaskCenter() {
           <footer className="flex shrink-0 flex-wrap items-center gap-4 border-t border-border p-4">
             <HintIcon text={t("workflow.taskPanel.backgroundHint")} />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold">{t("workflow.flow.selected", {count: choices.length})}</p>
-              <p className="text-xs text-muted-foreground">{t("workflow.flow.remaining", {risk: riskCount, check: recheckCount})}</p>
+              <p className="text-sm font-semibold">{tab === "history" ? t("workflow.batch.history") : t("workflow.flow.selected", {count: choices.length})}</p>
+              <p className="text-xs text-muted-foreground">{tab === "history" ? t("workflow.taskPanel.backgroundHint") : t("workflow.flow.remaining", {risk: riskCount, check: recheckCount})}</p>
               {submitError && <p role="alert" className="text-xs text-destructive">{t("workflow.batch.previewUnavailable")}</p>}
             </div>
+            {tab === "history" && <Button variant="outline" disabled={!historyCount} onClick={clearHistory}>{t("workflow.clearFinished")}</Button>}
             {tab === "current" && <><Button variant="outline" disabled={!batches.some(batch => !isHistory(batch) && batch.status === "success")} onClick={() => setArchived(previous => new Set([...previous, ...batches.filter(batch => batch.status === "success").map(batch => batch.id)]))}>{t("workflow.flow.archive")}</Button>
             <Button disabled={!choices.length} onClick={() => {
               const count = state.applySnapshots(choices.map(row => ({repository: row.repository, snapshotId: row.preview!.snapshotId!, allowDeletions: !!selection.approved.includes(row.preview!.snapshotId!)})), state.reportGeneration);
