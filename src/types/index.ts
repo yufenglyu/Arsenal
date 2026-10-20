@@ -430,6 +430,7 @@ export interface RepositorySyncPreviewItem {
 }
 
 export interface RepositorySyncPreview {
+  localModified?: boolean | null;
   snapshotId?: string | null;
   documentChanges?: {path:string;status:"added"|"modified"|"deleted"}[];
   repository: string;

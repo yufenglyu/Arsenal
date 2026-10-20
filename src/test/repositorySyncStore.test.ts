@@ -244,7 +244,7 @@ it("keeps the frozen coverage denominator when a repository is rechecked", async
 
 describe("repository check checkpoints", () => {
   const report = (repository:string):RepositorySyncPreviewReport => ({repositories:[{repository,added:[],modified:[],deleted:[],unchanged:[]}]});
-  it("pauses between repositories and resumes without checking completed repositories again", async () => {
+  it("checks repositories in parallel and resumes without repeating completed work", async () => {
     vi.restoreAllMocks(); queue.setState({tasks:[]});
     useRepositorySyncStore.setState({reportGeneration:"checkpoint",preview:null,isChecking:false,checkingRepository:null,migratingRepository:null});
     let finish!: (value:RepositorySyncPreviewReport) => void;
@@ -252,16 +252,18 @@ describe("repository check checkpoints", () => {
       .mockImplementationOnce(() => new Promise(resolve => {finish=resolve;}))
       .mockResolvedValueOnce(report("example/two"));
     const pending = useRepositorySyncStore.getState().checkForUpdates(["example/one","example/two"]);
-    const task = queue.getState().tasks.at(-1)!;
-    expect(task.steps).toHaveLength(2);
-    queue.getState().cancel(task.id);
+    const tasks = queue.getState().tasks;
+    expect(tasks).toHaveLength(2);
+    expect(tasks.every(task => task.steps.length === 1)).toBe(true);
+    expect(tasks.map(task => task.locks)).toEqual([["repo:example/one"], ["repo:example/two"]]);
+    expect(check).toHaveBeenCalledTimes(2);
+    queue.getState().cancel(tasks[0].id);
     finish(report("example/one")); await pending;
-    expect(check).toHaveBeenCalledTimes(1);
-    expect(queue.getState().tasks.at(-1)?.steps[0].status).toBe("success");
+    expect(queue.getState().tasks.every(task => task.steps[0].status === "success")).toBe(true);
     expect(useRepositorySyncStore.getState().error).toBeNull();
     await useRepositorySyncStore.getState().checkForUpdates();
     expect(check.mock.calls.map(call=>call[0])).toEqual([["example/one"],["example/two"]]);
-    expect(useRepositorySyncStore.getState().preview?.repositories.map(repo=>repo.repository)).toEqual(["example/one","example/two"]);
+    expect(useRepositorySyncStore.getState().preview?.repositories.map(repo=>repo.repository).sort()).toEqual(["example/one","example/two"]);
   });
   it("rehydrates an interrupted check and continues only its unfinished repository steps", async () => {
     vi.restoreAllMocks(); queue.setState({tasks:[]});

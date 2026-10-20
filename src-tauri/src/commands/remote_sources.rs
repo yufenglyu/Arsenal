@@ -451,6 +451,8 @@ pub struct RepositorySyncPreviewItem {
 #[serde(rename_all = "camelCase")]
 pub struct RepositorySyncPreview {
     #[serde(default)]
+    pub local_modified: Option<bool>,
+    #[serde(default)]
     pub snapshot_id: Option<String>,
     #[serde(default)]
     pub document_changes: Vec<RepositoryFileChange>,
@@ -731,6 +733,7 @@ async fn preview_github_repo_group_scoped(
         Ok(repo_ref) => repo_ref,
         Err(error) => {
             return RepositorySyncPreview {
+                local_modified: None,
                 snapshot_id: None,
                 document_changes: Vec::new(),
                 repository: repo.to_string(),
@@ -764,6 +767,7 @@ async fn preview_github_repo_group_scoped(
         Ok(result) => result,
         Err(error) => {
             return RepositorySyncPreview {
+                local_modified: None,
                 snapshot_id: None,
                 document_changes: Vec::new(),
                 repository: repo.to_string(),
@@ -874,6 +878,7 @@ async fn preview_github_repo_group_scoped(
     unchanged.sort_by(|left, right| left.skill_id.cmp(&right.skill_id));
 
     RepositorySyncPreview {
+        local_modified: None,
         snapshot_id: None,
         document_changes: Vec::new(),
         repository: repo.to_string(),
@@ -3067,6 +3072,7 @@ mod repository_file_tests {
     #[test]
     fn repeated_apply_requires_an_exact_unchanged_content_version() {
         let preview = RepositorySyncPreview {
+            local_modified: None,
             snapshot_id: None,
             document_changes: vec![],
             repository: "example/repo".into(),

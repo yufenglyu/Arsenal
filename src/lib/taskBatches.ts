@@ -114,9 +114,10 @@ export function reportRows(
       }
     }
   for (const [key, row] of rows) {
+    const lastCheck = Math.max(-1, ...tasks.filter(task => task.steps.some(step => step.command === CHECK_REPOSITORIES && step.status === "success" && Array.isArray(step.args.repositories) && step.args.repositories.some(name => typeof name === "string" && name.toLowerCase() === key))).map(task => task.createdAt));
     const applyTask = [...tasks]
       .reverse()
-      .find((task) =>
+      .find((task) => task.createdAt >= lastCheck &&
         task.steps.some(
           (step) =>
             step.command === "apply_repository_snapshot" &&
@@ -135,8 +136,10 @@ export function reportRows(
         applied: applyTask.status === "success" || row.applied,
       });
     else if (error) rows.set(key, { ...row, status: "failed", error });
+    const current = rows.get(key)!;
+    if (current.error && (applyTask || /PREVIEW_EXPIRED|SNAPSHOT_UNAVAILABLE|LOCAL_IDENTITY_CHANGED|LOCAL_CONTENT_CHANGED/i.test(current.error))) rows.set(key, {...current, needsCheck: true});
   }
-  return [...rows.values()];
+  return [...rows.values()].sort((a, b) => a.repository.localeCompare(b.repository));
 }
 
 export function buildTaskBatches(

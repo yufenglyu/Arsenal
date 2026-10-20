@@ -1,3 +1,4 @@
+import {useTaskReviewStore} from "./taskReviewStore";
 import {useNotebookStore} from "./notebookStore";
 import {invoke, isTauriRuntime} from "@/lib/tauri";
 import { useRepositoryDocumentStore } from "./repositoryDocumentStore";
@@ -76,7 +77,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
     (set, get) => ({
       applySnapshots: (choices, generation) => {
         const state = get();
-        if (state.reportGeneration !== generation || state.isChecking || state.checkingRepository || state.migratingRepository) return 0;
+        if (state.reportGeneration !== generation || state.migratingRepository) return 0;
         const parentReportGeneration = getReportTaskGeneration();
         const batchId = crypto.randomUUID();
         let count = 0;
@@ -172,13 +173,18 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
         }),
       recheckRepository: (repository) => get().recheckRepositories([repository]),
       recheckRepositories: async (repositories) => {
-        if (get().isChecking || !repositories.length) return;
-        const requested = [...new Set(repositories.map(repo => repo.toLowerCase()))].filter(repo => !activeRechecks.has(repo));
+        if (!repositories.length) return;
+        const requested = [...new Set(repositories.map(repo => repo.toLowerCase()))].filter(repo => !activeRechecks.has(repo) && !useTaskQueueStore.getState().tasks.some(task => isTaskActive(task) && task.locks.some(lock => lock === "repo:*" || lock === `repo:${repo}`)));
         if (!requested.length) return;
+        useTaskReviewStore.getState().forget(get().preview?.repositories.flatMap(row => requested.includes(row.repository.toLowerCase()) && row.snapshotId ? [row.snapshotId] : []) ?? []);
         requested.forEach(repo => activeRechecks.add(repo));
-        set({ checkingRepository: [...activeRechecks][0] });
+        set(state => ({ checkingRepository: [...activeRechecks][0], preview: state.preview ? {...state.preview, repositories: state.preview.repositories.map(row => requested.includes(row.repository.toLowerCase()) ? {...row, snapshotId: null, error: null} : row)} : null }));
         try {
-          const report = await checkInBackground(requested, getReportTaskGeneration());
+          const reports: RepositorySyncPreviewReport[] = await Promise.all(requested.map(async repo => {
+            try { return await checkInBackground([repo], getReportTaskGeneration()); }
+            catch (error) { return {repositories: [{repository: repo, snapshotId: null, added: [], modified: [], deleted: [], unchanged: [], error: String(error)}]} satisfies RepositorySyncPreviewReport; }
+          }));
+          const report = {repositories: reports.flatMap(r => r.repositories), coverage: reports.flatMap(r => r.coverage ?? [])};
           set((state) => ({
             preview: state.preview ? {
               ...state.preview,
@@ -215,14 +221,14 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
       checkForUpdates: (repositories) => {
         if (previewRequest) return previewRequest;
         if (get().checkingRepository || get().migratingRepository) return Promise.resolve();
-        const existing = useTaskQueueStore.getState().tasks.find(task =>
+        const existing = useTaskQueueStore.getState().tasks.filter(task =>
           !!get().reportGeneration && task.parentReportGeneration === get().reportGeneration && task.steps.length > 0 &&
           task.steps.every(step => step.command === "preview_source_backed_resource_repository_updates") &&
           (isTaskActive(task) || ["cancelled", "interrupted"].includes(task.status)));
-        if (existing) {
-          if (!isTaskActive(existing)) useTaskQueueStore.getState().retry(existing.id);
+        if (existing.length) {
+          existing.filter(task => !isTaskActive(task)).forEach(task => useTaskQueueStore.getState().retry(task.id));
           set({isChecking:true, error:null});
-          previewRequest = waitForTask(existing.id).then(() => {}).finally(() => {
+          previewRequest = Promise.all(existing.map(task => waitForTask(task.id))).then(() => {}).finally(() => {
             set({isChecking:false}); previewRequest = null;
           });
           return previewRequest;
@@ -249,7 +255,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
             const preview = await checkInBackground(repositories);
             toast.info(i18n.t("workflow.checkFinished", {count: preview.repositories.reduce<number>((sum, repo) => sum + repo.added.length + repo.modified.length + repo.deleted.length, 0), failures: preview.repositories.filter(repo => repo.error).length}), {action:{label:i18n.t("workflow.viewResults"),onClick:() => get().setOpen(true)}});
             set({
-              preview,
+              preview: get().preview ?? preview,
               reportCheckedAt: Date.now(),
               includeAdded: true,
               removeDeleted: false,
@@ -365,22 +371,19 @@ async function checkInBackground(
     ? await invoke<string[]>("plan_repository_update_check")
     : [...new Set(useResourceLibraryStore.getState().skills.flatMap(skill => skill.source_repo ? [skill.source_repo.toLowerCase()] : []))];
   const scopes = planned.length ? planned.map(repository => [repository]) : [null];
-  const id = useTaskQueueStore
-    .getState()
-    .enqueue({
-      parentReportGeneration: parentReportGeneration ?? reportGeneration ?? undefined,
-      key: `check:${repositories?.slice().sort().join(",") ?? "all"}:${reportGeneration ?? "legacy"}`,
-      kind: "check",
-      scope: {mode: repositories?.length ? "selected" : "all", repositories: planned},
-      locks: repositories?.length ? repositories.map(repo => `repo:${repo.toLowerCase()}`) : ["repo:*"],
-      label: repositories?.length ? i18n.t("workflow.checkRepositories", {count:repositories.length}) : i18n.t("workflow.allSourceRepositories"),
-      steps: scopes.map(scope => ({
-        label: scope?.[0] ?? i18n.t("workflow.recheck"),
-        command: "preview_source_backed_resource_repository_updates",
-        args: { repositories: scope, reportGeneration, plannedRepositories: planned },
-      })),
-    });
-  const task = await waitForTask(id);
+  const batchId = crypto.randomUUID();
+  const ids = scopes.map(scope => useTaskQueueStore.getState().enqueue({
+    batchId,
+    parentReportGeneration: parentReportGeneration ?? reportGeneration ?? undefined,
+    key: `check:${scope?.[0] ?? "all"}:${reportGeneration ?? "legacy"}`,
+    kind: "check",
+    scope: {mode: repositories?.length ? "selected" : "all", repositories: planned},
+    locks: scope?.length ? scope.map(repo => `repo:${repo.toLowerCase()}`) : ["repo:*"],
+    label: scope?.[0] ?? i18n.t("workflow.allSourceRepositories"),
+    steps: [{ label: scope?.[0] ?? i18n.t("workflow.recheck"), command: "preview_source_backed_resource_repository_updates", args: {repositories: scope, reportGeneration, plannedRepositories: planned} }],
+  }));
+  const completed = await Promise.all(ids.map(waitForTask));
+  const task = {status: completed.some(task => ["cancelled", "interrupted"].includes(task.status)) ? "cancelled" : completed.every(task => task.status === "success") ? "success" : completed.some(task => task.status === "success" || task.status === "partial") ? "partial" : "failed", steps: completed.flatMap(task => task.steps)};
   if (task.status === "cancelled" || task.status === "interrupted") throw new CheckPaused();
   if (task.status !== "success" && task.status !== "partial")
     throw new Error(task.steps.find(step => step.error)?.error ?? i18n.t("workflow.operationFailed"));
@@ -484,7 +487,7 @@ registerTaskResult(
     const report = {...rawReport, repositories:rawReport.repositories.filter(repo => !scope || scope.has(repo.repository.toLowerCase()))};
     useRepositorySyncStore.setState((state) => ({
       updateErrors: Object.fromEntries(Object.entries(state.updateErrors).filter(([key]) =>
-        !report.repositories.some(repo => !repo.error && key.startsWith(`${repo.repository.toLowerCase()}:`)))),
+        !report.repositories.some(repo => !repo.error && (key.startsWith(`${repo.repository.toLowerCase()}:`) || key === `mirror:${repo.snapshotId}`)))),
       reportCheckedAt: state.reportCheckedAt ?? Date.now(),
       checkedAt: {...state.checkedAt, ...Object.fromEntries(report.repositories.map(repo => [repo.repository.toLowerCase(), Date.now()]))},
       preview:
@@ -541,6 +544,7 @@ registerTaskCompletion("apply_repository_snapshot", async () => {
 });
 
 function releaseSnapshots(repositories: RepositorySyncPreview[]) {
+  useTaskReviewStore.getState().forget(repositories.flatMap(repo => repo.snapshotId ? [repo.snapshotId] : []));
   if (!isTauriRuntime()) return;
   const tasks = useTaskQueueStore.getState().tasks;
   const snapshotIds = repositories.flatMap(repo => repo.snapshotId && !tasks.some(task => task.status !== "success" && !task.clearRequested && task.steps.some(step=>step.command === "apply_repository_snapshot" && step.args.snapshotId===repo.snapshotId)) ? [repo.snapshotId] : []);

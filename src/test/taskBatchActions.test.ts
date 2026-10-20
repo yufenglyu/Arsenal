@@ -175,7 +175,7 @@ it("requires consent for removed files inside a modified skill", () => {
   ).toBe(0);
   expect(enqueue).not.toHaveBeenCalled();
 });
-it("blocks update application during a repository lock or global check", () => {
+it("blocks conflicting repository locks but permits sync during other checks", () => {
   const enqueue = vi
     .spyOn(queue.getState(), "enqueue")
     .mockReturnValue("child");
@@ -192,8 +192,9 @@ it("blocks update application during a repository lock or global check", () => {
   expect(updates.getState().applySnapshots(choices, "generation")).toBe(0);
   queue.setState({ tasks: [] });
   updates.setState({ isChecking: true });
-  expect(updates.getState().applySnapshots(choices, "generation")).toBe(0);
-  expect(enqueue).not.toHaveBeenCalled();
+  queue.setState({tasks: [{...task("other", "running"), locks: ["repo:other/repo"]}]});
+  expect(updates.getState().applySnapshots(choices, "generation")).toBe(1);
+  expect(enqueue).toHaveBeenCalledOnce();
 });
 it("does not enqueue repositories with unchanged or failed previews", () => {
   const enqueue = vi
@@ -316,4 +317,10 @@ it("rejects stale import reviews and unknown paths without marking preparation c
   ).toBeNull();
   expect(enqueue).not.toHaveBeenCalled();
   expect(queue.getState().tasks[0].status).toBe("awaiting_input");
+});
+
+it("supersedes a failed sync after a newer check even when immutable snapshot IDs match", () => {
+  const failed = {...task("failed-sync", "failed"),createdAt: 1, steps: [{command: "apply_repository_snapshot", label: "Apply", args: {snapshotId: "snapshot"}, status: "failed" as const, error: "LOCAL_IDENTITY_CHANGED"}]};
+  const checked = {...task("new-check", "success"),createdAt: 2, steps: [{command: CHECK_REPOSITORIES, label: "Check", args: {repositories: [repo.repository]}, status: "success" as const}]};
+  expect(reportRows(updates.getState(), [failed, checked])[0]).toMatchObject({status: "success", needsCheck: false, error: undefined});
 });

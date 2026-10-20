@@ -1,3 +1,4 @@
+import {useTaskReviewStore} from "@/stores/taskReviewStore";
 import { beforeEach, afterEach, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, act, within } from "@testing-library/react";
 import { TaskCenter } from "@/components/layout/TaskCenter";
@@ -29,6 +30,7 @@ const repo = (
 ): RepositorySyncPreview => ({
   repository: "example/repo",
   snapshotId: "snapshot-one",
+  localModified: false,
   added: [],
   modified: [
     {
@@ -117,6 +119,7 @@ const prepared = (): BackgroundTask => ({
   ],
 });
 beforeEach(() => {
+  useTaskReviewStore.setState({excluded: [], approved: []});
   queue.setState({ tasks: [] });
   updates.setState({
     open: false,
@@ -168,7 +171,7 @@ it("uses current/history tabs with keyboard navigation", () => {
   );
   expect(screen.getByText("暂无历史记录")).toBeVisible();
 });
-it("keeps one batch in place through completion until it is collapsed", () => {
+it("keeps completed batches until explicitly archived", () => {
   queue.setState({
     tasks: [
       { ...task("a", "success"), batchId: "batch", batchLabel: "Batch" },
@@ -199,6 +202,7 @@ it("keeps one batch in place through completion until it is collapsed", () => {
     screen.getAllByRole("article").map((el) => el.getAttribute("aria-label")),
   ).toEqual(before);
   expand("Batch");
+  fireEvent.click(screen.getByRole("button", {name: "归档已完成"}));
   expect(
     screen.queryByRole("article", { name: "Batch" }),
   ).not.toBeInTheDocument();
@@ -410,9 +414,10 @@ it("requires inline deletion confirmation and invalidates it when the snapshot c
   open();
   expect(screen.getAllByRole("dialog")).toHaveLength(1);
   const submit = () =>
-    screen.getByRole("button", { name: "确认更新 1 个仓库" });
+    screen.getByRole("button", { name: /同步已选 [01] 个仓库/ });
   expect(submit()).toBeDisabled();
-  fireEvent.click(screen.getByRole("checkbox", { name: /确认删除所列/ }));
+  fireEvent.click(screen.getByText("核对风险"));
+  fireEvent.click(screen.getByRole("button", {name: "允许删除并选中"}));
   expect(submit()).toBeEnabled();
   act(() =>
     updates.setState({
@@ -427,7 +432,8 @@ it("requires inline deletion confirmation and invalidates it when the snapshot c
     }),
   );
   expect(submit()).toBeDisabled();
-  fireEvent.click(screen.getByRole("checkbox", { name: /确认删除所列/ }));
+  fireEvent.click(screen.getByText("核对风险"));
+  fireEvent.click(screen.getByRole("button", {name: "允许删除并选中"}));
   fireEvent.click(submit());
   expect(enqueue).toHaveBeenCalledOnce();
   expect(enqueue.mock.calls[0][0]).toMatchObject({
@@ -451,9 +457,11 @@ it("requires confirmation for deleted files even when no skill is removed", () =
   });
   render(<TaskCenter />);
   open();
-  expect(screen.getByRole("checkbox", { name: /确认删除所列/ })).toBeVisible();
+  fireEvent.click(screen.getByText("核对风险"));
+  expect(screen.getByRole("button", {name: "允许删除并选中"})).toBeVisible();
+  expect(screen.queryByRole("checkbox", { name: /确认删除/ })).not.toBeInTheDocument();
   expect(
-    screen.getByRole("button", { name: "确认更新 1 个仓库" }),
+    screen.getByRole("button", { name: /同步已选 [01] 个仓库/ }),
   ).toBeDisabled();
 });
 it("keeps report identity throughout checking, review, application and retry", () => {
@@ -493,7 +501,7 @@ it("keeps report identity throughout checking, review, application and retry", (
   });
   expect(screen.getAllByRole("article")).toHaveLength(1);
   const enqueue = mockEnqueue();
-  fireEvent.click(screen.getByRole("button", { name: "确认更新 1 个仓库" }));
+  fireEvent.click(screen.getByRole("button", { name: /同步已选 [01] 个仓库/ }));
   expect(enqueue.mock.calls[0][0].parentReportGeneration).toBe("g");
   expect(screen.getAllByRole("article")).toHaveLength(1);
 });
@@ -512,4 +520,44 @@ it("reports failed repository checks without leaking raw provider errors", () =>
   expect(
     screen.queryByRole("button", { name: /确认更新/ }),
   ).not.toBeInTheDocument();
+});
+
+it("selects routine repositories in bulk and excludes unconfirmed risk and failed rows", () => {
+  updates.setState({reportGeneration: "bulk", preview: {repositories: [
+    ...Array.from({length: 98}, (_, i) => repo({repository: `example/regular-${i}`, snapshotId: `regular-${i}`})),
+    repo({repository: "example/risky", snapshotId: "risk", deleted: [{skillId: "old", name: "Old", sourcePath: "old/SKILL.md"}]}),
+    repo({repository: "example/failure", snapshotId: null, error: "NETWORK_ERROR"}),
+  ]}});
+  const enqueue = mockEnqueue();
+  render(<TaskCenter />); open();
+  expect(screen.getByRole("button", {name: "同步已选 98 个仓库"})).toBeEnabled();
+  expect(screen.queryByText("example/regular-0")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "同步已选 98 个仓库"}));
+  expect(enqueue).toHaveBeenCalledTimes(98);
+  expect(enqueue.mock.calls.every(([input]) => input.steps[0].args.snapshotId !== "risk")).toBe(true);
+});
+it("keeps other repository rechecks and sync available while one repository is checking", () => {
+  const recheck = vi.spyOn(updates.getState(), "recheckRepository").mockResolvedValue();
+  updates.setState({checkingRepository: "example/first", preview: {repositories: [repo(), repo({repository: "example/second", error: "NETWORK_ERROR", snapshotId: null}), repo({repository: "example/third", error: "NETWORK_ERROR", snapshotId: null})]}});
+  render(<TaskCenter />); open();
+  fireEvent.click(within(screen.getByRole("region", {name: "example/second"})).getByRole("button", {name: "重新检查"}));
+  fireEvent.click(within(screen.getByRole("region", {name: "example/third"})).getByRole("button", {name: "重新检查"}));
+  expect(recheck.mock.calls.map(([name]) => name)).toEqual(["example/second", "example/third"]);
+  expect(screen.getByRole("button", {name: "同步已选 1 个仓库"})).toBeEnabled();
+});
+it("gives expired sync failures a single recheck action and no selectable checkbox", () => {
+  updates.setState({preview: {repositories: [repo()]}, updateErrors: {"mirror:snapshot-one": "LOCAL_IDENTITY_CHANGED"}});
+  render(<TaskCenter />); open();
+  const repository = within(screen.getByRole("region", {name: "example/repo"}));
+  expect(repository.getAllByRole("button", {name: "重新检查"})).toHaveLength(1);
+  expect(repository.queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "同步已选 0 个仓库"})).toBeDisabled();
+});
+it("keeps multiple batches expanded without resetting import choices", () => {
+  queue.setState({tasks: [prepared()]});
+  updates.setState({preview: {repositories: [repo({deleted: [{skillId: "old", name: "Old"}]})]}});
+  render(<TaskCenter />); open();
+  expand("导入技能 example/skills");
+  expect(screen.getByText("核对风险")).toBeVisible();
+  expect(screen.getByRole("combobox", {name: "同名处理：Alpha"})).toBeVisible();
 });

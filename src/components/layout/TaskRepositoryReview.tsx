@@ -1,6 +1,7 @@
+import {repositoryRisk, repositoryLocked, repositorySelectable, selectedRepositories, useTaskReviewStore} from "@/stores/taskReviewStore";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RepositoryAddressButton } from "@/components/skill/RepositoryAddressButton";
@@ -11,7 +12,6 @@ import {
   useTaskQueueStore,
 } from "@/stores/taskQueueStore";
 import {
-  repositoryHasDeletions,
   type RepositoryTaskRow,
   type TaskBatch,
 } from "@/lib/taskBatches";
@@ -20,11 +20,16 @@ import { TaskDisclosure } from "./TaskDisclosure";
 
 function Changes({ repo }: { repo: RepositorySyncPreview }) {
   const { t } = useTranslation();
+  const paired = new Set(repo.added.filter(item => repo.deleted.some(old => old.name === item.name)).map(item => item.name));
   return (
     <div className="space-y-3">
+      {[...paired].map(name => <TaskDisclosure key={name} title={t("workflow.flow.sameName", {name})}>
+        <p className="mb-3 text-xs text-muted-foreground">{t("workflow.flow.sameNameHint")}</p>
+        {(["added", "deleted"] as const).flatMap(category => repo[category].filter(item => item.name === name).map(item => <div key={`${category}:${item.skillId}`} className="py-2"><p className={`text-sm ${category === "deleted" ? "text-destructive" : ""}`}>{t(`workflow.change.${category}`)}</p><p className="break-all font-mono text-xs text-muted-foreground">{item.sourcePath ?? item.skillId}</p></div>))}
+      </TaskDisclosure>)}
       {(["added", "modified", "deleted", "updated"] as const).flatMap(
         (category) =>
-          (repo[category] ?? []).map((item) => (
+          (repo[category] ?? []).filter(item => !(["added", "deleted"].includes(category) && paired.has(item.name))).map((item) => (
             <TaskDisclosure
               key={`${category}:${item.skillId}:${item.version}`}
               title={
@@ -111,295 +116,60 @@ function Changes({ repo }: { repo: RepositorySyncPreview }) {
   );
 }
 
-export function TaskRepositoryReview({
-  batch,
-  onLater,
-}: {
-  batch: TaskBatch;
-  onLater: () => void;
-}) {
+export function TaskRepositoryReview({ batch }: { batch: TaskBatch; onLater?: () => void }) {
   const { t, i18n } = useTranslation();
   const state = useRepositorySyncStore();
-  const tasks = useTaskQueueStore((s) => s.tasks);
-  const [excluded, setExcluded] = useState<Set<string>>(new Set());
-  const [acknowledged, setAcknowledged] = useState("");
+  const tasks = useTaskQueueStore(s => s.tasks);
+  const selection = useTaskReviewStore();
   const [search, setSearch] = useState("");
-  const [submitError, setSubmitError] = useState(false);
+  const [filter, setFilter] = useState<"attention" | "ready" | "risk" | "check" | "done" | "all">("attention");
   const rows = batch.report ?? [];
-  const busy =
-    state.isChecking ||
-    !!state.checkingRepository ||
-    !!state.migratingRepository;
-  const locked = (row: RepositoryTaskRow) =>
-    tasks.some(
-      (task) =>
-        isTaskActive(task) &&
-        task.locks.some(
-          (lock) =>
-            lock === "repo:*" ||
-            lock === `repo:${row.repository.toLowerCase()}`,
-        ),
-    );
-  const actionable = (row: RepositoryTaskRow) =>
-    row.pending &&
-    !row.needsCheck &&
-    !!row.preview?.snapshotId &&
-    !row.error &&
-    !locked(row) &&
-    !busy;
-  // A failed sync can be reviewed and re-submitted; failed checks must be repeated.
-  const canSelect = (row: RepositoryTaskRow) =>
-    actionable({ ...row, error: row.needsCheck ? row.error : undefined });
-  const candidates = rows.filter(canSelect);
-  const choices = candidates.filter(
-    (row) => !excluded.has(row.preview!.snapshotId!),
-  );
-  const deletionChoices = choices.filter((row) =>
-    repositoryHasDeletions(row.preview!),
-  );
-  const signature = JSON.stringify(
-    choices.map((row) => [row.repository, row.preview!.snapshotId]).sort(),
-  );
-  const hasDeletion = deletionChoices.length > 0;
-  const visible = rows.filter((row) =>
-    row.repository.toLowerCase().includes(search.trim().toLowerCase()),
-  );
-  const attention = visible.filter(
-    (row) =>
-      row.pending || row.needsCheck || row.error || row.status !== "success",
-  );
-  const settled = visible.filter((row) => !attention.includes(row));
-  const submit = () => {
-    const applied = state.applySnapshots(
-      choices.map((row) => ({
-        repository: row.repository,
-        snapshotId: row.preview!.snapshotId!,
-        allowDeletions: !hasDeletion || acknowledged === signature,
-      })),
-      state.reportGeneration,
-    );
-    setSubmitError(applied === 0);
-    setAcknowledged("");
-  };
-  const renderRow = (row: RepositoryTaskRow) => {
-    const repo = row.preview;
-    const running = locked(row);
-    const status = row.error
-      ? taskErrorMessage(row.error, "update")
-      : running
-        ? t(
-            `workflow.taskStatus.${row.status === "queued" ? "queued" : "running"}`,
-          )
-        : row.needsCheck
-          ? t("workflow.batch.needsCheck")
-          : row.pending
-            ? [
-                repo &&
-                repo.added.length + repo.modified.length + repo.deleted.length >
-                  0
-                  ? t("workflow.batch.changes", {
-                      added: repo.added.length,
-                      modified: repo.modified.length,
-                      deleted: repo.deleted.length,
-                    })
-                  : null,
-                repo?.documentChanges?.length
-                  ? t("workflow.batch.documentsChanged", {
-                      count: repo.documentChanges.length,
-                    })
-                  : null,
-              ]
-                .filter(Boolean)
-                .join(" · ")
-            : t(
-                row.applied
-                  ? "workflow.updated"
-                  : "workflow.changeType.unchanged",
-              );
-    return (
-      <section key={row.repository} className="border-b border-border py-3">
-        <div className="flex items-start gap-2">
-          {row.pending && !row.needsCheck && (
-            <input
-              type="checkbox"
-              className="mt-1 shrink-0"
-              aria-label={row.repository}
-              checked={!excluded.has(repo!.snapshotId!)}
-              disabled={!canSelect(row)}
-              onChange={(event) => {
-                const checked = event.target.checked;
-                setExcluded((previous) => {
-                  const next = new Set(previous);
-                  if (checked) next.delete(repo!.snapshotId!);
-                  else next.add(repo!.snapshotId!);
-                  return next;
-                });
-              }}
-            />
-          )}
-          <div className="min-w-0 flex-1">
-            {repo ? (
-              <TaskDisclosure
-                title={
-                  <>
-                    <span className="min-w-0 flex-1 break-all">
-                      {row.repository}
-                    </span>
-                    <span
-                      className={`shrink-0 text-xs ${row.error ? "text-destructive" : "text-muted-foreground"}`}
-                    >
-                      {status}
-                    </span>
-                  </>
-                }
-              >
-                <Changes repo={repo} />
-              </TaskDisclosure>
-            ) : (
-              <div className="flex flex-wrap justify-between gap-2 text-sm">
-                <span className="break-all">{row.repository}</span>
-                <span
-                  className={
-                    row.error ? "text-destructive" : "text-muted-foreground"
-                  }
-                >
-                  {status}
-                </span>
-              </div>
-            )}
-          </div>
-          {row.needsCheck && (
-            <Button
-              variant="outline"
-              disabled={busy || running}
-              onClick={() => void state.recheckRepository(row.repository)}
-            >
-              <RefreshCw />
-              {t("workflow.recheck")}
-            </Button>
-          )}
-        </div>
-      </section>
-    );
-  };
-  return (
-    <div>
-      {rows.length > 8 && (
-        <Input
-          type="search"
-          className="my-3"
-          aria-label={t("workflow.batch.searchRepos")}
-          placeholder={t("workflow.batch.searchRepos")}
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-      )}
-      {batch.reportError && (
-        <p role="alert" className="py-3 text-sm text-destructive">
-          {taskErrorMessage(batch.reportError)}
-        </p>
-      )}
-      {attention.map(renderRow)}
-      {!!settled.length && (
-        <TaskDisclosure
-          title={
-            <>
-              <Check />
-              {t("workflow.batch.completedCount", { count: settled.length })}
-            </>
-          }
-        >
-          {settled.map(renderRow)}
-        </TaskDisclosure>
-      )}
-      {!!candidates.length && (
-        <div className="space-y-3 py-3">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={choices.length === candidates.length}
-              ref={(input) => {
-                if (input)
-                  input.indeterminate =
-                    choices.length > 0 && choices.length < candidates.length;
-              }}
-              onChange={(event) => {
-                const checked = event.target.checked;
-                setExcluded((previous) => {
-                  const next = new Set(previous);
-                  for (const row of candidates) {
-                    if (checked) next.delete(row.preview!.snapshotId!);
-                    else next.add(row.preview!.snapshotId!);
-                  }
-                  return next;
-                });
-              }}
-            />
-            {t("workflow.batch.selectUpdates", { count: choices.length })}
-          </label>
-          {hasDeletion && (
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                className="mt-1"
-                type="checkbox"
-                checked={acknowledged === signature}
-                onChange={(event) =>
-                  setAcknowledged(event.target.checked ? signature : "")
-                }
-              />
-              <span
-                title={deletionChoices.map((row) => row.repository).join(", ")}
-              >
-                {t("workflow.batch.confirmDeletions", {
-                  count: deletionChoices.length,
-                })}
-              </span>
-            </label>
-          )}
-          {submitError && (
-            <p role="alert" className="text-xs text-destructive">
-              {t("workflow.batch.previewUnavailable")}
-            </p>
-          )}
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button
-              variant="outline"
-              title={t("workflow.batch.draftRetained")}
-              onClick={onLater}
-            >
-              {t("workflow.batch.later")}
-            </Button>
-            <Button
-              disabled={
-                !choices.length || (hasDeletion && acknowledged !== signature)
-              }
-              onClick={submit}
-            >
-              <Check />
-              {t("workflow.batch.updateConfirm", { count: choices.length })}
-            </Button>
-          </div>
-        </div>
-      )}
-      <TaskDisclosure small title={t("workflow.batch.log")}>
-        <p>
-          {state.reportCheckedAt
-            ? new Date(state.reportCheckedAt).toLocaleString(i18n.language)
-            : t("workflow.checkTimeUnknown")}
-        </p>
-        {!!state.preview?.coverage?.length && (
-          <div className="mt-3">
-            {state.preview.coverage.map((item) => (
-              <p key={item.skillId} className="break-all py-1">
-                {item.name} ·{" "}
-                {t(
-                  `workflow.mirror.coverageStatus.${item.reason ?? item.status}`,
-                )}
-              </p>
-            ))}
-          </div>
-        )}
-      </TaskDisclosure>
+  const eligible = (row: RepositoryTaskRow) => repositorySelectable(row, tasks, state.migratingRepository);
+  const approved = (row: RepositoryTaskRow) => !repositoryRisk(row) || selection.approved.includes(row.preview!.snapshotId!);
+  const ready = rows.filter(row => eligible(row) && approved(row));
+  const risks = rows.filter(row => eligible(row) && !approved(row));
+  const recheck = rows.filter(row => row.needsCheck);
+  const choices = selectedRepositories(rows, tasks, state.migratingRepository, selection);
+  const completed = (row: RepositoryTaskRow) => !row.pending && !row.needsCheck && !row.error && row.status === "success";
+  const matching = rows.filter(row => row.repository.toLowerCase().includes(search.trim().toLowerCase()));
+  const visible = matching.filter(row => filter === "all" ||
+    (filter === "ready" ? ready.includes(row) : filter === "risk" ? risks.includes(row) : filter === "check" ? recheck.includes(row) : filter === "done" ? completed(row) : !completed(row) && !ready.includes(row)));
+  const counts = {attention: rows.length - ready.length - rows.filter(completed).length, ready: ready.length, risk: risks.length, check: recheck.length, done: rows.filter(completed).length, all: rows.length};
+  return <div className="space-y-3 py-3">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <span className="text-xs text-muted-foreground">{t("workflow.flow.selection", {count: choices.length, total: ready.length})}</span>
+      {!!recheck.length && <Button variant="outline" onClick={() => void state.recheckRepositories(recheck.filter(row => !repositoryLocked(row, tasks)).map(row => row.repository))}><RefreshCw />{t("workflow.flow.recheck", {count: recheck.length})}</Button>}
     </div>
-  );
+    {!!ready.length && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={choices.length === ready.length} onChange={event => ready.forEach(row => selection.select(row.preview!.snapshotId!, event.target.checked))} />{t("workflow.flow.selectReady")}</label>}
+    <div className="flex flex-wrap gap-4" aria-label={t("workflow.flow.filters")}>
+      {(["attention", "ready", "risk", "check", "done", "all"] as const).map(value => <button type="button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)} className={`text-sm rounded-sm focus-visible:outline-2 focus-visible:outline-ring ${filter === value ? "font-semibold text-primary" : "text-muted-foreground"}`}>{t(`workflow.flow.${value}`)} {counts[value]}</button>)}
+    </div>
+    {rows.length > 8 && <Input aria-label={t("workflow.batch.searchRepos")} placeholder={t("workflow.batch.searchRepos")} value={search} onChange={event => setSearch(event.target.value)} />}
+    {batch.reportError && <p role="alert" className="text-xs text-destructive">{taskErrorMessage(batch.reportError)}</p>}
+    {visible.map(row => {
+      const repo = row.preview;
+      const running = repositoryLocked(row, tasks);
+      const owner = tasks.find(task => isTaskActive(task) && task.locks.includes(`repo:${row.repository.toLowerCase()}`));
+      const risk = repositoryRisk(row);
+      const accepted = !!repo?.snapshotId && selection.approved.includes(repo.snapshotId);
+      const selectable = eligible(row) && approved(row);
+      return <section key={row.repository} className="border-b border-border py-3" aria-label={row.repository}>
+        <div className="flex items-center gap-2">
+          {selectable && <input type="checkbox" aria-label={row.repository} checked={!selection.excluded.includes(repo!.snapshotId!)} onChange={event => selection.select(repo!.snapshotId!, event.target.checked)} />}
+          <span className="min-w-0 flex-1 break-all text-sm">{row.repository}</span>
+          <span className={`text-xs ${row.error ? "text-destructive" : "text-muted-foreground"}`}>{running && owner?.cancelRequested ? t("workflow.stopping") : running ? t(`workflow.taskStatus.${owner?.status === "queued" ? "queued" : "running"}`) : row.needsCheck ? t("workflow.batch.needsCheck") : completed(row) ? t(row.applied ? "workflow.updated" : "workflow.changeType.unchanged") : risk && !accepted ? t("workflow.flow.risk") : t("workflow.flow.ready")}</span>
+          {running && owner ? <Button variant="ghost" disabled={owner.cancelRequested} onClick={() => useTaskQueueStore.getState().cancel(owner.id)}>{t("workflow.stopTask")}</Button> : row.needsCheck ? <Button variant="outline" disabled={state.migratingRepository?.toLowerCase() === row.repository.toLowerCase()} onClick={() => void state.recheckRepository(row.repository)}><RefreshCw />{t("workflow.recheck")}</Button> : null}
+          {accepted && selectable && <Button variant="ghost" onClick={() => selection.forget([repo!.snapshotId!])}>{t("workflow.flow.withdraw")}</Button>}
+        </div>
+        {row.error && <p className="mt-1 text-xs text-destructive">{taskErrorMessage(row.error, "update")}</p>}
+        {repo && (row.pending || repo.unchanged.length > 0 || !!repo.updated?.length) && <TaskDisclosure title={t(row.needsCheck ? "workflow.flow.lastResult" : risk && !accepted ? "workflow.flow.reviewRisk" : "workflow.flow.viewChanges")}>
+          {row.needsCheck && <p className="mb-3 text-xs text-muted-foreground">{t("workflow.batch.previewUnavailable")}</p>}
+          <Changes repo={repo} />
+          {eligible(row) && risk && !accepted && <div className="mt-3 flex items-center justify-between gap-4"><p className="text-xs text-destructive">{t(`workflow.flow.${risk}`)}</p><Button onClick={() => selection.approve(repo.snapshotId!)}>{t(risk === "deletions" ? "workflow.flow.allowDeletion" : "workflow.flow.allowOverwrite")}</Button></div>}
+        </TaskDisclosure>}
+      </section>;
+    })}
+    {!visible.length && <p className="py-4 text-sm text-muted-foreground">{t("workflow.flow.empty")}</p>}
+    <TaskDisclosure small title={t("workflow.batch.log")}><p className="text-xs text-muted-foreground">{state.reportCheckedAt ? new Date(state.reportCheckedAt).toLocaleString(i18n.language) : t("workflow.checkTimeUnknown")}</p></TaskDisclosure>
+  </div>;
 }

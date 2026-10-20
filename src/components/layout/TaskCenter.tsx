@@ -1,3 +1,4 @@
+import {repositoryRisk, selectedRepositories, useTaskReviewStore} from "@/stores/taskReviewStore";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -50,16 +51,24 @@ export function TaskCenter() {
   const legacy = useAppStatusStore((s) => s.task);
   const batches = buildTaskBatches(tasks, state, legacy);
   const [tab, setTab] = useState<"current" | "history">("current");
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [archived, setArchived] = useState<Set<string>>(() => new Set(batches.filter(batch => batch.status === "success").map(batch => batch.id)));
+  const selection = useTaskReviewStore();
+  const [submitError, setSubmitError] = useState(false);
+  const reportRows = batches.find(batch => batch.report !== undefined)?.report ?? [];
+  const choices = selectedRepositories(reportRows, tasks, state.migratingRepository, selection);
+  const riskCount = reportRows.filter(row => row.pending && !row.needsCheck && repositoryRisk(row) && !selection.approved.includes(row.preview?.snapshotId ?? "")).length;
+  const recheckCount = reportRows.filter(row => row.needsCheck).length;
+  const collapse = (id: string) => setExpanded(previous => { const next = new Set(previous); next.delete(id); return next; });
   const [visited, setVisited] = useState<Set<string>>(new Set());
   const wasOpen = useRef(false);
   useTaskCloseGuard();
   const expand = (id: string | null) => {
-    setExpanded(id);
+    setExpanded(previous => id ? new Set(previous).add(id) : new Set());
     if (id) setVisited((previous) => new Set(previous).add(id));
   };
   const isHistory = (batch: TaskBatch) =>
-    batch.status === "success" && !(tab === "current" && expanded === batch.id);
+    archived.has(batch.id) && batch.status === "success";
   const counts = {
     running: batches.filter((batch) => activeStatus(batch.status)).length,
     pending: batches.filter(
@@ -83,7 +92,7 @@ export function TaskCenter() {
     ) {
       const id = `status:${legacy.id}`;
       setTab(legacy.status === "success" ? "history" : "current");
-      setExpanded(id);
+      setExpanded(previous => id ? new Set(previous).add(id) : new Set());
       setVisited((previous) => new Set(previous).add(id));
       return;
     }
@@ -93,7 +102,7 @@ export function TaskCenter() {
         : "current",
     );
     if (state.centerView === "pending" && reportId) {
-      setExpanded(reportId);
+      setExpanded(previous => new Set(previous).add(reportId));
       setVisited((previous) => new Set(previous).add(reportId));
     }
   }, [state.open, state.centerView, reportId, currentCount, legacy]);
@@ -246,6 +255,7 @@ export function TaskCenter() {
         .forEach((task) => useTaskQueueStore.getState().retry(task.id));
   };
   const action = (batch: TaskBatch) => {
+    if (batch.report !== undefined && !activeStatus(batch.status)) return null;
     const active = batch.tasks.filter(isTaskActive);
     if (activeStatus(batch.status))
       return (
@@ -266,17 +276,17 @@ export function TaskCenter() {
       return (
         <Button
           variant="ghost"
-          aria-expanded={expanded === batch.id}
-          onClick={() => expand(expanded === batch.id ? null : batch.id)}
+          aria-expanded={expanded.has(batch.id)}
+          onClick={() => expanded.has(batch.id) ? collapse(batch.id) : expand(batch.id)}
         >
           {t(
-            expanded === batch.id
+            expanded.has(batch.id)
               ? "workflow.batch.collapse"
               : batch.kind === "import"
                 ? "workflow.batch.chooseSkills"
                 : "workflow.batch.review",
           )}
-          <ChevronRight className={cn(expanded === batch.id && "rotate-90")} />
+          <ChevronRight className={cn(expanded.has(batch.id) && "rotate-90")} />
         </Button>
       );
     if (failedStatus(batch.status) || batch.status === "cancelled") {
@@ -314,7 +324,7 @@ export function TaskCenter() {
   };
   const changeTab = (value: typeof tab) => {
     setTab(value);
-    setExpanded(null);
+
   };
   const visibleCount = tab === "current" ? currentCount : historyCount;
   return (
@@ -407,7 +417,7 @@ export function TaskCenter() {
             className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]"
           >
             {batches.map((batch) => {
-              const open = expanded === batch.id;
+              const open = expanded.has(batch.id);
               const hidden =
                 tab === "history" ? !isHistory(batch) : isHistory(batch);
               const prepared = batch.tasks.find(
@@ -448,7 +458,7 @@ export function TaskCenter() {
                       type="button"
                       aria-expanded={open}
                       aria-controls={`batch-details-${batch.id}`}
-                      onClick={() => expand(open ? null : batch.id)}
+                      onClick={() => open ? collapse(batch.id) : expand(batch.id)}
                       className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left text-sm focus-visible:outline-2 focus-visible:outline-ring"
                     >
                       <ChevronRight
@@ -535,12 +545,12 @@ export function TaskCenter() {
                         <TaskRepositoryReview
                           key={state.reportGeneration ?? "legacy"}
                           batch={batch}
-                          onLater={() => expand(null)}
+                          onLater={() => collapse(batch.id)}
                         />
                       ) : prepared ? (
                         <TaskImportReview
                           taskId={prepared.id}
-                          onLater={() => expand(null)}
+                          onLater={() => collapse(batch.id)}
                         />
                       ) : (
                         <TaskBatchDetails batch={batch} />
@@ -581,8 +591,18 @@ export function TaskCenter() {
               </p>
             )}
           </div>
-          <footer className="flex shrink-0 items-center border-t border-border px-4 py-3">
+          <footer className="flex shrink-0 flex-wrap items-center gap-4 border-t border-border p-4">
             <HintIcon text={t("workflow.taskPanel.backgroundHint")} />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold">{t("workflow.flow.selected", {count: choices.length})}</p>
+              <p className="text-xs text-muted-foreground">{t("workflow.flow.remaining", {risk: riskCount, check: recheckCount})}</p>
+              {submitError && <p role="alert" className="text-xs text-destructive">{t("workflow.batch.previewUnavailable")}</p>}
+            </div>
+            {tab === "current" && <><Button variant="outline" disabled={!batches.some(batch => !isHistory(batch) && batch.status === "success")} onClick={() => setArchived(previous => new Set([...previous, ...batches.filter(batch => batch.status === "success").map(batch => batch.id)]))}>{t("workflow.flow.archive")}</Button>
+            <Button disabled={!choices.length} onClick={() => {
+              const count = state.applySnapshots(choices.map(row => ({repository: row.repository, snapshotId: row.preview!.snapshotId!, allowDeletions: !!selection.approved.includes(row.preview!.snapshotId!)})), state.reportGeneration);
+              setSubmitError(count === 0);
+            }}>{t("workflow.flow.sync", {count: choices.length})}</Button></>}
           </footer>
         </DialogContent>
       </Dialog>

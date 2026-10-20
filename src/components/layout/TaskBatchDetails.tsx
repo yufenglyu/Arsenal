@@ -9,7 +9,7 @@ import {
   retryableTask,
   type TaskBatch,
 } from "@/lib/taskBatches";
-import { taskErrorMessage, useTaskQueueStore } from "@/stores/taskQueueStore";
+import { isTaskActive, taskErrorMessage, useTaskQueueStore } from "@/stores/taskQueueStore";
 import { TaskDisclosure } from "./TaskDisclosure";
 
 export function TaskBatchDetails({ batch }: { batch: TaskBatch }) {
@@ -60,6 +60,7 @@ export function TaskBatchDetails({ batch }: { batch: TaskBatch }) {
                         : `workflow.taskStatus.${row.status}`,
                 )}
           </span>
+          {owner && isTaskActive(owner) && <Button variant="ghost" disabled={owner.cancelRequested} onClick={() => useTaskQueueStore.getState().cancel(owner.id)}>{t(owner.cancelRequested ? "workflow.stopping" : "workflow.stopTask")}</Button>}
           {owner && batch.tasks.length > 1 && retryableTask(owner) && (
             <Button
               variant="ghost"

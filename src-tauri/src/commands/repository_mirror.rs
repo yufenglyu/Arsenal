@@ -279,6 +279,7 @@ fn repo_directory(root: &Path, repo: &github::GitHubRepoRef) -> PathBuf {
 }
 fn empty_report(repository: &str) -> RepositorySyncPreview {
     RepositorySyncPreview {
+        local_modified: None,
         repository: repository.into(),
         snapshot_id: None,
         document_changes: vec![],
@@ -332,6 +333,7 @@ async fn preview(pool: &AppStore, snapshot: &Snapshot) -> Result<RepositorySyncP
     let candidates = validate_snapshot(snapshot)?;
     let mut report = empty_report(&format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo));
     report.remote_ref = Some(snapshot.repo.branch.clone());
+    report.local_modified = Some(false);
     let mut matched = HashSet::new();
     for candidate in candidates {
         let remote = github::mirror_skill_files(&snapshot.contents, &candidate.source_path)?;
@@ -354,6 +356,12 @@ async fn preview(pool: &AppStore, snapshot: &Snapshot) -> Result<RepositorySyncP
                 BTreeMap::new()
             };
             item.files = remote_sources::compare_files(&local, &remote);
+            if !item.files.is_empty() {
+                let baseline = db::get_skill_source_sync(pool, &skill.id).await?;
+                if baseline.and_then(|b| b.skill_fingerprint).as_deref() != Some(files_digest(&local).as_str()) {
+                    report.local_modified = Some(true);
+                }
+            }
             let mut installation_changed = false;
             for installation in snapshot
                 .installations
@@ -361,6 +369,9 @@ async fn preview(pool: &AppStore, snapshot: &Snapshot) -> Result<RepositorySyncP
                 .filter(|i| i.skill_id == skill.id)
             {
                 let path = Path::new(&installation.installed_path);
+                if installation.link_type == "copy" && path.exists() && remote_sources::local_skill_files(path)? != local {
+                    report.local_modified = Some(true);
+                }
                 if (installation.link_type == "copy"
                     && (!path.exists() || remote_sources::local_skill_files(path)? != remote))
                     || (installation.link_type != "copy"
@@ -379,12 +390,12 @@ async fn preview(pool: &AppStore, snapshot: &Snapshot) -> Result<RepositorySyncP
             report.added.push(item);
         }
     }
-    for (_, skill) in &snapshot.originals {
+    for (source, skill) in &snapshot.originals {
         if !matched.contains(&skill.id) {
             report.deleted.push(RepositorySyncPreviewItem {
                 skill_id: skill.id.clone(),
                 name: skill.name.clone(),
-                source_path: None,
+                source_path: source.source_path.clone(),
                 version: "deleted".into(),
                 files: vec![],
             });
@@ -403,6 +414,10 @@ async fn preview(pool: &AppStore, snapshot: &Snapshot) -> Result<RepositorySyncP
         )?,
         &github::snapshot_readmes(&snapshot.contents),
     );
+    // Document edits have no stored per-file sync baseline; require explicit review.
+    if report.document_changes.iter().any(|file| file.status == "modified") {
+        report.local_modified = Some(true);
+    }
     Ok(report)
 }
 async fn persist_snapshot(pool: &AppStore, snapshot: &Snapshot) -> Result<String, String> {
@@ -524,6 +539,7 @@ pub async fn check_with_retained(
         })
         .collect::<Vec<_>>();
     let auth = github::github_direct_auth_from_settings(pool).await?;
+    drop(_guard); // Network requests for independent repositories may overlap.
     let mut reports = Vec::new();
     let mut groups = groups.into_iter().collect::<Vec<_>>();
     groups.sort_by(|a, b| a.0.cmp(&b.0));
@@ -538,6 +554,7 @@ pub async fn check_with_retained(
                 .unwrap_or(&repository);
             let repo = github::resolve_update_revision(display, auth.as_deref(), None).await?;
             let contents = github::fetch_mirror_snapshot(&repo, auth.as_deref()).await?;
+            let _guard = MIRROR_LOCK.lock().await; // Serialize local inspection and snapshot publication.
             let mut installations = Vec::new();
             for (_, skill) in &originals {
                 installations.extend(db::get_skill_installations(pool, &skill.id).await?);
@@ -1158,6 +1175,23 @@ mod tests {
         snapshot
     }
     #[tokio::test]
+    async fn preview_distinguishes_upstream_updates_from_local_edits() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let snapshot = capture(&pool, snapshot).await;
+        let mut upstream = snapshot.clone();
+        upstream.contents.files.get_mut("skills/one/SKILL.md").unwrap().extend_from_slice(b"\nupstream change");
+        let report = preview(&pool, &upstream).await.unwrap();
+        assert!(!report.modified.is_empty());
+        assert_eq!(report.local_modified, Some(false));
+        let skill = &upstream.originals[0].1;
+        std::fs::write(&skill.file_path, "local edit").unwrap();
+        let report = preview(&pool, &upstream).await.unwrap();
+        assert_eq!(report.local_modified, Some(true));
+    }
+
+    #[tokio::test]
     async fn mirror_imports_all_overwrites_edits_and_removes_extra_files_and_skills() {
         let (_dir, pool, snapshot) = fixture().await;
         // Simulate a previous selective import of only one remote skill.
@@ -1219,7 +1253,9 @@ mod tests {
         let snapshot = capture(&pool, snapshot).await;
         let installed = Path::new(&snapshot.installations[0].installed_path);
         std::fs::write(installed.join("extra.txt"), "user edit").unwrap();
-        assert_eq!(preview(&pool, &snapshot).await.unwrap().modified.len(), 1);
+        let report = preview(&pool, &snapshot).await.unwrap();
+        assert_eq!(report.modified.len(), 1);
+        assert_eq!(report.local_modified, Some(true));
         let id = persist_snapshot(&pool, &snapshot).await.unwrap();
         apply(&pool, &id).await.unwrap();
         assert!(!installed.join("extra.txt").exists());
@@ -1245,6 +1281,7 @@ mod tests {
         let report = preview(&pool, &next).await.unwrap();
         assert!(report.modified.is_empty());
         assert_eq!(report.document_changes.len(), 1);
+        assert_eq!(report.local_modified, Some(true));
         let id = persist_snapshot(&pool, &next).await.unwrap();
         pool.write(|d| {
             d.table_mut("repository_mirror_snapshots")
