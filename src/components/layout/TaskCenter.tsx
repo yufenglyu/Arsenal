@@ -1,3 +1,4 @@
+import { ActionIcon } from "@/components/ui/action-icon";
 import {repositoryRisk, selectedRepositories, useTaskReviewStore} from "@/stores/taskReviewStore";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -9,7 +10,6 @@ import {
   ListTodo,
   RefreshCw,
   RotateCcw,
-  Square,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -268,7 +268,7 @@ export function TaskCenter() {
             )
           }
         >
-          <Square />
+          <ActionIcon action="stop" />
           {t("workflow.stopTask")}
         </Button>
       );
@@ -564,7 +564,7 @@ export function TaskCenter() {
                                 useAppStatusStore.getState().resetStatus();
                             }}
                           >
-                            {t("workflow.deleteRecord")}
+                            <ActionIcon action="delete" />{t("workflow.deleteRecord")}
                           </Button>
                         </div>
                       )}
@@ -589,12 +589,12 @@ export function TaskCenter() {
               <p className="text-xs text-muted-foreground">{tab === "history" ? t("workflow.taskPanel.backgroundHint") : t("workflow.flow.remaining", {risk: riskCount, check: recheckCount})}</p>
               {submitError && <p role="alert" className="text-xs text-destructive">{t("workflow.batch.previewUnavailable")}</p>}
             </div>
-            {tab === "history" && <Button variant="outline" disabled={!historyCount} onClick={clearHistory}>{t("workflow.clearFinished")}</Button>}
-            {tab === "current" && <><Button variant="outline" disabled={!batches.some(batch => !isHistory(batch) && batch.status === "success")} onClick={() => setArchived(previous => new Set([...previous, ...batches.filter(batch => batch.status === "success").map(batch => batch.id)]))}>{t("workflow.flow.archive")}</Button>
+            {tab === "history" && <Button variant="outline" disabled={!historyCount} onClick={clearHistory}><ActionIcon action="clear" />{t("workflow.clearFinished")}</Button>}
+            {tab === "current" && <><Button variant="outline" disabled={!batches.some(batch => !isHistory(batch) && batch.status === "success")} onClick={() => setArchived(previous => new Set([...previous, ...batches.filter(batch => batch.status === "success").map(batch => batch.id)]))}><ActionIcon action="archive" />{t("workflow.flow.archive")}</Button>
             <Button disabled={!choices.length} onClick={() => {
               const count = state.applySnapshots(choices.map(row => ({repository: row.repository, snapshotId: row.preview!.snapshotId!, allowDeletions: !!selection.approved.includes(row.preview!.snapshotId!)})), state.reportGeneration);
               setSubmitError(count === 0);
-            }}>{t("workflow.flow.sync", {count: choices.length})}</Button></>}
+            }}><ActionIcon action="update" />{t("workflow.flow.sync", {count: choices.length})}</Button></>}
           </footer>
         </DialogContent>
       </Dialog>

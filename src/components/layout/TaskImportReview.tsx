@@ -1,3 +1,4 @@
+import { ActionIcon } from "@/components/ui/action-icon";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check } from "lucide-react";
@@ -210,7 +211,7 @@ function ImportChoices({
           title={t("workflow.batch.draftRetained")}
           onClick={onLater}
         >
-          {t("workflow.batch.later")}
+          <ActionIcon action="back" />{t("workflow.batch.later")}
         </Button>
         <Button disabled={!chosen.length || invalid} onClick={submit}>
           <Check />

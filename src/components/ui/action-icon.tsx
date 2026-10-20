@@ -1,4 +1,4 @@
-import { MessageSquareText, NotebookPen, ArrowLeft, Ban, Check, CircleCheck, Download, EyeOff, FileText, FolderOpen, History, Info, Languages, ListFilter, ListTodo, PackageMinus, PackagePlus, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, ShieldAlert, Sparkles, Trash2, X } from "lucide-react";
+import { Archive, MessageSquareText, NotebookPen, ArrowLeft, Ban, Check, CircleCheck, Download, EyeOff, FileText, FolderOpen, History, Info, Languages, ListFilter, ListTodo, PackageMinus, PackagePlus, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, ShieldAlert, Sparkles, Trash2, X } from "lucide-react";
 
 // Shared symbols for actions across dialogs, toolbars and task controls.
 const icons = {
@@ -7,7 +7,7 @@ const icons = {
   add: Plus, import: Download, install: PackagePlus, uninstall: PackageMinus,
   edit: Pencil, back: ArrowLeft, retry: RotateCcw, reset: RotateCcw,
   check: RefreshCw, update: RefreshCw, ignore: EyeOff, history: History,
-  tasks: ListTodo, filter: ListFilter, error: ShieldAlert, success: CircleCheck,
+  archive: Archive, tasks: ListTodo, filter: ListFilter, error: ShieldAlert, success: CircleCheck,
   stop: Ban, active: Play, open: FolderOpen, language: Languages, ai: Sparkles, info: Info, document: FileText,
 };
 export type ActionIconName = keyof typeof icons;

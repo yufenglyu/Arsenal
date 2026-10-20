@@ -1,6 +1,7 @@
+import { ActionIcon } from "@/components/ui/action-icon";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, RotateCcw } from "lucide-react";
+import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { importDetailRows } from "@/lib/taskPresentation";
@@ -60,7 +61,7 @@ export function TaskBatchDetails({ batch }: { batch: TaskBatch }) {
                         : `workflow.taskStatus.${row.status}`,
                 )}
           </span>
-          {owner && isTaskActive(owner) && <Button variant="ghost" disabled={owner.cancelRequested} onClick={() => useTaskQueueStore.getState().cancel(owner.id)}>{t(owner.cancelRequested ? "workflow.stopping" : "workflow.stopTask")}</Button>}
+          {owner && isTaskActive(owner) && <Button variant="ghost" disabled={owner.cancelRequested} onClick={() => useTaskQueueStore.getState().cancel(owner.id)}><ActionIcon action="stop" />{t(owner.cancelRequested ? "workflow.stopping" : "workflow.stopTask")}</Button>}
           {owner && batch.tasks.length > 1 && retryableTask(owner) && (
             <Button
               variant="ghost"
@@ -69,8 +70,7 @@ export function TaskBatchDetails({ batch }: { batch: TaskBatch }) {
               })}
               onClick={() => useTaskQueueStore.getState().retry(owner.id)}
             >
-              <RotateCcw />
-              {t("workflow.retryTask")}
+              <ActionIcon action="retry" />{t("workflow.retryTask")}
             </Button>
           )}
         </div>
@@ -136,7 +136,7 @@ export function TaskBatchDetails({ batch }: { batch: TaskBatch }) {
               variant="outline"
               onClick={() => batch.legacy?.onRetryFailedItem?.(item)}
             >
-              {t("workflow.retryTask")}
+              <ActionIcon action="retry" />{t("workflow.retryTask")}
             </Button>
           )}
         </div>

@@ -1,3 +1,4 @@
+import { ActionIcon } from "@/components/ui/action-icon";
 import {repositoryRisk, repositoryLocked, repositorySelectable, selectedRepositories, useTaskReviewStore} from "@/stores/taskReviewStore";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -158,14 +159,14 @@ export function TaskRepositoryReview({ batch }: { batch: TaskBatch; onLater?: ()
           {selectable && <input type="checkbox" aria-label={row.repository} checked={!selection.excluded.includes(repo!.snapshotId!)} onChange={event => selection.select(repo!.snapshotId!, event.target.checked)} />}
           <span className="min-w-0 flex-1 break-all text-sm">{row.repository}</span>
           <span className={`text-xs ${row.error ? "text-destructive" : "text-muted-foreground"}`}>{running && owner?.cancelRequested ? t("workflow.stopping") : running ? t(`workflow.taskStatus.${owner?.status === "queued" ? "queued" : "running"}`) : row.needsCheck ? t("workflow.batch.needsCheck") : completed(row) ? t(row.applied ? "workflow.updated" : "workflow.changeType.unchanged") : risk && !accepted ? t("workflow.flow.risk") : t("workflow.flow.ready")}</span>
-          {running && owner ? <Button variant="ghost" disabled={owner.cancelRequested} onClick={() => useTaskQueueStore.getState().cancel(owner.id)}>{t("workflow.stopTask")}</Button> : row.needsCheck ? <Button variant="outline" disabled={state.migratingRepository?.toLowerCase() === row.repository.toLowerCase()} onClick={() => void state.recheckRepository(row.repository)}><RefreshCw />{t("workflow.recheck")}</Button> : null}
-          {accepted && selectable && <Button variant="ghost" onClick={() => selection.forget([repo!.snapshotId!])}>{t("workflow.flow.withdraw")}</Button>}
+          {running && owner ? <Button variant="ghost" disabled={owner.cancelRequested} onClick={() => useTaskQueueStore.getState().cancel(owner.id)}><ActionIcon action="stop" />{t("workflow.stopTask")}</Button> : row.needsCheck ? <Button variant="outline" disabled={state.migratingRepository?.toLowerCase() === row.repository.toLowerCase()} onClick={() => void state.recheckRepository(row.repository)}><RefreshCw />{t("workflow.recheck")}</Button> : null}
+          {accepted && selectable && <Button variant="ghost" onClick={() => selection.forget([repo!.snapshotId!])}><ActionIcon action="back" />{t("workflow.flow.withdraw")}</Button>}
         </div>
         {row.error && <p className="mt-1 text-xs text-destructive">{taskErrorMessage(row.error, "update")}</p>}
         {repo && (row.pending || repo.unchanged.length > 0 || !!repo.updated?.length) && <TaskDisclosure title={t(row.needsCheck ? "workflow.flow.lastResult" : risk && !accepted ? "workflow.flow.reviewRisk" : "workflow.flow.viewChanges")}>
           {row.needsCheck && <p className="mb-3 text-xs text-muted-foreground">{t("workflow.batch.previewUnavailable")}</p>}
           <Changes repo={repo} />
-          {eligible(row) && risk && !accepted && <div className="mt-3 flex items-center justify-between gap-4"><p className="text-xs text-destructive">{t(`workflow.flow.${risk}`)}</p><Button onClick={() => selection.approve(repo.snapshotId!)}>{t(risk === "deletions" ? "workflow.flow.allowDeletion" : "workflow.flow.allowOverwrite")}</Button></div>}
+          {eligible(row) && risk && !accepted && <div className="mt-3 flex items-center justify-between gap-4"><p className="text-xs text-destructive">{t(`workflow.flow.${risk}`)}</p><Button onClick={() => selection.approve(repo.snapshotId!)}><ActionIcon action="confirm" />{t(risk === "deletions" ? "workflow.flow.allowDeletion" : "workflow.flow.allowOverwrite")}</Button></div>}
         </TaskDisclosure>}
       </section>;
     })}
