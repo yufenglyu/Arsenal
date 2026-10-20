@@ -386,9 +386,9 @@ export function TaskCenter() {
                     }
                   }}
                   className={cn(
-                    "inline-flex items-center gap-2 rounded-sm text-sm focus-visible:outline-2 focus-visible:outline-ring",
+                    "inline-flex items-center gap-2 rounded-sm text-sm font-semibold focus-visible:outline-2 focus-visible:outline-ring",
                     tab === value
-                      ? "font-semibold text-primary"
+                      ? "text-primary"
                       : "text-muted-foreground",
                   )}
                 >
@@ -399,16 +399,16 @@ export function TaskCenter() {
                 </button>
               ))}
             </div>
-            {tab === "history" && (
-              <Button
-                variant="ghost"
-                className="ml-auto"
-                disabled={!historyCount}
-                onClick={clearHistory}
-              >
-                {t("workflow.clearFinished")}
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              className={cn("ml-auto", tab !== "history" && "invisible pointer-events-none")}
+              aria-hidden={tab !== "history"}
+              tabIndex={tab === "history" ? 0 : -1}
+              disabled={tab !== "history" || !historyCount}
+              onClick={clearHistory}
+            >
+              {t("workflow.clearFinished")}
+            </Button>
           </header>
           <div
             role="tabpanel"
