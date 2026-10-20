@@ -12,6 +12,8 @@ import {
 it("explains snapshot error codes returned as repository report strings",()=>{
  expect(taskErrorMessage("SNAPSHOT_CACHE_FULL")).toBe(i18n.t("workflow.errors.SNAPSHOT_CACHE_FULL"));
  expect(taskErrorMessage("UNSAFE_SNAPSHOT_PATH: unsupported managed file type")).toBe(i18n.t("workflow.errors.UNSAFE_SNAPSHOT_PATH"));
+ expect(taskErrorMessage("TARGET_DIRECTORY_CONFLICT")).toBe(i18n.t("workflow.errors.TARGET_DIRECTORY_CONFLICT"));
+ expect(taskErrorMessage("SNAPSHOT_LINK_UNAVAILABLE")).toBe(i18n.t("workflow.errors.SNAPSHOT_LINK_UNAVAILABLE"));
 });
 const input = (key: string, locks: string[] = []) => ({
   key,

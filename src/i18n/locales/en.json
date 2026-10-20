@@ -1239,6 +1239,8 @@
       "PREVIEW_EXPIRED": "The check snapshot expired. Check the repository again.",
       "SNAPSHOT_UNAVAILABLE": "The check snapshot is missing or damaged. Check again.",
       "LOCAL_IDENTITY_CHANGED": "Skill ownership or location changed. Check again before mirroring.",
+      "TARGET_DIRECTORY_CONFLICT": "The target directory has conflicting ownership or unmanaged files. Resolve the directory conflict before retrying.",
+      "SNAPSHOT_LINK_UNAVAILABLE": "A remote symbolic link is missing its target or forms a cycle. Fix the repository link before retrying.",
       "UNSAFE_TARGET": "The library target cannot be safely written.",
       "UNSAFE_INSTALL_TARGET": "The installation target changed and cannot be safely synchronized.",
       "UNSAFE_SNAPSHOT_PATH": "The remote snapshot contains unsupported or conflicting paths.",

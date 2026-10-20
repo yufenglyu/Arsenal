@@ -1237,6 +1237,8 @@
       "PREVIEW_EXPIRED": "检查快照已过期，请重新检查仓库。",
       "SNAPSHOT_UNAVAILABLE": "检查快照缺失或损坏，请重新检查仓库。",
       "LOCAL_IDENTITY_CHANGED": "技能来源或存储位置已改变，请重新检查后同步。",
+      "TARGET_DIRECTORY_CONFLICT": "目标目录存在重复归属或未托管文件，未覆盖本地内容；请处理目录占用后重试。",
+      "SNAPSHOT_LINK_UNAVAILABLE": "远端符号链接失效或形成循环；请修复仓库中的链接后重试。",
       "UNSAFE_TARGET": "资源库目标路径无法安全写入。",
       "UNSAFE_INSTALL_TARGET": "安装目标已改变，无法安全同步。",
       "UNSAFE_SNAPSHOT_PATH": "远端包含不支持或冲突的路径，未执行同步。",

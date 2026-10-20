@@ -253,16 +253,21 @@ fn source_key(path: &str) -> String {
         format!("{path}/SKILL.md")
     }
 }
+#[cfg(test)]
 fn matching<'a>(group: &'a [(db::SkillSource, db::Skill)], path: &str) -> Option<&'a db::Skill> {
+    matching_all(group, path).into_iter().next()
+}
+fn matching_all<'a>(group: &'a [(db::SkillSource, db::Skill)], path: &str) -> Vec<&'a db::Skill> {
     group
         .iter()
-        .find(|(source, _)| {
+        .filter(|(source, _)| {
             source
                 .source_path
                 .as_deref()
                 .is_some_and(|p| source_key(p).eq_ignore_ascii_case(&source_key(path)))
         })
         .map(|(_, skill)| skill)
+        .collect()
 }
 #[cfg(test)]
 fn repo_directory(root: &Path, repo: &github::GitHubRepoRef) -> PathBuf {
@@ -337,57 +342,70 @@ async fn preview(pool: &AppStore, snapshot: &Snapshot) -> Result<RepositorySyncP
     let mut matched = HashSet::new();
     for candidate in candidates {
         let remote = github::mirror_skill_files(&snapshot.contents, &candidate.source_path)?;
-        let mut item = RepositorySyncPreviewItem {
-            source_path: Some(candidate.source_path.clone()),
-            version: files_digest(&remote),
-            files: vec![],
-            skill_id: candidate.skill_id,
-            name: candidate.skill_name,
-        };
-        if let Some(skill) = matching(&snapshot.originals, &candidate.source_path) {
-            matched.insert(skill.id.clone());
-            item.skill_id = skill.id.clone();
-            let directory = Path::new(&skill.file_path)
-                .parent()
-                .ok_or("Invalid skill directory")?;
-            let local = if directory.exists() {
-                remote_sources::local_skill_files(directory)?
-            } else {
-                BTreeMap::new()
-            };
-            item.files = remote_sources::compare_files(&local, &remote);
-            if !item.files.is_empty() {
-                let baseline = db::get_skill_source_sync(pool, &skill.id).await?;
-                if baseline.and_then(|b| b.skill_fingerprint).as_deref() != Some(files_digest(&local).as_str()) {
-                    report.local_modified = Some(true);
-                }
-            }
-            let mut installation_changed = false;
-            for installation in snapshot
-                .installations
-                .iter()
-                .filter(|i| i.skill_id == skill.id)
-            {
-                let path = Path::new(&installation.installed_path);
-                if installation.link_type == "copy" && path.exists() && remote_sources::local_skill_files(path)? != local {
-                    report.local_modified = Some(true);
-                }
-                if (installation.link_type == "copy"
-                    && (!path.exists() || remote_sources::local_skill_files(path)? != remote))
-                    || (installation.link_type != "copy"
-                        && !crate::path_utils::paths_resolve_to_same_entry(path, directory))
-                {
-                    installation_changed = true;
-                }
-            }
-            if item.files.is_empty() && !installation_changed {
-                report.unchanged.push(item);
-            } else {
-                report.modified.push(item);
-            }
+        let existing = matching_all(&snapshot.originals, &candidate.source_path);
+        let targets = if existing.is_empty() {
+            vec![None]
         } else {
-            item.files = remote_sources::compare_files(&BTreeMap::new(), &remote);
-            report.added.push(item);
+            existing.into_iter().map(Some).collect()
+        };
+        for existing in targets {
+            let mut item = RepositorySyncPreviewItem {
+                source_path: Some(candidate.source_path.clone()),
+                version: files_digest(&remote),
+                files: vec![],
+                skill_id: candidate.skill_id.clone(),
+                name: candidate.skill_name.clone(),
+            };
+            if let Some(skill) = existing {
+                matched.insert(skill.id.clone());
+                item.skill_id = skill.id.clone();
+                let directory = Path::new(&skill.file_path)
+                    .parent()
+                    .ok_or("Invalid skill directory")?;
+                let local = if directory.exists() {
+                    remote_sources::local_skill_files(directory)?
+                } else {
+                    BTreeMap::new()
+                };
+                item.files = remote_sources::compare_files(&local, &remote);
+                if !item.files.is_empty() {
+                    let baseline = db::get_skill_source_sync(pool, &skill.id).await?;
+                    if baseline.and_then(|b| b.skill_fingerprint).as_deref()
+                        != Some(files_digest(&local).as_str())
+                    {
+                        report.local_modified = Some(true);
+                    }
+                }
+                let mut installation_changed = false;
+                for installation in snapshot
+                    .installations
+                    .iter()
+                    .filter(|i| i.skill_id == skill.id)
+                {
+                    let path = Path::new(&installation.installed_path);
+                    if installation.link_type == "copy"
+                        && path.exists()
+                        && remote_sources::local_skill_files(path)? != local
+                    {
+                        report.local_modified = Some(true);
+                    }
+                    if (installation.link_type == "copy"
+                        && (!path.exists() || remote_sources::local_skill_files(path)? != remote))
+                        || (installation.link_type != "copy"
+                            && !crate::path_utils::paths_resolve_to_same_entry(path, directory))
+                    {
+                        installation_changed = true;
+                    }
+                }
+                if item.files.is_empty() && !installation_changed {
+                    report.unchanged.push(item);
+                } else {
+                    report.modified.push(item);
+                }
+            } else {
+                item.files = remote_sources::compare_files(&BTreeMap::new(), &remote);
+                report.added.push(item);
+            }
         }
     }
     for (source, skill) in &snapshot.originals {
@@ -415,7 +433,11 @@ async fn preview(pool: &AppStore, snapshot: &Snapshot) -> Result<RepositorySyncP
         &github::snapshot_readmes(&snapshot.contents),
     );
     // Document edits have no stored per-file sync baseline; require explicit review.
-    if report.document_changes.iter().any(|file| file.status == "modified") {
+    if report
+        .document_changes
+        .iter()
+        .any(|file| file.status == "modified")
+    {
         report.local_modified = Some(true);
     }
     Ok(report)
@@ -690,8 +712,7 @@ async fn apply_contents(pool: &AppStore, id: &str, snapshot: &Snapshot) -> Resul
         }
     }
     let mut owned_targets = HashSet::new();
-    let mut owned_sources = HashSet::new();
-    for (source, skill) in &current {
+    for (_, skill) in &current {
         let target = Path::new(
             skill
                 .canonical_path
@@ -700,66 +721,89 @@ async fn apply_contents(pool: &AppStore, id: &str, snapshot: &Snapshot) -> Resul
         );
         ensure_owned_path(&root, target)?;
         let key = target.to_string_lossy().to_lowercase();
-        if !owned_targets.insert(key)
-            || !owned_sources.insert(
-                source
-                    .source_path
-                    .as_deref()
-                    .map(source_key)
-                    .map(|p| p.to_lowercase()),
-            )
-        {
-            return Err("LOCAL_IDENTITY_CHANGED: duplicate ownership".into());
+        if !owned_targets.insert(key) {
+            return Err("TARGET_DIRECTORY_CONFLICT".into());
         }
     }
     let repository_directory =
         super::repository_address::directory(pool, &root, &snapshot.repo.owner, &repository)
             .await?;
     let mut selections = Vec::new();
+    let mut directories = std::collections::HashMap::new();
     let mut retained = HashSet::new();
     for candidate in &candidates {
-        let existing = matching(&current, &candidate.source_path);
-        let target = existing
-            .and_then(|s| s.canonical_path.as_deref())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| repository_directory.join(&candidate.skill_directory_name));
-        ensure_owned_path(&root, &target)?;
-        if existing.is_none() && target.exists() {
-            return Err("LOCAL_IDENTITY_CHANGED: untracked target directory".into());
+        let existing = matching_all(&current, &candidate.source_path);
+        let targets = if existing.is_empty() {
+            vec![None]
+        } else {
+            existing.into_iter().map(Some).collect()
+        };
+        for existing in targets {
+            let mut target = existing
+                .and_then(|s| s.canonical_path.as_deref())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| repository_directory.join(&candidate.skill_directory_name));
+            ensure_owned_path(&root, &target)?;
+            if existing.is_none() && target.exists() {
+                // A moved source is an explicit addition/deletion, not an inferred rename.
+                // Stage its new directory separately so old content remains recoverable.
+                if !owned_targets.contains(&target.to_string_lossy().to_lowercase()) {
+                    return Err("TARGET_DIRECTORY_CONFLICT".into());
+                }
+                let hash = format!("{:x}", Sha256::digest(candidate.source_path.as_bytes()));
+                let directory = format!("{}-{}", candidate.skill_directory_name, &hash[..12]);
+                target = repository_directory.join(&directory);
+                if target.exists()
+                    || owned_targets.contains(&target.to_string_lossy().to_lowercase())
+                {
+                    return Err("TARGET_DIRECTORY_CONFLICT".into());
+                }
+                directories.insert(candidate.source_path.clone(), directory);
+            }
+            let remote = github::mirror_skill_files(&snapshot.contents, &candidate.source_path)?;
+            if let Some(skill) = existing {
+                retained.insert(skill.id.clone());
+            }
+            if existing.is_some()
+                && target.exists()
+                && remote_sources::local_skill_files(&target)? == remote
+                && current.iter().any(|(source, skill)| {
+                    Some(skill.id.as_str()) == existing.map(|s| s.id.as_str())
+                        && source.source_path.as_deref()
+                            == Some(candidate.source_manifest_path.as_str())
+                })
+            {
+                continue;
+            }
+            selections.push(github::GitHubSkillImportSelection {
+                source_path: candidate.source_path.clone(),
+                resolution: github::DuplicateResolution::Overwrite,
+                renamed_skill_id: existing.map(|s| s.id.clone()),
+            });
         }
-        let remote = github::mirror_skill_files(&snapshot.contents, &candidate.source_path)?;
-        if let Some(skill) = existing {
-            retained.insert(skill.id.clone());
-        }
-        if existing.is_some()
-            && target.exists()
-            && remote_sources::local_skill_files(&target)? == remote
-            && current.iter().any(|(source, skill)| {
-                Some(skill.id.as_str()) == existing.map(|s| s.id.as_str())
-                    && source.source_path.as_deref()
-                        == Some(candidate.source_manifest_path.as_str())
-            })
-        {
-            continue;
-        }
-        selections.push(github::GitHubSkillImportSelection {
-            source_path: candidate.source_path.clone(),
-            resolution: github::DuplicateResolution::Overwrite,
-            renamed_skill_id: existing.map(|s| s.id.clone()),
-        });
     }
     save_recovery(pool, id, &current).await?;
     set_snapshot_state(pool, id, "applying").await?;
     if !selections.is_empty() {
-        github::import_prepared_snapshot(
-            pool,
-            snapshot.repo.clone(),
-            &snapshot.contents,
-            selections,
-            None,
-            None,
-        )
-        .await?;
+        // A legacy source can have several managed copies. Keep each identity;
+        // the importer accepts each remote source once per atomic import batch.
+        while !selections.is_empty() {
+            let mut seen = HashSet::new();
+            let (batch, remaining): (Vec<_>, Vec<_>) = selections
+                .into_iter()
+                .partition(|s| seen.insert(s.source_path.clone()));
+            selections = remaining;
+            github::import_prepared_snapshot_with_directories(
+                pool,
+                snapshot.repo.clone(),
+                &snapshot.contents,
+                batch,
+                None,
+                None,
+                &directories,
+            )
+            .await?;
+        }
     } else {
         github::mirror_documents(pool, &snapshot.repo, &snapshot.contents).await?;
     }
@@ -769,36 +813,40 @@ async fn apply_contents(pool: &AppStore, id: &str, snapshot: &Snapshot) -> Resul
         .remove(&repository.to_lowercase())
         .unwrap_or_default();
     for candidate in &candidates {
-        let skill = matching(&current, &candidate.source_path)
-            .ok_or("WRITE_FAILED: missing imported skill")?;
-        retained.insert(skill.id.clone());
-        let remote = github::mirror_skill_files(&snapshot.contents, &candidate.source_path)?;
-        if remote_sources::local_skill_files(
-            Path::new(&skill.file_path)
-                .parent()
-                .ok_or("Invalid skill path")?,
-        )? != remote
-        {
-            return Err("WRITE_FAILED: content verification failed".into());
+        let matches = matching_all(&current, &candidate.source_path);
+        if matches.is_empty() {
+            return Err("WRITE_FAILED: missing imported skill".into());
         }
-        linker::refresh_resource_installations_impl(pool, &skill.id).await?;
-        let now = chrono::Utc::now().to_rfc3339();
-        db::upsert_skill_source_sync(
-            pool,
-            &db::SkillSourceSync {
-                skill_id: skill.id.clone(),
-                sync_scope: "github-repository".into(),
-                remote_ref: Some(snapshot.repo.branch.clone()),
-                skill_fingerprint: Some(files_digest(&remote)),
-                last_checked_at: Some(now.clone()),
-                last_sync_at: Some(now.clone()),
-                sync_status: "synced".into(),
-                sync_error: None,
-                remote_deleted: false,
-                updated_at: now,
-            },
-        )
-        .await?;
+        for skill in matches {
+            retained.insert(skill.id.clone());
+            let remote = github::mirror_skill_files(&snapshot.contents, &candidate.source_path)?;
+            if remote_sources::local_skill_files(
+                Path::new(&skill.file_path)
+                    .parent()
+                    .ok_or("Invalid skill path")?,
+            )? != remote
+            {
+                return Err("WRITE_FAILED: content verification failed".into());
+            }
+            linker::refresh_resource_installations_impl(pool, &skill.id).await?;
+            let now = chrono::Utc::now().to_rfc3339();
+            db::upsert_skill_source_sync(
+                pool,
+                &db::SkillSourceSync {
+                    skill_id: skill.id.clone(),
+                    sync_scope: "github-repository".into(),
+                    remote_ref: Some(snapshot.repo.branch.clone()),
+                    skill_fingerprint: Some(files_digest(&remote)),
+                    last_checked_at: Some(now.clone()),
+                    last_sync_at: Some(now.clone()),
+                    sync_status: "synced".into(),
+                    sync_error: None,
+                    remote_deleted: false,
+                    updated_at: now,
+                },
+            )
+            .await?;
+        }
     }
     for (_, skill) in current {
         if !retained.contains(&skill.id) {
@@ -1175,13 +1223,91 @@ mod tests {
         snapshot
     }
     #[tokio::test]
+    async fn duplicate_source_records_keep_both_identities_and_installations() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let mut next = capture(&pool, snapshot).await;
+        let (source, original) = next.originals.iter().find(|(_, s)| s.id == "one").unwrap();
+        let directory = Path::new(&original.file_path)
+            .parent()
+            .unwrap()
+            .with_file_name("one-copy");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::copy(&original.file_path, directory.join("SKILL.md")).unwrap();
+        let mut copy = original.clone();
+        copy.id = "one-copy".into();
+        copy.canonical_path = Some(directory.to_string_lossy().into_owned());
+        copy.file_path = directory.join("SKILL.md").to_string_lossy().into_owned();
+        db::upsert_skill(&pool, &copy).await.unwrap();
+        let mut copy_source = source.clone();
+        copy_source.skill_id = copy.id.clone();
+        db::upsert_skill_source(&pool, &copy_source).await.unwrap();
+        let link = linker::add_resource_skill_to_central_impl(&pool, &copy.id)
+            .await
+            .unwrap();
+        next = capture(&pool, next).await;
+        next.contents
+            .files
+            .get_mut("skills/one/SKILL.md")
+            .unwrap()
+            .extend_from_slice(b"\nupdated");
+        let report = preview(&pool, &next).await.unwrap();
+        assert!(report.deleted.is_empty());
+        assert_eq!(report.modified.len(), 2);
+        let id = persist_snapshot(&pool, &next).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        for id in ["one", "one-copy"] {
+            let skill = db::get_skill_by_id(&pool, id).await.unwrap().unwrap();
+            assert!(std::fs::read_to_string(skill.file_path)
+                .unwrap()
+                .ends_with("updated"));
+        }
+        assert!(
+            std::fs::read_to_string(Path::new(&link.central_path).join("SKILL.md"))
+                .unwrap()
+                .ends_with("updated")
+        );
+    }
+
+    #[tokio::test]
+    async fn moved_source_with_same_directory_name_is_not_an_identity_change() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let mut next = capture(&pool, snapshot).await;
+        let old = matching(&next.originals, "skills/one/SKILL.md")
+            .unwrap()
+            .clone();
+        let bytes = next.contents.files.remove("skills/one/SKILL.md").unwrap();
+        next.contents
+            .files
+            .insert("plugins/new/skills/one/SKILL.md".into(), bytes);
+        let report = preview(&pool, &next).await.unwrap();
+        assert_eq!(report.added.len(), 1);
+        assert_eq!(report.deleted.len(), 1);
+        let id = persist_snapshot(&pool, &next).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let next = capture(&pool, next).await;
+        let new = matching(&next.originals, "plugins/new/skills/one/SKILL.md").unwrap();
+        assert_ne!(new.canonical_path, old.canonical_path);
+        assert!(db::get_skill_by_id(&pool, &old.id).await.unwrap().is_none());
+        assert!(preview(&pool, &next).await.unwrap().added.is_empty());
+    }
+
+    #[tokio::test]
     async fn preview_distinguishes_upstream_updates_from_local_edits() {
         let (_dir, pool, snapshot) = fixture().await;
         let id = persist_snapshot(&pool, &snapshot).await.unwrap();
         apply(&pool, &id).await.unwrap();
         let snapshot = capture(&pool, snapshot).await;
         let mut upstream = snapshot.clone();
-        upstream.contents.files.get_mut("skills/one/SKILL.md").unwrap().extend_from_slice(b"\nupstream change");
+        upstream
+            .contents
+            .files
+            .get_mut("skills/one/SKILL.md")
+            .unwrap()
+            .extend_from_slice(b"\nupstream change");
         let report = preview(&pool, &upstream).await.unwrap();
         assert!(!report.modified.is_empty());
         assert_eq!(report.local_modified, Some(false));

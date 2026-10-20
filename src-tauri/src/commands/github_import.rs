@@ -441,6 +441,27 @@ pub(crate) async fn import_prepared_snapshot(
     app: Option<&AppHandle>,
     operation: Option<&super::github_cancellation::Operation>,
 ) -> Result<GitHubRepoImportResult, String> {
+    import_prepared_snapshot_with_directories(
+        pool,
+        repo,
+        snapshot,
+        selections,
+        app,
+        operation,
+        &HashMap::new(),
+    )
+    .await
+}
+
+pub(crate) async fn import_prepared_snapshot_with_directories(
+    pool: &AppStore,
+    repo: GitHubRepoRef,
+    snapshot: &GitHubRepoSnapshot,
+    selections: Vec<GitHubSkillImportSelection>,
+    app: Option<&AppHandle>,
+    operation: Option<&super::github_cancellation::Operation>,
+    directories: &HashMap<String, String>,
+) -> Result<GitHubRepoImportResult, String> {
     let candidates = build_repo_skill_candidates_from_snapshot(&repo, snapshot)?;
     if candidates.is_empty() {
         return Err(
@@ -456,7 +477,7 @@ pub(crate) async fn import_prepared_snapshot(
     let mut selected_paths = HashSet::new();
     let mut selected = Vec::new();
     for selection in selections {
-        let candidate = candidates
+        let mut candidate = candidates
             .iter()
             .find(|candidate| candidate.source_path == selection.source_path)
             .ok_or_else(|| {
@@ -466,6 +487,13 @@ pub(crate) async fn import_prepared_snapshot(
                 )
             })?
             .clone();
+
+        if let Some(directory) = directories.get(&candidate.source_path) {
+            if directory.contains(['/', '\\']) || !is_safe_repo_relative_path(directory) {
+                return Err("UNSAFE_TARGET".into());
+            }
+            candidate.skill_directory_name = directory.clone();
+        }
 
         if !selected_paths.insert(candidate.source_path.clone()) {
             return Err(format!(
@@ -4983,52 +5011,20 @@ pub(crate) async fn fetch_mirror_snapshot(
     if tree["truncated"].as_bool() != Some(false) {
         return Err("SNAPSHOT_UNAVAILABLE: incomplete repository tree".into());
     }
-    let entries = tree["tree"]
-        .as_array()
-        .ok_or("SNAPSHOT_UNAVAILABLE: missing tree")?;
     let snapshot = (*download_repo_snapshot(&client, repo, auth).await?).clone();
+    let client = &client;
+    let snapshot = complete_mirror_snapshot(&tree, snapshot, |path| async move {
+        send_github_bytes_with_fallback(
+            client,
+            GitHubFetchSurface::Raw,
+            |endpoint| raw_file_url(endpoint, repo, &path),
+            "Failed to download missing skill resource",
+            auth,
+        )
+        .await
+    })
+    .await?;
     let candidates = build_repo_skill_candidates_from_snapshot(repo, &snapshot)?;
-    let roots = entries
-        .iter()
-        .filter_map(|entry| {
-            entry["path"]
-                .as_str()
-                .and_then(classify_skill_manifest_path)
-        })
-        .map(|manifest| snapshot_source_directory(&manifest.source_path))
-        .collect::<HashSet<_>>();
-    // Verify the complete expected manifest set and every managed resource against
-    // the immutable tree before interpreting any missing local content as deletion.
-    for entry in entries {
-        let path = entry["path"]
-            .as_str()
-            .ok_or("SNAPSHOT_UNAVAILABLE: missing path")?;
-        let selected = repository_docs::language(path).is_some()
-            || roots.iter().any(|root| {
-                if root.is_empty() {
-                    true
-                } else {
-                    path.starts_with(&format!("{root}/"))
-                }
-            });
-        if !selected || entry["type"] == "tree" {
-            continue;
-        }
-        if entry["type"] != "blob" || !matches!(entry["mode"].as_str(), Some("100644" | "100755")) {
-            return Err("UNSAFE_SNAPSHOT_PATH: unsupported managed file type".into());
-        }
-        let expected = entry["size"]
-            .as_u64()
-            .ok_or("SNAPSHOT_UNAVAILABLE: missing size")?;
-        if snapshot
-            .files
-            .get(path)
-            .is_none_or(|bytes| bytes.len() as u64 != expected)
-        {
-            return Err("SNAPSHOT_UNAVAILABLE: incomplete managed files".into());
-        }
-    }
-    // Persist only managed skill bytes and shared documents, never unrelated repo artifacts.
     let mut files = snapshot
         .files
         .iter()
@@ -5041,6 +5037,133 @@ pub(crate) async fn fetch_mirror_snapshot(
                 file.repo_path.clone(),
                 snapshot.files[&file.repo_path].clone(),
             );
+        }
+    }
+    Ok(GitHubRepoSnapshot { files })
+}
+
+// Complete only the managed tree, including archive export omissions and in-repo
+// links. Links are materialized as regular files; no filesystem symlink is created.
+async fn complete_mirror_snapshot<F, Fut>(
+    tree: &serde_json::Value,
+    mut snapshot: GitHubRepoSnapshot,
+    fetch: F,
+) -> Result<GitHubRepoSnapshot, String>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<u8>, String>>,
+{
+    if tree["truncated"].as_bool() != Some(false) {
+        return Err("SNAPSHOT_UNAVAILABLE: incomplete repository tree".into());
+    }
+    let entries = tree["tree"]
+        .as_array()
+        .ok_or("SNAPSHOT_UNAVAILABLE: missing tree")?;
+    let mut index = std::collections::BTreeMap::new();
+    for entry in entries {
+        let path = entry["path"]
+            .as_str()
+            .ok_or("SNAPSHOT_UNAVAILABLE: missing path")?;
+        if !is_safe_repo_relative_path(path) || index.insert(path.to_owned(), entry).is_some() {
+            return Err("UNSAFE_SNAPSHOT_PATH".into());
+        }
+    }
+    let roots = index
+        .keys()
+        .filter_map(|p| classify_skill_manifest_path(p))
+        .map(|m| snapshot_source_directory(&m.source_path))
+        .collect::<HashSet<_>>();
+    let mut pending = index
+        .iter()
+        .filter(|(path, entry)| {
+            entry["type"] != "tree"
+                && (repository_docs::language(path).is_some()
+                    || roots
+                        .iter()
+                        .any(|root| root.is_empty() || path.starts_with(&format!("{root}/"))))
+        })
+        .map(|(path, _)| (path.clone(), path.clone(), Vec::<String>::new()))
+        .collect::<Vec<_>>();
+    let mut files = HashMap::new();
+    let mut total_bytes = 0usize;
+    while let Some((output, input, chain)) = pending.pop() {
+        if !is_safe_repo_relative_path(&output) || chain.len() > 32 {
+            return Err("UNSAFE_SNAPSHOT_PATH".into());
+        }
+        if input.is_empty() || index.get(&input).is_some_and(|e| e["type"] == "tree") {
+            let prefix = if input.is_empty() {
+                String::new()
+            } else {
+                format!("{input}/")
+            };
+            for path in index.keys() {
+                if let Some(relative) = path.strip_prefix(&prefix) {
+                    if !relative.is_empty() && !relative.contains('/') {
+                        pending.push((format!("{output}/{relative}"), path.clone(), chain.clone()));
+                    }
+                }
+            }
+            continue;
+        }
+        let entry = index.get(&input).ok_or("SNAPSHOT_LINK_UNAVAILABLE")?;
+        if entry["type"] != "blob" {
+            return Err("UNSAFE_SNAPSHOT_PATH: unsupported managed file type".into());
+        }
+        let mode = entry["mode"].as_str().ok_or("UNSAFE_SNAPSHOT_PATH")?;
+        if !matches!(mode, "100644" | "100755" | "120000") {
+            return Err("UNSAFE_SNAPSHOT_PATH".into());
+        }
+        let size = entry["size"]
+            .as_u64()
+            .ok_or("SNAPSHOT_UNAVAILABLE: missing size")?;
+        if size > 128 * 1024 * 1024 {
+            return Err("SNAPSHOT_TOO_LARGE".into());
+        }
+        if snapshot
+            .files
+            .get(&input)
+            .is_none_or(|b| b.len() as u64 != size)
+        {
+            let bytes = fetch(input.clone()).await?;
+            if bytes.len() as u64 != size {
+                return Err("SNAPSHOT_UNAVAILABLE: incomplete managed files".into());
+            }
+            snapshot.files.insert(input.clone(), bytes);
+        }
+        let bytes = &snapshot.files[&input];
+        if mode == "120000" {
+            if chain.contains(&input) {
+                return Err("SNAPSHOT_LINK_UNAVAILABLE".into());
+            }
+            let link = std::str::from_utf8(bytes).map_err(|_| "UNSAFE_SNAPSHOT_PATH")?;
+            if link.is_empty() || link.starts_with('/') || link.contains(['\\', ':', '\0']) {
+                return Err("UNSAFE_SNAPSHOT_PATH".into());
+            }
+            let mut parts = input.split('/').collect::<Vec<_>>();
+            parts.pop();
+            for part in link.split('/') {
+                match part {
+                    "" | "." => {}
+                    ".." => {
+                        if parts.pop().is_none() {
+                            return Err("UNSAFE_SNAPSHOT_PATH".into());
+                        }
+                    }
+                    _ => parts.push(part),
+                }
+            }
+            let target = parts.join("/");
+            let mut next_chain = chain;
+            next_chain.push(input);
+            pending.push((output, target, next_chain));
+        } else {
+            total_bytes = total_bytes.saturating_add(bytes.len());
+            if total_bytes > 128 * 1024 * 1024 || files.len() >= 100_000 {
+                return Err("SNAPSHOT_TOO_LARGE".into());
+            }
+            if files.insert(output, bytes.clone()).is_some() {
+                return Err("UNSAFE_SNAPSHOT_PATH: overlapping link target".into());
+            }
         }
     }
     Ok(GitHubRepoSnapshot { files })
@@ -5099,6 +5222,108 @@ pub(crate) async fn mirror_documents(
     )?;
     transaction.commit()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod mirror_completion_tests {
+    use super::*;
+
+    fn entry(path: &str, mode: &str, size: usize) -> serde_json::Value {
+        serde_json::json!({"path": path, "type": "blob", "mode": mode, "size": size})
+    }
+
+    #[tokio::test]
+    async fn mirror_completion_fetches_archive_omissions_at_pinned_revision() {
+        let tree = serde_json::json!({"truncated":false,"tree":[
+            entry("SKILL.md", "100644", 1), entry("assets/image.png", "100644", 3)
+        ]});
+        let snapshot = GitHubRepoSnapshot {
+            files: [("SKILL.md".into(), vec![1])].into(),
+        };
+        let result = complete_mirror_snapshot(&tree, snapshot, |path| async move {
+            assert_eq!(path, "assets/image.png");
+            Ok(vec![2, 3, 4])
+        })
+        .await
+        .unwrap();
+        assert_eq!(result.files["assets/image.png"], vec![2, 3, 4]);
+    }
+
+    #[tokio::test]
+    async fn mirror_completion_materializes_internal_file_and_directory_links() {
+        let tree = serde_json::json!({"truncated":false,"tree":[
+            entry("skills/demo/SKILL.md", "100644", 1),
+            entry("skills/demo/guide.md", "120000", 21),
+            entry("skills/demo/assets", "120000", 12),
+            entry("shared/guide.md", "100644", 3),
+            {"path":"shared", "type":"tree", "mode":"040000"},
+        ]});
+        let snapshot = GitHubRepoSnapshot {
+            files: [
+                ("skills/demo/SKILL.md".into(), vec![1]),
+                ("shared/guide.md".into(), b"doc".to_vec()),
+            ]
+            .into(),
+        };
+        let result = complete_mirror_snapshot(&tree, snapshot, |path| async move {
+            Ok(match path.as_str() {
+                "skills/demo/guide.md" => b"../../shared/guide.md".to_vec(),
+                "skills/demo/assets" => b"../../shared".to_vec(),
+                _ => panic!("unexpected fetch"),
+            })
+        })
+        .await
+        .unwrap();
+        assert_eq!(result.files["skills/demo/guide.md"], b"doc");
+        assert_eq!(result.files["skills/demo/assets/guide.md"], b"doc");
+        assert!(!result.files.contains_key("skills/demo/assets"));
+    }
+
+    #[tokio::test]
+    async fn mirror_completion_rejects_escaping_dangling_and_cyclic_links() {
+        for (link, expected) in [
+            ("../outside", "UNSAFE_SNAPSHOT_PATH"),
+            ("/outside", "UNSAFE_SNAPSHOT_PATH"),
+            ("missing", "SNAPSHOT_LINK_UNAVAILABLE"),
+            ("alias", "SNAPSHOT_LINK_UNAVAILABLE"),
+            (".", "SNAPSHOT_LINK_UNAVAILABLE"),
+        ] {
+            let tree = serde_json::json!({"truncated":false,"tree":[
+                entry("SKILL.md", "100644", 1), entry("alias", "120000", link.len())
+            ]});
+            let snapshot = GitHubRepoSnapshot {
+                files: [
+                    ("SKILL.md".into(), vec![1]),
+                    ("alias".into(), link.as_bytes().to_vec()),
+                ]
+                .into(),
+            };
+            let error = complete_mirror_snapshot(&tree, snapshot, |_| async {
+                panic!("no fetch expected")
+            })
+            .await
+            .unwrap_err();
+            assert_eq!(error, expected, "link: {link}");
+        }
+    }
+
+    #[tokio::test]
+    async fn mirror_completion_rejects_incomplete_refetch_and_incomplete_tree() {
+        let tree = serde_json::json!({"truncated":false,"tree":[entry("SKILL.md", "100644", 3)]});
+        let snapshot = GitHubRepoSnapshot {
+            files: HashMap::new(),
+        };
+        let error = complete_mirror_snapshot(&tree, snapshot.clone(), |_| async { Ok(vec![1]) })
+            .await
+            .unwrap_err();
+        assert!(error.contains("incomplete managed files"));
+        let tree = serde_json::json!({"truncated":true,"tree":[]});
+        let error =
+            complete_mirror_snapshot(&tree, snapshot, |_| async { panic!("no fetch expected") })
+                .await
+                .unwrap_err();
+        assert!(error.contains("incomplete repository tree"));
+    }
 }
 
 /// Recover interrupted swaps before scanning, so a temporary missing SKILL.md cannot erase identity.
