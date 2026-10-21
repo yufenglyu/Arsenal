@@ -30,6 +30,7 @@ export function hasRepositoryChanges(item: RepositorySyncPreview): boolean {
 }
 
 interface RepositorySyncState {
+  invalidateRepositories: (repositories:string[]) => void;
   applySnapshots: (choices: {repository: string; snapshotId: string; allowDeletions: boolean}[], generation: string | null) => number;
   migratingRepository: string | null;
   changeRepositoryAddress: (repository: string, newAddress: string) => Promise<void>;
@@ -274,6 +275,15 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
           previewRequest = null;
         });
         return previewRequest;
+      },
+      invalidateRepositories: repositories => {
+        const affected=new Set(repositories.map(repository=>repository.toLowerCase()));
+        if(!affected.size)return;
+        set(state=>({
+          preview:state.preview?{...state.preview,repositories:state.preview.repositories.map(row=>affected.has(row.repository.toLowerCase())?{...row,snapshotId:null,error:"PREVIEW_EXPIRED"}:row)}:null,
+          checkedAt:Object.fromEntries(Object.entries(state.checkedAt).filter(([repository])=>!affected.has(repository.toLowerCase()))),
+          applied:state.preview?.repositories.some(row=>affected.has(row.repository.toLowerCase()))?false:state.applied,appliedRepositories:state.appliedRepositories.filter(repository=>!affected.has(repository.toLowerCase())),
+        }));
       },
       open: false,
       centerView: null,

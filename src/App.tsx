@@ -1,3 +1,4 @@
+import { ResourceTrashView } from "@/pages/ResourceTrashView";
 import { NotebookNavigation } from "@/components/notebook/NotebookNavigation";
 import { useEffect, useRef } from "react";
 import {startSnapshotCacheMaintenance} from "@/stores/snapshotCacheMaintenance";
@@ -28,6 +29,7 @@ function App() {
         <Route path="central" element={<CentralSkillsView />} />
         {/* Skill Repository: downloaded/imported skill source library */}
         <Route path="resources" element={<ResourceLibraryView />} />
+        <Route path="trash" element={<ResourceTrashView />} />
         {/* Skill detail page */}
         <Route path="skill/:skillId" element={<SkillDetailPage />} />
         {/* Skill Bundles */}

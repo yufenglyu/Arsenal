@@ -17,7 +17,7 @@ it('selects groups in the repository and navigates visible rows with arrows',()=
  fireEvent.keyDown(first,{key:'ArrowRight'});expect(screen.getByRole('button',{name:'Writing 0/0'})).toBeInTheDocument();
 });
 it('collapses and expands child groups while keeping the repository root open',()=>{
- setup();const first=screen.getByRole('button',{name:'Research 0/0'});fireEvent.keyDown(first,{key:'-'});expect(screen.getAllByRole('treeitem')).toHaveLength(2); expect(screen.getByText('未分组')).toBeInTheDocument();
+ setup();const first=screen.getByRole('button',{name:'Research 0/0'});fireEvent.keyDown(first,{key:'-'});expect(screen.getAllByRole('treeitem')).toHaveLength(2); expect(screen.getByText('未分类')).toBeInTheDocument();
  fireEvent.keyDown(screen.getByRole('tree'),{key:'+'});expect(screen.getAllByRole('treeitem')).toHaveLength(3);
 });
 it('opens the keyboard context menu and creates a child at the chosen parent',async()=>{
@@ -62,7 +62,17 @@ it('counts distinct repositories and skills across subgroups with matching right
  expect(within(root).getByTitle('2 个仓库 / 3 个技能')).toBeInTheDocument();
  expect(screen.getByRole('button',{name:'Research 1/2'})).toHaveClass('pr-2');
  expect(screen.getByRole('button',{name:'Writing 1/2'})).toHaveClass('pr-2');
- expect(screen.getByRole('button',{name:'未分组 1/1'})).toHaveClass('pr-2');
+ expect(screen.getByRole('button',{name:'未分类 1/1'})).toHaveClass('pr-2');
  act(()=>store.setState({includeDescendants:false}));
  expect(screen.getByRole('button',{name:'Research 1/1'})).toBeInTheDocument();
+});
+
+it('keeps unfiled and recycle bin after custom groups and gives every menu action an icon',()=>{
+ setup();const tree=screen.getByRole('tree');const rows=Array.from(tree.querySelectorAll('[data-group-select]'));
+ expect(rows.at(-2)).toHaveTextContent('未分类');expect(rows.at(-1)).toHaveTextContent('回收站');
+ fireEvent.contextMenu(screen.getByRole('button',{name:'Research 0/0'}).parentElement!);
+ const menu=screen.getByRole('menu');
+ expect(within(menu).getAllByRole('group')).toHaveLength(5);
+ expect(within(menu).getAllByRole('separator')).toHaveLength(4);
+ for(const item of menu.querySelectorAll('button'))expect(item.querySelector('svg')).not.toBeNull();
 });

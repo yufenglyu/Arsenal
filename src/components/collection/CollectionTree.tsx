@@ -1,8 +1,9 @@
+import {useResourceTrashStore} from "@/stores/resourceTrashStore";
 import {splitResourceLibrarySkillsByFolder} from "@/lib/skillFolders";
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent} from "react";
 import {useNavigate,useLocation} from "react-router-dom";
 import {useTranslation} from "react-i18next";
-import {ChevronRight, Folder, Inbox, Plus, Minus} from "lucide-react";
+import {ChevronRight, Folder, Inbox, Plus, Minus, FolderPlus, Pencil, FileDown, FolderMinus, Trash2, Check, ListTree} from "lucide-react";
 import {toast} from "sonner";
 import {useCollectionStore} from "@/stores/collectionStore";
 import {useResourceLibraryStore} from "@/stores/resourceLibraryStore";
@@ -21,6 +22,11 @@ export function CollectionTree({count, onExport, onExpandedChange}: {count?: num
   const {t}=useTranslation(); const navigate=useNavigate(); const {pathname}=useLocation(); const store=useCollectionStore(s=>s);
   const skills=useResourceLibraryStore(s=>s.skills);
   const libraryDir=useResourceLibraryStore(s=>s.resourceLibraryDir);
+  const trashEntries=useResourceTrashStore(s=>s.entries);const loadTrash=useResourceTrashStore(s=>s.load);
+  const trashRevision=skills.map(skill=>skill.id).join("\0");
+  useEffect(()=>{void loadTrash(true);},[trashRevision,loadTrash]);
+  const trashRepositories=new Set(trashEntries.flatMap(entry=>entry.repositories)).size;
+  const trashSkills=trashEntries.reduce((total,entry)=>total+entry.skillCount,0);
   const repositoryBySkill=useMemo(()=>{
     const keys=new Map<string,string>();
     const folders=splitResourceLibrarySkillsByFolder(skills,libraryDir).groups;
@@ -142,14 +148,29 @@ export function CollectionTree({count, onExport, onExpandedChange}: {count?: num
       <div className="flex items-center" onDragOver={e=>{if(e.dataTransfer.types.includes(COLLECTION_DRAG))e.preventDefault();}} onDrop={e=>acceptDrop(e,'','inside')} onContextMenu={e=>{e.preventDefault();setMenu({item:null,x:e.clientX,y:e.clientY});}}>
         <button data-group-select aria-expanded={rootExpanded} aria-label={t('sidebar.resourceLibrary')} aria-current={(pathname==='/resources'||pathname==='/')&&!store.activeCollectionId?'page':undefined} className={cn('flex min-w-0 flex-1 items-center gap-2 rounded-md pl-1 pr-2 py-1 text-sm font-semibold', (pathname==='/resources'||pathname==='/')&&!store.activeCollectionId?'bg-hover-bg text-white':'hover:bg-primary/10')} onClick={e=>{e.currentTarget.focus();choose(null);}} onDoubleClick={()=>setRootOpen(!rootExpanded)} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();e.stopPropagation();setRootOpen(!rootExpanded);choose(null);}}}><SkillRepositoryIcon className="size-3.5 shrink-0"/><span className="min-w-0 flex-1 truncate text-left">{t('sidebar.resourceLibrary')}</span>{statistics(undefined,count)}</button>
       </div>
-      {rootExpanded&&<div><button data-group-select className={cn('flex w-full items-center gap-2 rounded-md pl-6 pr-2 py-1 text-sm',store.activeCollectionId===UNFILED_COLLECTION&&'bg-primary/15 text-primary')} onClick={e=>{e.currentTarget.focus();choose(UNFILED_COLLECTION);}}><Inbox className="size-3.5"/><span className="flex-1 text-left">{t('groups.unfiled')}</span>{statistics(new Set(skills.filter(skill=>!assigned.has(skill.id)).map(skill=>skill.id)))}</button>{render(null,0)}</div>}
+      {rootExpanded&&<div>{render(null,0)}<button data-group-select className={cn('flex w-full items-center gap-2 rounded-md pl-6 pr-2 py-1 text-sm',store.activeCollectionId===UNFILED_COLLECTION&&'bg-primary/15 text-primary')} onClick={e=>{e.currentTarget.focus();choose(UNFILED_COLLECTION);}}><Inbox className="size-3.5"/><span className="flex-1 text-left">{t('groups.unfiled')}</span>{statistics(new Set(skills.filter(skill=>!assigned.has(skill.id)).map(skill=>skill.id)))}</button><button data-group-select className={cn('flex w-full items-center gap-2 rounded-md pl-6 pr-2 py-1 text-sm',pathname==='/trash'&&'bg-primary/15 text-primary')} onClick={()=>{store.selectGroup(null);navigate('/trash');}}><Trash2 className="size-3.5 shrink-0"/><span className="flex-1 text-left">{t('trash.title')}</span><span className="shrink-0 text-xs font-normal tabular-nums" title={t('groups.countSummary',{repositories:trashRepositories,skills:trashSkills})}>{trashRepositories}/{trashSkills}</span></button></div>}
     </div>
     {menu&&<div ref={menuRef} role="menu" className="fixed z-50 min-w-44 rounded-md border border-border bg-popover p-1 shadow-md" style={{left:menu.x,top:menu.y}} onClick={e=>e.stopPropagation()} onKeyDown={e=>{if(e.key==='Escape'){setMenu(null);tree.current?.querySelector<HTMLButtonElement>('button')?.focus();}if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const buttons=Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const i=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[(i+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}}}>
-      <button role="menuitem" className="group-menu-item" onClick={()=>open('create',undefined,menu.item?.id??null)}>{t(menu.item?'groups.createChild':'groups.create')}</button>
-      {!menu.item&&onExport&&<button role="menuitem" className="group-menu-item" onClick={()=>{setMenu(null);onExport();}}>{t('resource.exportDirectoryList')}</button>}
-      {menu.item&&<><button role="menuitem" className="group-menu-item" onClick={()=>open('rename',menu.item!)}>{t('groups.rename')}</button><button role="menuitem" className="group-menu-item" disabled={!store.selectedSkillIds.length} onClick={()=>{void change({action:'assign',id:menu.item!.id,skillIds:store.selectedSkillIds});setMenu(null);}}>{t('groups.addSelected')}</button><button role="menuitem" className="group-menu-item" disabled={!store.selectedSkillIds.length} onClick={()=>{void change({action:'detach',id:menu.item!.id,skillIds:store.selectedSkillIds});setMenu(null);}}>{t('groups.detachSelected')}</button><button role="menuitem" className="group-menu-item" onClick={()=>void exportGroup(menu.item!)}>{t('groups.export')}</button><button role="menuitem" className="group-menu-item text-destructive" onClick={()=>open('delete',menu.item!)}>{t('groups.delete')}</button></>}
-      <button role="menuitemcheckbox" aria-checked={store.includeDescendants} className="group-menu-item" onClick={()=>{try{localStorage.setItem('skillshub.groups.includeDescendants',String(!store.includeDescendants));}catch{/* Keep session state. */}useCollectionStore.setState({includeDescendants:!store.includeDescendants});setMenu(null);}}>{store.includeDescendants?'✓ ':''}{t('groups.includeChildren')}</button>
-      <button role="menuitem" className="group-menu-item" onClick={()=>{expandAll();setMenu(null);}}><Plus className="size-3.5"/>{t('groups.expandAll')}</button><button role="menuitem" className="group-menu-item" onClick={()=>{collapseAll();setMenu(null);}}><Minus className="size-3.5"/>{t('groups.collapseAll')}</button>
+      <div role="group" aria-label={t('groups.menu.organize')}>
+        <button role="menuitem" className="group-menu-item" onClick={()=>open('create',undefined,menu.item?.id??null)}><FolderPlus/>{t(menu.item?'groups.createChild':'groups.create')}</button>
+        {menu.item&&<button role="menuitem" className="group-menu-item" onClick={()=>open('rename',menu.item!)}><Pencil/>{t('groups.rename')}</button>}
+      </div>
+      {menu.item&&<><div role="separator" className="my-1 border-t border-border"/><div role="group" aria-label={t('groups.menu.members')}>
+        <button role="menuitem" className="group-menu-item" disabled={!store.selectedSkillIds.length} onClick={()=>{void change({action:'assign',id:menu.item!.id,skillIds:store.selectedSkillIds});setMenu(null);}}><Plus/>{t('groups.addSelected')}</button>
+        <button role="menuitem" className="group-menu-item" disabled={!store.selectedSkillIds.length} onClick={()=>{void change({action:'detach',id:menu.item!.id,skillIds:store.selectedSkillIds});setMenu(null);}}><FolderMinus/>{t('groups.detachSelected')}</button>
+      </div></>}
+      {(menu.item||onExport)&&<><div role="separator" className="my-1 border-t border-border"/><div role="group" aria-label={t('groups.menu.export')}>
+        <button role="menuitem" className="group-menu-item" onClick={()=>{if(menu.item)void exportGroup(menu.item);else{setMenu(null);onExport?.();}}}><FileDown/>{t(menu.item?'groups.export':'resource.exportDirectoryList')}</button>
+      </div></>}
+      <div role="separator" className="my-1 border-t border-border"/>
+      <div role="group" aria-label={t('groups.menu.view')}>
+        <button role="menuitemcheckbox" aria-checked={store.includeDescendants} className="group-menu-item" onClick={()=>{try{localStorage.setItem('skillshub.groups.includeDescendants',String(!store.includeDescendants));}catch{/* Keep session state. */}useCollectionStore.setState({includeDescendants:!store.includeDescendants});setMenu(null);}}><ListTree/>{t('groups.includeChildren')}<Check className={cn('ml-auto',!store.includeDescendants&&'invisible')}/></button>
+        <button role="menuitem" className="group-menu-item" onClick={()=>{expandAll();setMenu(null);}}><Plus/>{t('groups.expandAll')}</button>
+        <button role="menuitem" className="group-menu-item" onClick={()=>{collapseAll();setMenu(null);}}><Minus/>{t('groups.collapseAll')}</button>
+      </div>
+      {menu.item&&<><div role="separator" className="my-1 border-t border-border"/><div role="group" aria-label={t('groups.menu.danger')}>
+        <button role="menuitem" className="group-menu-item text-destructive" onClick={()=>open('delete',menu.item!)}><Trash2/>{t('groups.delete')}</button>
+      </div></>}
     </div>}
     <Dialog open={!!edit} onOpenChange={open=>{if(!busy&&!open)setEdit(null);}}><DialogContent><DialogHeader><DialogTitle>{t(`groups.${edit?.action??'create'}`)}</DialogTitle></DialogHeader><DialogBody>{edit?.action==='delete'?<p className="text-sm">{t('groups.deleteConfirm',{name:edit.item?.name})}</p>:<Input autoFocus aria-label={t('groups.name')} value={name} maxLength={100} onChange={e=>setName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.nativeEvent.isComposing&&name.trim()&&!busy)void submit();}}/>}</DialogBody><DialogFooter><Button variant="outline" disabled={busy} onClick={()=>setEdit(null)}>{t('common.cancel')}</Button><Button variant={edit?.action==='delete'?'destructive':'default'} disabled={busy||(edit?.action!=='delete'&&!name.trim())} onClick={()=>void submit()}>{t('common.confirm')}</Button></DialogFooter></DialogContent></Dialog>
   </>;

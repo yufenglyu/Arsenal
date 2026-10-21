@@ -282,3 +282,15 @@ describe("repository check checkpoints", () => {
     expect(queue.getState().tasks[0].status).toBe("success");
   });
 });
+
+it("invalidates only repositories whose library content changed", () => {
+  const one = {repository:"example/one",added:[],modified:[],deleted:[],unchanged:[],snapshotId:"first"};
+  const two = {repository:"example/two",added:[],modified:[],deleted:[],unchanged:[],snapshotId:"second"};
+  useRepositorySyncStore.setState({preview:{repositories:[one,two]},checkedAt:{"example/one":1,"example/two":2},applied:true,appliedRepositories:["example/one","example/two"]});
+  useRepositorySyncStore.getState().invalidateRepositories(["EXAMPLE/ONE"]);
+  const state = useRepositorySyncStore.getState();
+  expect(state.preview?.repositories[0]).toMatchObject({snapshotId:null,error:"PREVIEW_EXPIRED"});
+  expect(state.preview?.repositories[1]).toEqual(two);
+  expect(state.checkedAt).toEqual({"example/two":2});
+  expect(state.appliedRepositories).toEqual(["example/two"]);
+});

@@ -676,3 +676,26 @@ it.each(["skill", "folder"] as const)("keeps selected %s rows highlighted under 
  fireEvent.click(rows[1],{ctrlKey:true});
  expect(rows[1]).toHaveClass("hover:bg-muted/25");
 });
+
+it("reimports multiple selected repositories once each after confirmation",async()=>{
+ const first=vi.fn().mockResolvedValue(undefined),second=vi.fn().mockResolvedValue(undefined);
+ render(<SkillBrowserTable kind="folder" visibleColumns={new Set(['name'])} folders={[
+   {key:'one',name:'example/one',sourceRepo:'example/one',path:'/demo/one',skillCount:1,onOpen:vi.fn(),reimport:first},
+   {key:'two',name:'example/two',sourceRepo:'example/two',path:'/demo/two',skillCount:1,onOpen:vi.fn(),reimport:second},
+ ]}/>);
+ const one=screen.getByRole('button',{name:'example/one'}).closest('tr')!;
+ const two=screen.getByRole('button',{name:'example/two'}).closest('tr')!;
+ fireEvent.click(one);fireEvent.click(two,{ctrlKey:true});
+ fireEvent.click(openRowActions(one).getByRole('menuitem',{name:'重新导入'}));
+ expect(first).not.toHaveBeenCalled();expect(second).not.toHaveBeenCalled();
+ fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'确认'}));
+ await waitFor(()=>{expect(first).toHaveBeenCalledOnce();expect(second).toHaveBeenCalledOnce();});
+});
+it("opens a confirmation for a single repository reimport",async()=>{
+ const reimport=vi.fn().mockResolvedValue(undefined);
+ render(<SkillBrowserTable kind="folder" visibleColumns={new Set(['name'])} folders={[{key:'repo',name:'example/one',path:'/demo/one',skillCount:1,onOpen:vi.fn(),reimport}]}/>);
+ const row=screen.getByRole('button',{name:'example/one'}).closest('tr')!;
+ fireEvent.click(openRowActions(row).getByRole('menuitem',{name:'重新导入'}));
+ expect(reimport).not.toHaveBeenCalled();fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'确认'}));
+ await waitFor(()=>expect(reimport).toHaveBeenCalledOnce());
+});

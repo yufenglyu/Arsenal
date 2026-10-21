@@ -10,6 +10,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 pub(crate) struct ImportRules {
     // Logical name -> explicitly retained source directories. Empty means excluded.
     pub groups: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    pub excluded_paths: BTreeMap<String, String>,
+    #[serde(default)]
+    pub legacy_passthrough: bool,
 }
 
 fn name(candidate: &RemoteSkillCandidate) -> String {
@@ -103,6 +107,8 @@ pub(crate) fn update_candidates(
     let Some(rules) = rules else {
         return Ok(all);
     }; // Existing repositories retain their current behavior.
+    let all:Vec<_>=all.into_iter().filter(|candidate|!rules.excluded_paths.contains_key(&candidate.source_path)).collect();
+    if rules.legacy_passthrough {return Ok(all);}
     let mut retained = Vec::new();
     let mut new_names = Vec::new();
     for candidate in all {
@@ -115,7 +121,7 @@ pub(crate) fn update_candidates(
     // A removed chosen source requires a new import choice, never a silent switch to a variant.
     for paths in rules.groups.values().filter(|paths| !paths.is_empty()) {
         if paths.iter().any(|path| {
-            !retained
+            !rules.excluded_paths.contains_key(path) && !retained
                 .iter()
                 .any(|candidate| &candidate.source_path == path)
         }) {

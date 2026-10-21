@@ -496,7 +496,7 @@ pub fn remove_symlink_path(path: &Path) -> Result<(), String> {
     std::fs::remove_file(path).map_err(|e| e.to_string())
 }
 
-fn path_without_verbatim_prefix(path: &Path) -> PathBuf {
+pub(crate) fn path_without_verbatim_prefix(path: &Path) -> PathBuf {
     #[cfg(windows)]
     {
         let display = path.to_string_lossy();

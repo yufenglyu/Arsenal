@@ -286,12 +286,12 @@ describe("Sidebar", () => {
     expect(title).toHaveAttribute('aria-expanded','true');
     fireEvent.doubleClick(title);
     expect(title).toHaveAttribute('aria-expanded','false');
-    expect(screen.queryByText('未分组')).not.toBeInTheDocument();
+    expect(screen.queryByText('未分类')).not.toBeInTheDocument();
     expect(region.style.height).toBe('');
     expect(screen.getByRole('button',{name:'技能安装'})).toHaveAttribute('aria-expanded','true');
     fireEvent.doubleClick(title);
     expect(title).toHaveAttribute('aria-expanded','true');
-    expect(screen.getByText('未分组')).toBeInTheDocument();
+    expect(screen.getByText('未分类')).toBeInTheDocument();
     expect(region).toHaveStyle({height:'240px'});
   });
 

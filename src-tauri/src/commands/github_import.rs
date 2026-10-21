@@ -298,6 +298,19 @@ pub async fn import_github_repo_skills(
 }
 
 #[tauri::command]
+pub async fn reimport_github_repo_skills(app:AppHandle,state:State<'_,AppState>,repo_url:String,selections:Vec<GitHubSkillImportSelection>)->Result<GitHubRepoImportResult,String>{
+    let auth=github_direct_auth_from_settings(&state.db).await?;
+    let mut repo=resolve_repo_ref(&repo_url,auth.as_deref()).await?;
+    if !is_commit_ref(&repo.branch){repo.branch=fetch_repo_head_ref(&repo,auth.as_deref()).await?;}
+    let client=github_client()?;
+    let snapshot=download_repo_snapshot(&client,&repo,auth.as_deref()).await?;
+    let _guard=super::repository_mirror::MIRROR_LOCK.lock().await;
+    super::repository_address::recover(&state.db).await?;
+    recover_import_transactions(&state.db).await?;
+    super::resource_trash::reimport_prepared(&state.db,repo,&snapshot,selections,Some(&app)).await
+}
+
+#[tauri::command]
 pub async fn import_github_repo_snapshot(
     app: AppHandle,
     state: State<'_, AppState>,

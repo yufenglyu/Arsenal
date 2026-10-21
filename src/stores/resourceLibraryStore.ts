@@ -83,6 +83,12 @@ interface ResourceLibraryState {
 }
 
 let resourceLoad: Promise<void> | null = null;
+async function invalidateDeletedRepositories(skills:SkillWithLinks[],ids:string[]) {
+  const removed=new Set(ids);
+  const repositories=[...new Set(skills.filter(skill=>removed.has(skill.id)).flatMap(skill=>skill.source_repo?[skill.source_repo]:[]))];
+  if(repositories.length){const {useRepositorySyncStore}=await import("./repositorySyncStore");useRepositorySyncStore.getState().invalidateRepositories(repositories);}
+}
+
 
 export const useResourceLibraryStore = create<ResourceLibraryState>((set, get) => ({
   skills: [],
@@ -409,6 +415,7 @@ export const useResourceLibraryStore = create<ResourceLibraryState>((set, get) =
         "delete_resource_skill_bundle",
         { relativePath, options }
       );
+      await invalidateDeletedRepositories(get().skills,result.removedSkillIds);
       const skills = await invoke<SkillWithLinks[]>("get_resource_library_skills");
       set({ skills: skills ?? [], isLoading: false });
       return result;
@@ -439,6 +446,7 @@ export const useResourceLibraryStore = create<ResourceLibraryState>((set, get) =
         skillId,
         options,
       });
+      await invalidateDeletedRepositories(get().skills,[skillId]);
       const skills = await invoke<SkillWithLinks[]>("get_resource_library_skills");
       set({ skills: skills ?? [], deletingSkillId: null });
       return result;

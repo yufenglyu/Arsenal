@@ -464,3 +464,5 @@ summary.overview-section-title::-webkit-details-marker { display: none; }
 .group-menu-item {
   @apply flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:opacity-50;
 }
+
+.group-menu-item > svg { width: 1em; height: 1em; flex-shrink: 0; }

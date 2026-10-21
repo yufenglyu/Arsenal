@@ -3197,7 +3197,7 @@ pub async fn delete_resource_skill_bundle(
     relative_path: String,
     options: Option<DeleteCentralSkillBundleOptions>,
 ) -> Result<DeleteCentralSkillBundleResult, String> {
-    delete_resource_skill_bundle_impl(
+    super::resource_trash::trash_bundle(
         &state.db,
         &relative_path,
         options.unwrap_or(DeleteCentralSkillBundleOptions {
@@ -3357,7 +3357,7 @@ pub async fn delete_resource_skill(
     skill_id: String,
     options: Option<DeleteResourceSkillOptions>,
 ) -> Result<DeleteResourceSkillResult, String> {
-    delete_resource_skill_impl(
+    super::resource_trash::trash_skill(
         &state.db,
         &skill_id,
         options.unwrap_or(DeleteResourceSkillOptions {

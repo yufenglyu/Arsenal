@@ -6,7 +6,7 @@ export type TaskFilter = "all" | "active" | "attention" | "failed" | "finished";
 // Extract only the public repository identity, never URL credentials/query/ref.
 export function importRepository(tasks: Pick<BackgroundTask, "steps">[]): string | null {
   for (const task of tasks) for (const step of task.steps) {
-    if (!["prepare_github_resource_import", "import_github_repo_skills"].includes(step.command) || typeof step.args.repoUrl !== "string") continue;
+    if (!["prepare_github_resource_import", "import_github_repo_skills", "reimport_github_repo_skills"].includes(step.command) || typeof step.args.repoUrl !== "string") continue;
     let path = step.args.repoUrl.trim();
     if (/^https?:\/\//i.test(path)) {
       try {const url = new URL(path); if(url.hostname.toLowerCase() !== "github.com") continue; path = url.pathname.replace(/^\//, "");} catch {continue;}
@@ -46,7 +46,7 @@ function records(value: unknown): Record<string, unknown>[] {
 }
 // Read only the documented skill/result fields. Never render arbitrary IPC payloads.
 export function importDetailRows(tasks: BackgroundTask[]): ImportDetailRow[] {
-  const importing = tasks.some(task => task.steps.some(step => step.command === "import_github_repo_skills"));
+  const importing = tasks.some(task => task.steps.some(step => ["import_github_repo_skills","reimport_github_repo_skills"].includes(step.command)));
   return tasks.flatMap(task => [...(task.skippedImportSkills ?? []).map((name, index): ImportDetailRow => ({key:`${task.id}:skip:${index}`,name,status:"skipped"})), ...task.steps.flatMap((step, index): ImportDetailRow[] => {
     const key = `${task.id}:${index}`;
     const result = step.result && typeof step.result === "object" ? step.result as Record<string, unknown> : {};
@@ -61,7 +61,7 @@ export function importDetailRows(tasks: BackgroundTask[]): ImportDetailRow[] {
     const skipped = Array.isArray(result.skippedSkills) ? result.skippedSkills.flatMap((name, i) => typeof name === "string"
       ? [{key:`${key}:skipped:${i}`,name,status:"skipped" as const}] : []) : [];
     if (imported.length || skipped.length) return [...imported, ...skipped];
-    if (step.command === "import_github_repo_skills") {
+    if (["import_github_repo_skills","reimport_github_repo_skills"].includes(step.command)) {
       return records(step.args.selections).flatMap((selection, i) => typeof selection.sourcePath === "string" ? [{
         key:`${key}:${i}`,name:selection.sourcePath,status:selection.resolution === "skip" ? "skipped" : step.status === "running"
           ? task.importProgress?.currentSkill === selection.sourcePath ? "running" : "queued" : step.status ?? task.status,error:step.error,

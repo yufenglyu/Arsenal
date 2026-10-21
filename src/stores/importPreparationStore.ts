@@ -43,7 +43,7 @@ export function submitPreparedImport(taskId: string, preview: GitHubRepoPreview,
   if (!chosen.length || new Set(selections.map(item => item.sourcePath)).size !== selections.length || selections.some(item => !paths.has(item.sourcePath) || !["skip","rename","overwrite"].includes(item.resolution))) return null;
   if (chosen.some(item => item.resolution === "rename" && (!item.renamedSkillId?.trim() || /[\\/]/.test(item.renamedSkillId) || [".",".."].includes(item.renamedSkillId.trim())))) return null;
   const batchId = task.batchId ?? task.id;
-  const id = enqueueGitHubImport(step.args.repoUrl, preview, selections, batchId);
+  const id = enqueueGitHubImport(step.args.repoUrl, preview, selections, batchId, step.args.reimport === true);
   if (!id) return null;
   queue.patch(task.id, {batchId, status:"success", skippedImportSkills:preview.skills.filter(skill => !chosen.some(item => item.sourcePath === skill.sourcePath)).map(skill => skill.skillName),
     steps:task.steps.map(item => ({...item,status:"success"}))});
@@ -64,6 +64,7 @@ export function enqueueGitHubImport(
   preview: GitHubRepoPreview,
   selections: GitHubSkillImportSelection[],
   batchId?: string,
+  reimport = false,
 ) {
   const chosen = selections.filter((selection) => selection.resolution !== "skip");
   if (!chosen.length) return null;
@@ -72,7 +73,7 @@ export function enqueueGitHubImport(
     ? `https://github.com/${preview.repo.owner}/${preview.repo.repo}/tree/${preview.repo.branch}`
     : repoUrl;
   return useTaskQueueStore.getState().enqueue({
-    key: `import:${repository}:${JSON.stringify(chosen)}`,
+    key: `${reimport?"reimport":"import"}:${repository}:${JSON.stringify(chosen)}`,
     kind: "import",
     label: repository,
     ...(batchId ? { batchId, batchLabel: repository } : {}),
@@ -84,7 +85,7 @@ export function enqueueGitHubImport(
     ],
     // The backend stages the whole selection transactionally from one archive.
     steps: [{
-      command: "import_github_repo_skills",
+      command: reimport?"reimport_github_repo_skills":"import_github_repo_skills",
       label: repository,
       args: { repoUrl: importUrl, selections: chosen },
     }],
@@ -96,8 +97,9 @@ export function continueGitHubImportInBackground(
   repoUrl: string,
   preview?: Promise<GitHubRepoPreview>,
   operationId?: string,
+  reimport = false,
 ) {
-  const key = `prepare-import:${repoUrl.trim().toLowerCase()}`;
+  const key = `prepare-${reimport?"reimport":"import"}:${repoUrl.trim().toLowerCase()}`;
   const existing = useTaskQueueStore.getState().tasks.find((task) => task.key === key &&
     ["queued", "running", "awaiting_input"].includes(task.status) && !task.cancelRequested);
   if (existing) return existing.id;
@@ -113,7 +115,7 @@ export function continueGitHubImportInBackground(
     steps: [{
       command: PREPARE_GITHUB_IMPORT,
       label: i18n.t("workflow.prepareImport"),
-      args: { repoUrl, requestId, ...(operationId ? {operationId} : {}) },
+      args: { repoUrl, requestId, ...(reimport?{reimport:true}:{}), ...(operationId ? {operationId} : {}) },
     }],
   });
 }
@@ -127,7 +129,8 @@ registerTaskExecutor(PREPARE_GITHUB_IMPORT, async (args) => {
   const requestId = String(args.requestId);
   const pending = pendingPreviews.get(requestId);
   try {
-    return await (pending ?? useGitHubImportStore.getState().previewGitHubRepoImport(String(args.repoUrl), String(args.operationId)));
+    const preview = await (pending ?? useGitHubImportStore.getState().previewGitHubRepoImport(String(args.repoUrl), String(args.operationId)));
+    return args.reimport ? {...preview, skills:preview.skills.map(skill=>({...skill,conflict:null}))} : preview;
   } finally {
     pendingPreviews.delete(requestId);
   }
@@ -152,10 +155,16 @@ registerTaskResult(PREPARE_GITHUB_IMPORT, (step, result) => {
   enqueueGitHubImport(String(step.args.repoUrl), preview, preview.skills.map((skill) => ({
     sourcePath: skill.sourcePath,
     resolution: skill.recommended === false ? "skip" : "overwrite",
-  })), task.batchId);
+  })), task.batchId, step.args.reimport === true);
 });
-for (const command of ["import_github_repo_skills", "add_local_resource_skills"]) {
-  registerTaskResult(command, async () => {
-    await useResourceLibraryStore.getState().loadResourceLibrary({fresh:true});
+for (const command of ["import_github_repo_skills", "reimport_github_repo_skills", "add_local_resource_skills"]) {
+  registerTaskResult(command, async (_step,result) => {
+    if(command==="reimport_github_repo_skills") {
+      const {useRepositorySyncStore} = await import("./repositorySyncStore");
+      const repo=(result as {repo?:{owner?:string;repo?:string}})?.repo;
+      if(repo?.owner&&repo.repo)useRepositorySyncStore.getState().invalidateRepositories([`${repo.owner}/${repo.repo}`]);
+      const {refreshResourceViews} = await import("./resourceTrashStore");
+      await refreshResourceViews();
+    } else await useResourceLibraryStore.getState().loadResourceLibrary({fresh:true});
   });
 }

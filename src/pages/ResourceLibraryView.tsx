@@ -1,3 +1,4 @@
+import {continueGitHubImportInBackground} from "@/stores/importPreparationStore";
 import {RepositoryAddressButton} from "@/components/skill/RepositoryAddressButton";
 import {useCollectionStore} from "@/stores/collectionStore";
 import {collectionMembers,collectionScope,UNFILED_COLLECTION,SKILLS_DRAG,COLLECTION_SOURCE_DRAG} from "@/lib/collectionGroups";
@@ -747,6 +748,9 @@ export function ResourceLibraryView() {
                         ? () => void handleUpdateFolderSources(group)
                         : undefined,
                       updateLabel: t("workflow.updateRepositorySkills"),
+                      reimport: group.skills[0]?.source_repo && group.skills.every(skill=>skill.source_repo?.toLowerCase()===group.skills[0].source_repo?.toLowerCase()) ? async()=>{
+                        continueGitHubImportInBackground(`https://github.com/${group.skills[0].source_repo}`,undefined,undefined,true);
+                      } : undefined,
                       onRefreshRepository: group.skills.some(skill=>!!resourceSkillSourceRepo(skill)) ? ()=>void useRepositorySyncStore.getState().refreshRepositories([...new Set(group.skills.map(resourceSkillSourceRepo).filter((repo):repo is string=>!!repo))]) : undefined,
                       onDetachGroup: canDetachGroup ? ()=>void detachSkills(group.skills.map(skill=>skill.id)) : undefined,
                       isUpdating:

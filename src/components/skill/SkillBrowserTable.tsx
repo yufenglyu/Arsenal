@@ -30,6 +30,8 @@ import {
   PackageMinus,
   PackagePlus,
   RefreshCw,
+  Undo2,
+  RotateCw,
   Trash2,
 } from "lucide-react";
 import {
@@ -78,6 +80,9 @@ import {
 type InstallationSource = "independent" | "shared";
 
 export interface FolderTableItem {
+  reimport?: () => Promise<unknown>;
+  restore?: () => Promise<unknown>;
+  purge?: () => Promise<unknown>;
   onChangeRepositoryAddress?: () => void;
   onRefreshRepository?: () => void;
   onDetachGroup?: () => void;
@@ -165,6 +170,7 @@ export interface SkillTableItem extends UnifiedSkillCardProps {
 }
 
 export interface SkillBrowserTableProps {
+  columnLabels?: Record<string,string>;
   onDetachSkills?: (ids:string[]) => void;
   onDragSkills?: (event: React.DragEvent, skillIds: string[]) => void;
   statusPath?: string;
@@ -452,9 +458,12 @@ function SkillActions({ skill }: { skill: SkillTableItem }) {
   return <div className="flex flex-wrap justify-start gap-1">{actions}</div>;
 }
 
-function FolderActions({ folder }: {folder: FolderTableItem}) {
+function FolderActions({ folder, onAction }: {folder: FolderTableItem;onAction?:(action:BatchAction)=>void}) {
   const { t } = useTranslation();
   return (                          <div className="flex flex-wrap justify-start gap-1">
+                            {folder.restore&&onAction&&<ActionButton label={t("browser.batch.restore")} onClick={()=>onAction("restore")}><Undo2/></ActionButton>}
+                            {folder.purge&&onAction&&<><ActionSeparator/><ActionButton destructive label={t("browser.batch.purge")} onClick={()=>onAction("purge")}><Trash2/></ActionButton></>}
+
                             {folder.onEdit && <ActionButton label={t("collection.edit")} onClick={folder.onEdit}><Pencil className="size-4" /></ActionButton>}
                             {folder.onAddSkills && <ActionButton label={t("collection.addSkill")} onClick={folder.onAddSkills}><Plus className="size-4" /></ActionButton>}
                             {folder.onLocate && <ActionButton label={t("skillBrowser.locateInRepository")} onClick={folder.onLocate}><LocateFixed className="size-4" /></ActionButton>}
@@ -529,6 +538,7 @@ function FolderActions({ folder }: {folder: FolderTableItem}) {
                               </ActionButton>
                             ) : null}
                             {folder.onRefreshRepository && <ActionButton label={t("workflow.refreshRepositoryInfo")} onClick={folder.onRefreshRepository}><FolderSync className="size-4"/></ActionButton>}
+                            {folder.reimport&&onAction&&<ActionButton label={t("browser.batch.reimport")} onClick={()=>onAction("reimport")}><RotateCw/></ActionButton>}
                             {(folder.onDetachGroup || folder.onDelete) && <ActionSeparator/>}
                             {folder.onDetachGroup && <ActionButton label={t("groups.detachItem")} onClick={folder.onDetachGroup}><FolderMinus className="size-4"/></ActionButton>}
                             {folder.onDelete ? (
@@ -727,6 +737,7 @@ function sortHeaderLabel(
 export function SkillBrowserTable({
   onDragSkills,
   onDetachSkills,
+  columnLabels,
   statusPath,
   statusCollections = false,
   onSelectionChange,
@@ -772,7 +783,7 @@ export function SkillBrowserTable({
     : originalFolders.some(folder => folder.sourceRepo?.toLowerCase() === folder.name.toLowerCase());
   const repositoryNameColumn = kind === "skill" ? "repository" : "name";
   const switchNameLabel = t(repositoryFirst ? "skillBrowser.showOwnerFirst" : "skillBrowser.showRepositoryFirst");
-  const columnLabel = (column: string) => t(`skillBrowser.columns.${column === "installSummary" && showInstallationSource ? "installationSource" : column}`);
+  const columnLabel = (column: string) => columnLabels?.[column] ?? t(`skillBrowser.columns.${column === "installSummary" && showInstallationSource ? "installationSource" : column}`);
   const renderInstallationSources = (sources: InstallationSource[] = []) => (
     <span className="text-inherit text-muted-foreground">
       {sources.map(source => t(`skillBrowser.installationSource.${source}`)).join("、") || "—"}
@@ -836,6 +847,9 @@ export function SkillBrowserTable({
     if(row.folder?.batchOperations)return [{key:row.key,name:row.folder.name,operations:row.folder.batchOperations,agents:row.folder.installAgents}];
     return items.map(skill=>({key:`skill:${skill.rowKey ?? skill.name}`,name:skill.name,operations:skill.batchOperations,agents:skill.installAgents}));
   }).map(entry=>[entry.key,entry])).values()];
+  const reimportEntries = [...new Map(visibleRows.filter(row=>effectiveSelection.has(row.key)&&row.folder?.reimport).map(row=>{
+    const folder=row.folder!;return [folder.sourceRepo?.toLowerCase()??folder.key,{key:folder.key,name:folder.sourceRepo??folder.name,operations:{reimport:folder.reimport}}] as const;
+  })).values()];
   const selectionClass = (key:string, highlighted?:boolean) => effectiveSelection.size ? effectiveSelection.has(key) : highlighted;
   const [rowMenu, setRowMenu] = useState<{kind:"skill"|"folder"; key:string; x:number; y:number} | null>(null);
   const menuReturnFocus = useRef<HTMLElement | null>(null);
@@ -1421,9 +1435,10 @@ export function SkillBrowserTable({
             }}>
             {effectiveSelection.size > 1 ? <div>
               <p className="px-2.5 py-1 text-xs text-muted-foreground">{t("browser.selectedRows",{count:effectiveSelection.size})}</p>
-              {(["install","update","uninstall","delete"] as BatchAction[]).filter(action=>batchEntries.some(entry=>entry.operations?.[action])).map(action=><ActionButton key={action} label={t(`browser.batch.${action}`)} destructive={action==="delete"||action==="uninstall"} onClick={()=>setBatchRequest({action,entries:batchEntries})}>{action==="install"?<PackagePlus className="size-4"/>:action==="update"?<RefreshCw className="size-4"/>:action==="uninstall"?<PackageMinus className="size-4"/>:<Trash2 className="size-4"/>}</ActionButton>)}
+              {(["install","update","restore","uninstall","delete","purge"] as BatchAction[]).filter(action=>batchEntries.some(entry=>entry.operations?.[action])).map(action=><ActionButton key={action} label={t(`browser.batch.${action}`)} destructive={action==="delete"||action==="uninstall"||action==="purge"} onClick={()=>setBatchRequest({action,entries:batchEntries})}>{action==="install"?<PackagePlus className="size-4"/>:action==="update"?<RefreshCw className="size-4"/>:action==="uninstall"?<PackageMinus className="size-4"/>:action==="restore"?<Undo2 className="size-4"/>:<Trash2 className="size-4"/>}</ActionButton>)}
+              {!!reimportEntries.length&&<ActionButton label={t("browser.batch.reimport")} onClick={()=>setBatchRequest({action:"reimport",entries:reimportEntries})}><RotateCw/></ActionButton>}
               {onDetachSkills&&<><ActionSeparator/><ActionButton label={t("groups.detachItem")} onClick={()=>onDetachSkills([...new Set(visibleRows.filter(row=>effectiveSelection.has(row.key)).flatMap(row=>row.skill?[row.skill]:row.folder?.children??[]).map(skill=>skill.detailRequest?.skillId??skill.rowKey??skill.name))])}><FolderMinus className="size-4"/></ActionButton></>}
-            </div> : menuSkill ? <SkillActions skill={menuSkill}/> : menuFolder ? <FolderActions folder={menuFolder}/> : null}
+            </div> : menuSkill ? <SkillActions skill={menuSkill}/> : menuFolder ? <FolderActions folder={menuFolder} onAction={action=>setBatchRequest({action,entries:[{key:menuFolder.key,name:menuFolder.sourceRepo??menuFolder.name,operations:{[action]:action==="reimport"?menuFolder.reimport:action==="restore"?menuFolder.restore:menuFolder.purge}}]})}/> : null}
           </div>
         </ActionMenuContext.Provider>, document.body)}
       {batchRequest && <BatchSkillActionDialog {...batchRequest} onClose={()=>setBatchRequest(null)}/> }

@@ -1,4 +1,18 @@
 {
+  "trash": {
+    "title": "Recycle Bin",
+    "search": "Search recycle bin",
+    "deletedAt": "Deleted at",
+    "restoreSelected": "Restore selected",
+    "empty": "Empty recycle bin",
+    "emptyState": "The recycle bin is empty",
+    "retention": "Deleted repositories and skills stay here until you permanently delete them.",
+    "reimportTitle": "Reimport skill repositories",
+    "reimportWarning": "Move the old repository to the recycle bin and import it again. Keep repository remarks, notebooks and groups, and reconnect matching installations. Choose variants in the task window when needed.",
+    "restoreWarning": "Restore the original location and installation links. Existing content will not be overwritten.",
+    "purgeWarning": "Permanently delete the listed recycle bin records. They can no longer be restored from the recycle bin. Active library content is unaffected.",
+    "reimportQueued": "Queued in the background. View progress in the task window."
+  },
   "browser": {
     "readmeTitle": "README",
     "chooseReadme": "Select README document",
@@ -14,6 +28,9 @@
     "batchRemovalWarning": "Confirm the listed items. Deletion removes items from this view and related installation links. Collection members are only removed from the collection. Uninstalling preserves repository source files.",
     "batchPartialFailure": "{{count}} installation targets failed",
     "batch": {
+      "reimport": "Reimport",
+      "restore": "Restore",
+      "purge": "Delete permanently",
       "install": "Install",
       "update": "Update",
       "delete": "Delete",
@@ -452,7 +469,7 @@
     "deleteAction": "Delete",
     "deleteLabel": "Delete {{name}} from Skill Repository",
     "deleteConfirmTitle": "Delete {{name}}?",
-    "deleteLinkedWarning": "This skill is installed on: {{platforms}}. Deleting it from the Skill Repository will also uninstall those managed platform links or copies.",
+    "deleteLinkedWarning": "This skill is installed on: {{platforms}}. Moving it to the recycle bin also uninstalls its managed links or copies. You can restore it from the recycle bin.",
     "deleteCascadeLabel": "Uninstall and delete",
     "deleteSuccess": "Deleted {{name}} from the Skill Repository.",
     "deleteError": "Delete failed: {{error}}",
@@ -469,7 +486,7 @@
     "manualCreateError": "Failed to create manual skill: {{error}}",
     "deleteFolderLabel": "Delete resource directory {{name}}",
     "deleteFolderConfirmTitle": "Delete directory {{name}}?",
-    "deleteFolderConfirmDesc": "This will delete {{count}} skills in the directory. Affected platforms: {{platforms}}.",
+    "deleteFolderConfirmDesc": "Move {{count}} skills in this repository to the recycle bin. Affected platforms: {{platforms}}. You can restore them later.",
     "deleteFolderCascadeLabel": "Delete directory and uninstall",
     "deleteFolderLabelShort": "Delete directory",
     "deleteFolderSuccess": "Deleted directory {{name}}.",
@@ -1238,6 +1255,13 @@
       "conflict": "The target already exists. Resolve the conflict again.",
       "other": "Operation failed. Check settings and the target, then retry.",
       "invalidRepository": "Enter a GitHub repository as owner/repo or https://github.com/owner/repo.",
+      "TRASH_TOO_LARGE": "The selected content exceeds the recycle bin limit. Split the operation.",
+      "TRASH_UNAVAILABLE": "The recycle bin record could not be read. Keep the data and retry.",
+      "TRASH_NOT_FOUND": "The repository or skill no longer exists. Refresh and retry.",
+      "TRASH_INSTALLED": "This skill is installed. Choose uninstall and delete.",
+      "TRASH_ROOT_CHANGED": "The library location changed. Switch back to its original location before restoring.",
+      "TRASH_RESTORE_CONFLICT": "A repository, skill or file already exists at the original location. Nothing was overwritten. Resolve the conflict before restoring.",
+      "TRASH_RECOVERY_REQUIRED": "The operation did not finish. The original content is saved in the recycle bin. Restore it there before retrying.",
       "IMPORT_SOURCE_MISSING": "The selected source was removed. Import the repository again to choose a version.",
       "PREVIEW_EXPIRED": "The check snapshot expired. Check the repository again.",
       "SNAPSHOT_UNAVAILABLE": "The check snapshot is missing or damaged. Check again.",
@@ -1708,6 +1732,7 @@
     "repair": "Repair links"
   },
   "groups": {
+    "menu":{"organize":"Organize groups","members":"Manage members","export":"Export","view":"View options","danger":"Delete actions"},
     "countSummary": "{{repositories}} repositories / {{skills}} skills",
     "detachItem": "Remove from group",
     "export": "Export group list",

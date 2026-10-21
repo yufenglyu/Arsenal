@@ -120,7 +120,7 @@ export function TaskCenter() {
               : "workflow.refreshRepositoryInfo",
           )
         : batch.kind === "import"
-          ? t("workflow.batch.importTitle")
+          ? t(batch.tasks.some(task=>task.steps.some(step=>step.command==="reimport_github_repo_skills"||step.args.reimport))?"trash.reimportTitle":"workflow.batch.importTitle")
           : batch.label;
   const scope = (batch: TaskBatch) =>
     batch.scope && (batch.report !== undefined || !batch.repository)
