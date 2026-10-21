@@ -809,3 +809,19 @@ it('resizes the repository region and retains its height',()=>{
  fireEvent.click(screen.getByRole('button',{name:'技能仓库'}));
  expect(screen.getByRole('button',{name:'展开侧边栏'})).toBeInTheDocument();
 });
+
+it("docks the collapsed installation heading above the collapsed tags and releases repository height",()=>{
+  useSidebarStore.setState({expanded:true});
+  localStorage.setItem("skillshub.sidebar.installationCollapsed","false");
+  localStorage.setItem("skillshub.tags.expanded","false");
+  localStorage.setItem("skillshub.sidebar.repositoryHeight","240");
+  renderSidebar();
+  const heading=screen.getByRole("button",{name:"技能安装"});
+  fireEvent.doubleClick(heading);
+  expect(heading).toHaveAttribute("aria-expanded","false");
+  expect(screen.getByRole("region",{name:"技能安装"})).toHaveClass("mt-auto","shrink-0");
+  expect(screen.getByTestId("repository-tree-region")).toHaveClass("flex-1");
+  expect(screen.getByTestId("repository-tree-region").style.height).toBe("");
+  fireEvent.doubleClick(heading);
+  expect(screen.getByTestId("repository-tree-region")).toHaveStyle({height:"240px"});
+});

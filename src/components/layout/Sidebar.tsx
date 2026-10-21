@@ -305,11 +305,11 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
       </div>
 
       {/* Scrollable nav items */}
-      <div className={cn("flex-1 overflow-y-auto py-2 space-y-0.5", expanded ? "px-1.5" : "px-0")}>
+      <div className={cn("flex min-h-0 flex-1 flex-col overflow-y-auto py-2 space-y-0.5", expanded ? "px-1.5" : "px-0")}>
         {/* Skill Repository */}
         {expanded ? <>
-          <div ref={repositoryRegion} className="overflow-y-auto" style={{height:repositoryExpanded?repositoryHeight:undefined,maxHeight:"calc(100vh - 240px)"}} data-testid="repository-tree-region"><CollectionTree onExpandedChange={setRepositoryExpanded} count={resourceSkillsCount} onExport={()=>void handleExportDirectoryList()}/></div>
-          <div role="separator" tabIndex={0} aria-label={t("sidebar.resizeRepositoryHeight")} aria-orientation="horizontal" aria-valuemin={80} aria-valuemax={Math.max(80,window.innerHeight-240)} aria-valuenow={repositoryHeight??repositoryRegion.current?.clientHeight??80} className={cn(!repositoryExpanded&&"hidden", "h-1.5 cursor-row-resize touch-none border-b border-border hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+          <div ref={repositoryRegion} className={cn("overflow-y-auto",installationCollapsed?"min-h-0 flex-1":"shrink-0")} style={{height:repositoryExpanded&&!installationCollapsed?repositoryHeight:undefined,maxHeight:installationCollapsed?undefined:"calc(100vh - 240px)"}} data-testid="repository-tree-region"><CollectionTree onExpandedChange={setRepositoryExpanded} count={resourceSkillsCount} onExport={()=>void handleExportDirectoryList()}/></div>
+          <div role="separator" tabIndex={0} aria-label={t("sidebar.resizeRepositoryHeight")} aria-orientation="horizontal" aria-valuemin={80} aria-valuemax={Math.max(80,window.innerHeight-240)} aria-valuenow={repositoryHeight??repositoryRegion.current?.clientHeight??80} className={cn((!repositoryExpanded||installationCollapsed)&&"hidden", "h-1.5 cursor-row-resize touch-none border-b border-border hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
             onPointerDown={event=>{event.preventDefault();event.currentTarget.setPointerCapture(event.pointerId);}}
             onPointerMove={event=>{if(event.currentTarget.hasPointerCapture(event.pointerId)&&repositoryRegion.current)resizeRepository(event.clientY-repositoryRegion.current.getBoundingClientRect().top);}}
             onPointerUp={event=>{if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);}}
@@ -327,7 +327,7 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
         {/* Divider */}
         <div className={cn("my-2", !expanded && "border-t border-sidebar-border/70")} />
 
-        <section aria-label={t("sidebar.skillInstallation")}>
+        <section aria-label={t("sidebar.skillInstallation")} className={cn("shrink-0",expanded&&installationCollapsed&&"mt-auto border-t border-border pt-2")}>
         {expanded && <button type="button" aria-expanded={!installationCollapsed} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();setInstallationCollapsed(!installationCollapsed);}else installationExpansionKeys(event);}} onClick={event=>event.currentTarget.focus()} onDoubleClick={()=>setInstallationCollapsed(!installationCollapsed)} className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-sm font-semibold hover:bg-primary/10 hover:text-primary focus:bg-primary/10 focus:text-primary">
           <PackageCheck className="size-3.5 shrink-0"/><span>{t("sidebar.skillInstallation")}</span>
         </button>}

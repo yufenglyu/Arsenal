@@ -152,6 +152,8 @@ export function ResourceLibraryView() {
   const [updatingSkillId, setUpdatingSkillId] = useState<string | null>(null);
   const [isCheckConfirmOpen, setIsCheckConfirmOpen] = useState(false);
   const [isLocalAddOpen, setIsLocalAddOpen] = useState(false);
+  const [folderDeleteTarget,setFolderDeleteTarget]=useState<SkillFolderGroup<SkillWithLinks>|null>(null);
+  const deletePreviewRequest=useRef(0);
   const [folderDeletePreview, setFolderDeletePreview] =
     useState<CentralSkillBundleDeletePreview | null>(null);
   const [isDeletingFolder, setIsDeletingFolder] = useState(false);
@@ -628,21 +630,24 @@ export function ResourceLibraryView() {
   }
 
   function handleDeleteClick(skill: SkillWithLinks) {
-    if (skill.linked_agents.length > 0 || (skill.read_only_agents?.length ?? 0) > 0) {
-      setDeleteTargetSkill(skill);
-      return;
-    }
-
-    void handleDeleteResourceSkill(skill, false);
+    setDeleteTargetSkill(skill);
   }
 
   async function handleDeleteFolderClick(group: SkillFolderGroup<SkillWithLinks>) {
+    const request=++deletePreviewRequest.current;
+    setFolderDeleteTarget(group);setFolderDeletePreview(null);
     try {
       const preview = await previewDeleteResourceBundle(group.relativePath);
-      setFolderDeletePreview(preview);
+      if(request===deletePreviewRequest.current)setFolderDeletePreview(preview);
     } catch (err) {
+      if(request!==deletePreviewRequest.current)return;
+      setFolderDeleteTarget(null);
       toast.error(t("resource.deleteFolderError", { error: String(err) }));
     }
+  }
+  function closeFolderDelete(){
+    if(isDeletingFolder)return;
+    deletePreviewRequest.current++;setFolderDeleteTarget(null);setFolderDeletePreview(null);
   }
 
   async function handleConfirmDeleteFolder() {
@@ -657,7 +662,7 @@ export function ResourceLibraryView() {
         ...folderDeletePreview.affectedAgents.map((agentId) => getSkillsByAgent(agentId)),
       ]);
       toast.success(t("resource.deleteFolderSuccess", { name: folderDeletePreview.bundle.name }));
-      setFolderDeletePreview(null);
+      setFolderDeletePreview(null);setFolderDeleteTarget(null);
     } catch (err) {
       toast.error(t("resource.deleteFolderError", { error: String(err) }));
     } finally {
@@ -838,8 +843,7 @@ export function ResourceLibraryView() {
                       removeFromCentralLabel: t("resource.removeFromCentralAction"),
                       onDeleteFromCentral: () => handleDeleteClick(skill),
                       deleteFromCentralLabel: t("resource.deleteAction"),
-                      deleteFromCentralRequiresDialog:
-                        skill.linked_agents.length > 0 || (skill.read_only_agents?.length ?? 0) > 0,
+                      deleteFromCentralRequiresDialog: true,
                       onUpdateFromSource:
                         isSourceBackedSkill(skill)
                           ? () => void handleUpdateSingleSource(skill)
@@ -905,7 +909,7 @@ export function ResourceLibraryView() {
             <DialogDescription>
               {deleteTargetSkill
                 ? t("resource.deleteLinkedWarning", {
-                    platforms: linkedAgentNames(deleteTargetSkill).join(", "),
+                    platforms: linkedAgentNames(deleteTargetSkill).join(", ") || t("common.none"),
                   })
                 : ""}
             </DialogDescription>
@@ -922,12 +926,12 @@ export function ResourceLibraryView() {
               variant="destructive"
               onClick={() => {
                 if (deleteTargetSkill) {
-                  void handleDeleteResourceSkill(deleteTargetSkill, true);
+                  void handleDeleteResourceSkill(deleteTargetSkill,deleteTargetSkill.linked_agents.length>0||(deleteTargetSkill.read_only_agents?.length??0)>0);
                 }
               }}
               disabled={!!deleteTargetSkill && deletingSkillId === deleteTargetSkill.id}
             ><ActionIcon action="delete"/>
-              {t("resource.deleteCascadeLabel")}
+              {t(deleteTargetSkill?.linked_agents.length||(deleteTargetSkill?.read_only_agents?.length??0)>0?"resource.deleteCascadeLabel":"resource.deleteAction")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1067,18 +1071,14 @@ export function ResourceLibraryView() {
       </Dialog>
 
       <Dialog
-        open={!!folderDeletePreview}
-        onOpenChange={(open) => {
-          if (!open) {
-            setFolderDeletePreview(null);
-          }
-        }}
+        open={!!folderDeleteTarget}
+        onOpenChange={open=>{if(!open)closeFolderDelete();}}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
               {t("resource.deleteFolderConfirmTitle", {
-                name: folderDeletePreview?.bundle.name ?? "",
+                name: folderDeleteTarget?.name ?? "",
               })}
             </DialogTitle>
             <DialogDescription>
@@ -1087,13 +1087,13 @@ export function ResourceLibraryView() {
                     count: folderDeletePreview.skills.length,
                     platforms: folderDeletePreview.affectedAgents.join(", ") || t("common.none"),
                   })
-                : ""}
+                : t("common.loading")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setFolderDeletePreview(null)}
+              onClick={closeFolderDelete}
               disabled={isDeletingFolder}
             ><ActionIcon action="cancel"/>
               {t("common.cancel")}
@@ -1101,7 +1101,7 @@ export function ResourceLibraryView() {
             <Button
               variant="destructive"
               onClick={() => void handleConfirmDeleteFolder()}
-              disabled={isDeletingFolder}
+              disabled={isDeletingFolder||!folderDeletePreview}
             ><ActionIcon action="delete"/>
               {folderDeletePreview?.affectedAgents.length
                 ? t("resource.deleteFolderCascadeLabel")

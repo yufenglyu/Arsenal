@@ -80,6 +80,8 @@ import {
 type InstallationSource = "independent" | "shared";
 
 export interface FolderTableItem {
+  /** Archived summaries have no live document, installation or skill-file actions. */
+  overviewOnly?: boolean;
   reimport?: () => Promise<unknown>;
   restore?: () => Promise<unknown>;
   purge?: () => Promise<unknown>;

@@ -587,6 +587,17 @@ describe("ResourceLibraryView delete", () => {
     expect(mockGetSkillsByAgent).toHaveBeenCalledWith("cursor");
   });
 
+  it("opens the delete confirmation immediately while the directory preview is pending", async () => {
+    mockPreviewDeleteResourceBundle.mockReturnValueOnce(new Promise(()=>{}));
+    render(<MemoryRouter><ResourceLibraryView/></MemoryRouter>);
+    await switchBrowserViewMode("folders");
+    const folderRow=await screen.findByRole("row",{name:/example/i});
+    fireEvent.click(openRowActions(folderRow).getByRole("menuitem",{name:/删除|Delete/i}));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(mockDeleteResourceBundle).not.toHaveBeenCalled();
+    expect(within(screen.getByRole("dialog")).getByRole("button",{name:/删除目录$|Delete directory$/i})).toBeDisabled();
+  });
+
   it("previews and confirms deleting a resource directory", async () => {
     render(
       <MemoryRouter>

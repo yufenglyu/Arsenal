@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { ICON_RAIL_WIDTH, ICON_RAIL_BUTTON } from "@/components/layout/iconRail";
 
 type Tab = "overview" | "document" | "notebook";
-type Props = Omit<SkillBrowserTableProps, "kind" | "visibleColumns"> & { storageKey: string; searchActive?: boolean; agentId?: string; loading?: boolean; toolbar?: ReactNode | ((viewControl: ReactNode) => ReactNode); onRefresh?: () => void | Promise<unknown>; collectionsMode?: boolean; allowFlatView?: boolean; forceFlat?: boolean };
+type Props = Omit<SkillBrowserTableProps, "kind" | "visibleColumns"> & { visibleColumns?: Set<string>; emptyMessage?: string; storageKey: string; searchActive?: boolean; agentId?: string; loading?: boolean; toolbar?: ReactNode | ((viewControl: ReactNode) => ReactNode); onRefresh?: () => void | Promise<unknown>; collectionsMode?: boolean; allowFlatView?: boolean; forceFlat?: boolean };
 function readPreference<T>(key: string, fallback: T): T {
   try { return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback; } catch { return fallback; }
 }
@@ -35,7 +35,7 @@ function readWidth(): number {
 }
 function writePreference(key: string, value: unknown) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* Keep in-memory state. */ } }
 
-export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], searchActive = false, agentId, loading = false, toolbar, collectionsMode = false, allowFlatView = true, forceFlat = false, onRefresh, ...tableProps }: Props) {
+export function SkillBrowserWorkspace({ visibleColumns:fixedColumns, emptyMessage, storageKey, skills = [], folders = [], searchActive = false, agentId, loading = false, toolbar, collectionsMode = false, allowFlatView = true, forceFlat = false, onRefresh, ...tableProps }: Props) {
   const { t } = useTranslation();
   const statusSlot = useContext(StatusBarSlot);
   const { pathname } = useLocation();
@@ -138,8 +138,8 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
   );
   const selectedSkill = selected?.kind === "skill" ? skills.find(s => id(s) === selected.key) : undefined;
   const selectedFolder = selected?.kind === "folder" ? groups.find(g => g.key === selected.key) : undefined;
-  const canUseNotebook = (folder?: FolderTableItem) => !collectionsMode && !!folder && Boolean(folder.path || folder.sourceRepo || folder.children?.some(child => child.sourceRepo));
-  const activeTab = (tab === "notebook" && !canUseNotebook(selectedFolder)) || (collectionsMode && !selectedSkill && tab === "document") ? "overview" : tab;
+  const canUseNotebook = (folder?: FolderTableItem) => !collectionsMode && !!folder && !folder.overviewOnly && Boolean(folder.path || folder.sourceRepo || folder.children?.some(child => child.sourceRepo));
+  const activeTab = selectedFolder?.overviewOnly || (tab === "notebook" && !canUseNotebook(selectedFolder)) || (collectionsMode && !selectedSkill && tab === "document") ? "overview" : tab;
   const selectionTags = useMemo(() => {
     const keys = new Set(selectedRowKeys);
     return [
@@ -203,13 +203,13 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
     }} className="flex min-w-0 flex-1 flex-col overflow-hidden outline-none" aria-label={t("browser.list")}>
       <div className="flex h-11 shrink-0 items-center border-b border-border [&>header]:h-full [&>header]:flex-1 [&>header]:border-b-0" style={{paddingRight: scrollbarWidth}}>{typeof toolbar === "function" ? toolbar(viewControl) : <div className="flex h-full items-center gap-1 px-2">{toolbar}{viewControl}</div>}</div>
       <div ref={listScroll} className="skill-browser-list min-h-0 flex-1 overflow-y-auto overflow-x-hidden [overflow-anchor:none]">
-        {loading && !groups.length ? <p className="p-8 text-center text-sm text-muted-foreground">{t("common.loading")}</p> : groups.length ? <SkillBrowserTable {...tableProps} onSelectionChange={keys=>{setSelectedRowKeys(keys);tableProps.onSelectionChange?.(keys);}} statusPath={pathname} statusCollections={collectionsMode} kind={flat ? "skill" : "folder"} tree visibleColumns={collectionsMode ? new Set([...visibleColumns].filter(column => !["skillCount", "githubStars", "installSummary"].includes(column))) : visibleColumns} skills={skills.map(skill => ({...skill, highlighted: selectedSkill && id(selectedSkill) === id(skill), onDetail: () => chooseSkill(skill)}))} folders={treeRows} onToggleColumn={toggleColumn} onResetColumns={resetColumns} stickyHeaderTop="0px" className="rounded-none border-0 shadow-none"/> : <p className="p-8 text-center text-sm text-muted-foreground">{t("browser.noMatches")}</p>}
+        {loading && !groups.length ? <p className="p-8 text-center text-sm text-muted-foreground">{t("common.loading")}</p> : groups.length ? <SkillBrowserTable {...tableProps} onSelectionChange={keys=>{setSelectedRowKeys(keys);tableProps.onSelectionChange?.(keys);}} statusPath={pathname} statusCollections={collectionsMode} kind={flat ? "skill" : "folder"} tree visibleColumns={fixedColumns ?? (collectionsMode ? new Set([...visibleColumns].filter(column => !["skillCount", "githubStars", "installSummary"].includes(column))) : visibleColumns)} skills={skills.map(skill => ({...skill, highlighted: selectedSkill && id(selectedSkill) === id(skill), onDetail: () => chooseSkill(skill)}))} folders={treeRows} onToggleColumn={fixedColumns?undefined:toggleColumn} onResetColumns={fixedColumns?undefined:resetColumns} stickyHeaderTop="0px" className="rounded-none border-0 shadow-none"/> : <p className="p-8 text-center text-sm text-muted-foreground">{emptyMessage ?? t("browser.noMatches")}</p>}
       </div>
       <div ref={statusSlot} className="shrink-0" data-testid="browser-status-slot"/>
     </section>
     {collapsed && <aside style={{width:ICON_RAIL_WIDTH}} className="shrink-0 border-l border-border bg-sidebar" aria-label={t("browser.preview")}>
       <div className="flex h-11 items-center justify-center border-b border-border"><button className={cn(ICON_RAIL_BUTTON,"text-muted-foreground")} title={t("browser.showPreview")} aria-label={t("browser.showPreview")} onClick={()=>setCollapsed(false)}><PanelRight/></button></div>
-      <div className="flex flex-col items-center gap-2 py-2">{(["overview","document","notebook"] as Tab[]).map(value=><button key={value} className={cn(ICON_RAIL_BUTTON,"text-muted-foreground disabled:opacity-50",activeTab===value&&"bg-primary/15 text-primary")} title={t(`browser.${value}`)} aria-label={t(`browser.${value}`)} disabled={value==="notebook" ? !canUseNotebook(selectedFolder) : value==="document" && !selectedSkill && (!selectedFolder || collectionsMode)} onClick={()=>{setTab(value);writePreference("skillshub.browser.tab",value);}}><ActionIcon action={value==="notebook"?"notebook":value==="document"?"document":"info"}/></button>)}</div>
+      <div className="flex flex-col items-center gap-2 py-2">{(["overview","document","notebook"] as Tab[]).map(value=><button key={value} className={cn(ICON_RAIL_BUTTON,"text-muted-foreground disabled:opacity-50",activeTab===value&&"bg-primary/15 text-primary")} title={t(`browser.${value}`)} aria-label={t(`browser.${value}`)} disabled={value==="notebook" ? !canUseNotebook(selectedFolder) : value==="document" && !selectedSkill && (!selectedFolder || selectedFolder.overviewOnly || collectionsMode)} onClick={()=>{setTab(value);writePreference("skillshub.browser.tab",value);}}><ActionIcon action={value==="notebook"?"notebook":value==="document"?"document":"info"}/></button>)}</div>
     </aside>}
     {!collapsed && <>
       <div role="separator" tabIndex={0} aria-label={t("browser.resize")} aria-orientation="vertical" aria-valuenow={Math.round(width)} aria-valuemin={30} aria-valuemax={70} className="relative w-1.5 shrink-0 cursor-col-resize touch-none bg-background after:pointer-events-none after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-border hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
@@ -219,7 +219,7 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
         onKeyDown={e=>{if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();const next=Math.min(70,Math.max(30,width+(e.key==="ArrowLeft"?2:-2)));setWidth(next);writePreference("skillshub.browser.width",next);}}}/>
       <aside style={{flexBasis:`${width}%`}} className="flex min-w-0 shrink-0 flex-col overflow-hidden" aria-label={t("browser.preview")}>
         <div role="tablist" className="flex h-11 shrink-0 items-stretch gap-4 border-b border-border px-4">
-          {((selectedSkill ? ["overview","document"] : !collectionsMode && selectedFolder ? ["overview","document", ...(canUseNotebook(selectedFolder) ? ["notebook"] : [])] : ["overview"]) as Tab[]).map(value=><button role="tab" aria-selected={activeTab===value} key={value} onClick={()=>{setTab(value);writePreference("skillshub.browser.tab",value);}} className={cn("inline-flex items-center gap-2 border-b-2 border-transparent px-1 text-sm font-semibold text-muted-foreground",activeTab===value&&"border-primary text-primary")}>{value === "notebook" ? <ActionIcon action="notebook"/> : <ActionIcon action={value === "document" ? "document" : "info"}/>}{t(`browser.${value}`)}</button>)}
+          {((selectedSkill ? ["overview","document"] : !collectionsMode && selectedFolder && !selectedFolder.overviewOnly ? ["overview","document", ...(canUseNotebook(selectedFolder) ? ["notebook"] : [])] : ["overview"]) as Tab[]).map(value=><button role="tab" aria-selected={activeTab===value} key={value} onClick={()=>{setTab(value);writePreference("skillshub.browser.tab",value);}} className={cn("inline-flex items-center gap-2 border-b-2 border-transparent px-1 text-sm font-semibold text-muted-foreground",activeTab===value&&"border-primary text-primary")}>{value === "notebook" ? <ActionIcon action="notebook"/> : <ActionIcon action={value === "document" ? "document" : "info"}/>}{t(`browser.${value}`)}</button>)}
           <Button className="my-auto ml-auto text-muted-foreground hover:text-foreground" size="icon-sm" variant="ghost" aria-label={t("browser.hidePreview")} onClick={()=>setCollapsed(true)}><PanelRight className="size-4 shrink-0"/></Button>
         </div>
         {selectedSkill && request ? <>
@@ -239,8 +239,8 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
               </details>
             </section>}
             {selectedFolder.notesEditor}
-            {installationSummary}
-            <section aria-label={t("browser.skillList")}>
+            {!selectedFolder.overviewOnly && installationSummary}
+            {!selectedFolder.overviewOnly && <section aria-label={t("browser.skillList")}>
               <details open className="group/overview-section"><summary className="overview-section-title"><List className="size-4 shrink-0" aria-hidden="true"/>{t("browser.skillList")}<ChevronRight className="size-4 shrink-0 group-open/overview-section:rotate-90" aria-hidden="true"/></summary>
               <div className="overflow-hidden rounded-lg border border-border/70">
                 {selectedFolder.skillListLoading ? <p className="p-3 text-sm text-muted-foreground">{t("common.loading")}</p> : (
@@ -254,7 +254,7 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
                 )}
               </div>
               </details>
-            </section>
+            </section>}
 
           </>
         </div> : <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">{t("browser.selectItem")}</div>}

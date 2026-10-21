@@ -3128,7 +3128,8 @@ pub async fn preview_delete_resource_skill_bundle_impl(
     relative_path: &str,
 ) -> Result<CentralSkillBundleDeletePreview, String> {
     let resource_root = resource_root_path(pool).await?;
-    sync_resource_library_skills(pool, &resource_root).await?;
+    // Confirmation uses current records and scans only the selected target.
+    // The destructive command reconciles the library again before changing anything.
     let target = validate_resource_bundle_target(relative_path, &resource_root)?;
     resource_bundle_preview_for_target(pool, target).await
 }
@@ -5603,9 +5604,14 @@ mod tests {
         .await
         .unwrap();
 
+        // A delete preview must not traverse/reconcile unrelated repositories.
+        let unrelated = resource_dir.join("unrelated/extra");
+        fs::create_dir_all(&unrelated).unwrap();
+        fs::write(unrelated.join("SKILL.md"), "---\nname: unrelated\ndescription: other\n---\nOther").unwrap();
         let preview = preview_delete_resource_skill_bundle_impl(&pool, "owner/repo")
             .await
             .unwrap();
+        assert_eq!(db::get_resource_library_skills(&pool).await.unwrap().len(), 2);
 
         assert_eq!(preview.bundle.relative_path, "owner/repo");
         assert_eq!(preview.bundle.skill_count, 2);
