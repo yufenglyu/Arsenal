@@ -31,7 +31,7 @@ export function ResourceTrashView(){
     <SkillBrowserWorkspace storageKey="trash" allowFlatView={false} loading={loading} folders={folders}
       visibleColumns={new Set(["index","name","skillCount","updatedAt"])} columnLabels={{updatedAt:t("trash.deletedAt")}}
       emptyMessage={t(query?"browser.noMatches":"trash.emptyState")} onRefresh={()=>load(true)}
-      toolbar={<SkillBrowserHeader title={<h1>{t("trash.title")}</h1>} search={<SearchInput value={query} onValueChange={setQuery} placeholder={t("trash.search")} aria-label={t("trash.search")}/>}
+      toolbar={()=> <SkillBrowserHeader title={<h1>{t("trash.title")}</h1>} search={<SearchInput value={query} onValueChange={setQuery} placeholder={t("trash.search")} aria-label={t("trash.search")}/>}
         actions={<><Button variant="ghost" size="icon" aria-label={t("common.refresh")} disabled={loading} onClick={()=>void load(true)}><RotateCw/></Button>
           <Button variant="ghost" size="icon" title={t("trash.empty")} aria-label={t("trash.empty")} disabled={!entries.length} onClick={()=>setRequest({action:"purge",entries:actions(entries.map(entry=>entry.id))})}><Trash2/></Button></>}/>}/>
     {request&&<BatchSkillActionDialog {...request} onClose={()=>setRequest(null)}/>}

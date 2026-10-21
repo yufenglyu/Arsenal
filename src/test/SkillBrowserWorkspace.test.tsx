@@ -556,3 +556,14 @@ it('keeps partial folders as explicit members when mixed with a complete reposit
  fireEvent.dragStart(first,{dataTransfer:{setData}});
  expect(setData).toHaveBeenCalledWith(REPOSITORIES_DRAG,JSON.stringify({repositories:['Example/Tools'],skillIds:['three']}));
 });
+
+it("gives static and callback toolbars the same full-width slot and reserves the scrollbar gutter",()=>{
+  const header=<SkillBrowserHeader title={<h1>Archive</h1>} search={<input aria-label="layout search"/>}/>;
+  const {rerender}=render(<SkillBrowserWorkspace {...props} allowFlatView={false} toolbar={()=>header}/>);
+  const slot=screen.getByRole("textbox",{name:"layout search"}).closest("header")!.parentElement!;
+  const slotClass=slot.className;
+  rerender(<SkillBrowserWorkspace {...props} allowFlatView={false} toolbar={header}/>);
+  const next=screen.getByRole("textbox",{name:"layout search"}).closest("header")!.parentElement!;
+  expect(next.className).toBe(slotClass);
+  expect(document.querySelector(".skill-browser-list")).toHaveClass("[scrollbar-gutter:stable]");
+});
