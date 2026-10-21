@@ -1,3 +1,4 @@
+import { REPOSITORIES_DRAG } from "@/lib/collectionGroups";
 import userEvent from "@testing-library/user-event";
 import {useCollectionStore as groups} from "@/stores/collectionStore";
 import { openRowActions } from "./rowActions";
@@ -526,7 +527,7 @@ describe("ResourceLibraryView delete", () => {
 
     await waitFor(() => {
       const rows = tableDataRows();
-      expect(rows).toHaveLength(2);
+      expect(rows).toHaveLength(1);
       expect(rows[0]).toHaveTextContent("alpha/repo");
       expect(screen.queryByText("zeta/repo")).toBeNull();
     });
@@ -773,6 +774,21 @@ describe("ResourceLibraryView delete", () => {
     expect(screen.getByRole('button',{name:'查看 One 的详情'})).toBeInTheDocument();expect(screen.getByRole('button',{name:'查看 Two 的详情'})).toBeInTheDocument();expect(screen.queryByRole('button',{name:'查看 Three 的详情'})).not.toBeInTheDocument();
     view.unmount();groups.setState({activeCollectionId:'__unfiled__'});render(<MemoryRouter><ResourceLibraryView/></MemoryRouter>);
     expect(screen.getByRole('button',{name:'查看 Three 的详情'})).toBeInTheDocument();expect(screen.queryByRole('button',{name:'查看 One 的详情'})).not.toBeInTheDocument();
+  });  it("uses whole-repository drag identities only when all source members are visible", async () => {
+    resourceSkills = [
+      {...defaultSkills[0],id:'one',name:'One',source_repo:'example/tools',tags:['design'],file_path:'~/.arsenal/library/example/tools/one/SKILL.md',canonical_path:'~/.arsenal/library/example/tools/one'},
+      {...defaultSkills[0],id:'two',name:'Two',source_repo:'example/tools',tags:['backend'],file_path:'~/.arsenal/library/example/tools/two/SKILL.md',canonical_path:'~/.arsenal/library/example/tools/two'},
+    ];
+    render(<MemoryRouter><ResourceLibraryView/></MemoryRouter>);
+    // Use the same public control as the resource page; the default may be flat.
+    const switcher=screen.queryByRole('button',{name:'按仓库分组'});
+    if(switcher)fireEvent.click(switcher);
+    let setData=vi.fn();
+    fireEvent.dragStart(tableDataRows()[0],{dataTransfer:{setData}});
+    expect(setData).toHaveBeenCalledWith(REPOSITORIES_DRAG,JSON.stringify({repositories:['example/tools'],skillIds:[]}));
+    fireEvent.click(screen.getByRole('button',{name:'design'}));
+    setData=vi.fn();fireEvent.dragStart(tableDataRows()[0],{dataTransfer:{setData}});
+    expect(setData.mock.calls.some(([type])=>type===REPOSITORIES_DRAG)).toBe(false);
   });
 });
 

@@ -274,6 +274,16 @@ export function ResourceLibraryView() {
   }, [normalizedSearchQuery, selectedTags, visibleSkills, folderSplit.groups, folderNotes, searchScopes]);
   const sortedSkills = useMemo(() => sortBySkillBrowserOrder(filteredSkills, sortField, sortDirection),[filteredSkills,sortField,sortDirection]);
   const filteredFolders = useMemo(() => sortFoldersBySkillBrowserOrder(scopedFolders.filter(group=>group.skills.some(skill=>filteredSkills.some(match=>match.id===skill.id))),sortField,sortDirection),[scopedFolders,filteredSkills,sortField,sortDirection]);
+  // Partial search/group results must retain their selected members, never widen to a whole source.
+  const completeDragRepositories = useMemo(() => {
+    const visible = new Set(filteredSkills.map(skill => skill.id));
+    const complete = new Map<string, boolean>();
+    for (const skill of skills) if (skill.source_repo) {
+      const repo = skill.source_repo.toLowerCase();
+      complete.set(repo, (complete.get(repo) ?? true) && visible.has(skill.id));
+    }
+    return complete;
+  }, [skills, filteredSkills]);
   const canDetachGroup=!!groupState.activeCollectionId&&groupState.activeCollectionId!==UNFILED_COLLECTION;
   async function detachSkills(ids:string[]){if(!canDetachGroup)return;try{await groupState.changeGroup({action:'detach',id:groupState.activeCollectionId!,skillIds:ids});}catch{toast.error(t('groups.operationFailed'));}}
 
@@ -709,6 +719,7 @@ export function ResourceLibraryView() {
                       onSearch: () => handleSearchSkill({ ...group.skills[0], name: group.name }),
                       name: group.name,
                       onChangeRepositoryAddress: group.skills.every(skill => skill.source_repo && skill.source_repo.toLowerCase() === group.skills[0]?.source_repo?.toLowerCase()) ? () => setAddressRepository(group.skills[0].source_repo!) : undefined,
+                      dragSourceRepo: group.skills[0]?.source_repo && completeDragRepositories.get(group.skills[0].source_repo.toLowerCase()) && group.skills.every(skill => skill.source_repo?.toLowerCase() === group.skills[0].source_repo?.toLowerCase()) ? group.skills[0].source_repo : undefined,
                       sourceRepo: group.skills.every(skill => skill.source_repo && skill.source_repo.toLowerCase() === group.skills[0]?.source_repo?.toLowerCase()) ? group.skills[0]?.source_repo : undefined,
                       path: group.path,
                       tags: [...new Set(group.skills.flatMap(skill => skill.tags ?? []))],

@@ -1,3 +1,4 @@
+import { REPOSITORIES_DRAG } from "@/lib/collectionGroups";
 import { Button } from "@/components/ui/button";
 import { ActionIcon } from "@/components/ui/action-icon";
 import { browserStats } from "@/lib/browserStats";
@@ -83,6 +84,8 @@ export interface FolderTableItem {
   onNotebook?: () => void;
   hasNotebook?: boolean;
   sourceRepo?: string | null;
+  /** Only set when this folder represents every member of its source repository. */
+  dragSourceRepo?: string;
   batchOperations?: BatchOperations;
   expandable?: boolean;
   onSelect?: () => void;
@@ -1181,7 +1184,15 @@ export function SkillBrowserTable({
             const selected=effectiveSelection.has(current.key)?visibleRows.filter(item=>effectiveSelection.has(item.key)):[current];
             const members=selected.flatMap(item=>item.skill?[item.skill]:item.folder?.children??[]);
             const ids=[...new Set(members.filter(item=>!item.isReadOnly).map(item=>item.detailRequest?.skillId??item.rowKey??item.name))];
-            if(ids.length)onDragSkills(event,ids);
+            if(ids.length) {
+              onDragSkills(event,ids);
+              const repositories=[...new Set(selected.flatMap(item=>item.folder?.dragSourceRepo?[item.folder.dragSourceRepo]:[]))];
+              if(repositories.length) {
+                const explicit=selected.filter(item=>!item.folder?.dragSourceRepo).flatMap(item=>item.skill?[item.skill]:item.folder?.children??[]);
+                const skillIds=[...new Set(explicit.filter(item=>!item.isReadOnly).map(item=>item.detailRequest?.skillId??item.rowKey??item.name))];
+                event.dataTransfer.setData(REPOSITORIES_DRAG,JSON.stringify({repositories,skillIds}));
+              }
+            }
           }}
           onKeyDown={event => {
             if (!event.nativeEvent.isComposing && !shouldIgnoreShortcutTarget(event.target) && (event.ctrlKey||event.metaKey) && !event.altKey && event.key.toLowerCase()==='a') {event.preventDefault();event.stopPropagation();setSelectedRows(new Set(visibleKeys));return;}

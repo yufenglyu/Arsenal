@@ -165,7 +165,7 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
     onNotebook: !canUseNotebook(folder) ? undefined : () => { setSelectedRowKeys([`folder:${folder.key}`]); setSelected({kind:"folder",key:folder.key}); setTab("notebook"); },
     highlighted: selectedFolder?.key === folder.key,
     scrollToRow: folder.highlighted,
-    expanded: folder.expandable !== false && (searchActive || expanded.has(folder.key) || Boolean(folder.children?.some(s => s.highlighted))),
+    expanded: folder.expandable !== false && (expanded.has(folder.key) || Boolean(folder.children?.some(s => s.highlighted))),
     onToggle: folder.expandable === false ? undefined : () => toggle(folder.key),
     onOpen: () => { setSelectedRowKeys([`folder:${folder.key}`]); setSelected({kind:"folder",key:folder.key}); folder.onSelect?.(); },
     children: folder.children?.map(skill => ({ ...skill, scrollToRow: skill.highlighted, highlighted: selectedSkill && id(selectedSkill) === id(skill), onDetail: () => chooseSkill(skill) })),

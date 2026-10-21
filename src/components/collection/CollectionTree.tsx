@@ -6,14 +6,13 @@ import {toast} from "sonner";
 import {useCollectionStore} from "@/stores/collectionStore";
 import {useResourceLibraryStore} from "@/stores/resourceLibraryStore";
 import {useExpansionShortcuts} from "@/hooks/useExpansionShortcuts";
-import {collectionMembers, collectionScope, COLLECTION_DRAG, SKILLS_DRAG, COLLECTION_SOURCE_DRAG, UNFILED_COLLECTION} from "@/lib/collectionGroups";
+import {collectionMembers, collectionScope, COLLECTION_DRAG, SKILLS_DRAG, REPOSITORIES_DRAG, COLLECTION_SOURCE_DRAG, UNFILED_COLLECTION} from "@/lib/collectionGroups";
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import {Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody, DialogFooter} from "@/components/ui/dialog";
 import {cn} from "@/lib/utils";
 import type {Collection} from "@/types";
-import {matchesShortcutEvent,shouldIgnoreShortcutTarget} from "@/lib/shortcutKeys";
-import {useShortcutStore} from "@/stores/shortcutStore";
+import {shouldIgnoreShortcutTarget} from "@/lib/shortcutKeys";
 import {SkillRepositoryIcon} from "@/components/skill/SkillActionIcons";
 import {save} from "@tauri-apps/plugin-dialog";
 
@@ -48,9 +47,6 @@ export function CollectionTree({count, onExport, onExpandedChange}: {count?: num
     const handler=(event:KeyboardEvent)=>{
       const target=event.target instanceof HTMLElement?event.target:null;
       if(pathname!=='/resources'||!target?.closest('[data-testid="skill-browser-workspace"]')||target.closest('[role="dialog"],[role="menu"],[role="separator"]')||shouldIgnoreShortcutTarget(target)||event.defaultPrevented||event.isComposing)return;
-      const shortcuts=useShortcutStore.getState().shortcuts;
-      const expand=matchesShortcutEvent(event,shortcuts.expandSection)||(shortcuts.expandSection==='plus'&&event.key==='='&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey);const collapse=matchesShortcutEvent(event,shortcuts.collapseSection);
-      if(expand||collapse){event.preventDefault();event.stopPropagation();if(expand){setRootOpen(true);setClosed(new Set());}else{setClosed(new Set(collections.map(item=>item.id)));}return;}
       if(!store.activeCollectionId||store.activeCollectionId===UNFILED_COLLECTION||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
       if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();event.stopPropagation();setClosed(old=>{const next=new Set(old);if(event.key==='ArrowRight')next.delete(store.activeCollectionId!);else next.add(store.activeCollectionId!);return next;});}
     };
@@ -84,9 +80,19 @@ export function CollectionTree({count, onExport, onExpandedChange}: {count?: num
       void change({action:'move',id:dragged,parentId:zone==='inside'?(id||null):target?.parent_id??null,beforeId:zone==='before'?id:zone==='after'?next?.id:null});
     }else if(id){
       try{const ids:unknown=JSON.parse(e.dataTransfer.getData(SKILLS_DRAG));if(!Array.isArray(ids)||!ids.length||!ids.every(value=>typeof value==='string'))return;
+        let skillIds:string[]=ids;
+        let repositories:string[]|undefined;
+        const stable=e.dataTransfer.getData(REPOSITORIES_DRAG);
+        if(stable){
+          const payload:unknown=JSON.parse(stable);
+          if(!payload||typeof payload!=='object'||!('repositories' in payload)||!('skillIds' in payload))return;
+          const repos=payload.repositories;const members=payload.skillIds;
+          if(!Array.isArray(repos)||!repos.length||!repos.every(value=>typeof value==='string'&&value.trim())||!Array.isArray(members)||!members.every(value=>typeof value==='string'))return;
+          repositories=repos;skillIds=members;
+        }
         const source=e.dataTransfer.getData(COLLECTION_SOURCE_DRAG);
         if(e.shiftKey&&source===id)return;
-        void change({action:e.shiftKey&&source?'transfer':'assign',id,skillIds:ids,sourceCollectionId:e.shiftKey&&source?source:undefined});
+        void change({action:e.shiftKey&&source?'transfer':'assign',id,skillIds,...(repositories?{repositories}:{}),sourceCollectionId:e.shiftKey&&source?source:undefined});
       }catch{/* Ignore unrelated drag data. */}
     }
     setClosed(old=>new Set([...old].filter(value=>value!==id)));

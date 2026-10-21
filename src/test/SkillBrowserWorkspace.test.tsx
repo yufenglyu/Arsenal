@@ -1,6 +1,9 @@
+import { REPOSITORIES_DRAG } from "@/lib/collectionGroups";
 vi.mock("@/components/notebook/RepositoryNotebook", () => ({ RepositoryNotebook: ({skillId}: {skillId: string}) => <div data-testid="repository-notebook">{skillId}</div> }));
 import { useRepositoryDocumentStore } from "@/stores/repositoryDocumentStore";
 import { TagFilters } from "@/components/skill/TagFilters";
+import { CollectionTree } from "@/components/collection/CollectionTree";
+import { useCollectionStore } from "@/stores/collectionStore";
 import { type ReactElement, type ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { openRowActions } from "./rowActions";
@@ -20,6 +23,26 @@ const skills: SkillTableItem[] = [
 ];
 const folders: FolderTableItem[] = [{key:"repo",name:"Example/Tools",path:"/demo/tools",skillCount:2,skillKeys:["one","two"],githubStars:20,onOpen:vi.fn()}];
 const props={storageKey:"test",skills,folders,showGithubStars:true};
+it("keeps sidebar and table expansion shortcuts scoped to their focused region", () => {
+  useShortcutStore.setState({shortcuts: {...DEFAULT_SHORTCUTS}});
+  useCollectionStore.setState({collections:[
+    {id:"parent",name:"Parent",parent_id:null,created_at:"",updated_at:""},
+    {id:"child",name:"Child",parent_id:"parent",created_at:"",updated_at:""},
+  ],groupDetails:[],activeCollectionId:null,selectedSkillIds:[],loadGroupDetails:vi.fn().mockResolvedValue(undefined)});
+  render(<MemoryRouter initialEntries={["/resources"]}><CollectionTree/><SkillBrowserWorkspace {...props}/></MemoryRouter>);
+  const tree = screen.getByRole("tree");
+  const list = screen.getByRole("region", {name:"技能列表"});
+  fireEvent.keyDown(tree, {key:"-"});
+  expect(within(tree).queryByText("Child")).not.toBeInTheDocument();
+  fireEvent.keyDown(list, {key:"+"});
+  expect(within(list).getByRole("button", {name:"查看 First skill 的详情"})).toBeInTheDocument();
+  expect(within(tree).queryByText("Child")).not.toBeInTheDocument();
+  fireEvent.keyDown(tree, {key:"+"});
+  expect(within(tree).getByText("Child")).toBeInTheDocument();
+  fireEvent.keyDown(list, {key:"-"});
+  expect(within(list).queryByRole("button", {name:"查看 First skill 的详情"})).not.toBeInTheDocument();
+  expect(within(tree).getByText("Child")).toBeInTheDocument();
+});
 beforeEach(()=>{localStorage.clear();vi.clearAllMocks()});
 describe("tree browser workspace",()=>{
  it("restores each view's scroll position after the shorter view clamps scrolling",()=>{
@@ -97,11 +120,20 @@ describe("tree browser workspace",()=>{
   fireEvent.click(openRowActions(row).getByRole("menuitem", { name: "删除"}));
   expect(screen.getByTestId("inspector")).toHaveTextContent("two");
  });
- it("search expands matching rows without overwriting saved expansion",()=>{
+ it("keeps search results collapsed until expanded and allows collapsing during search",()=>{
   const {rerender}=render(<SkillBrowserWorkspace {...props}/>);
   rerender(<SkillBrowserWorkspace {...props} skills={[skills[1]]} searchActive/>);
+  expect(screen.queryByRole("button",{name:"查看 Second skill 的详情"})).not.toBeInTheDocument();
+  const row=screen.getByRole("button",{name:"Example/Tools"}).closest("tr")!;
+  fireEvent.click(screen.getByRole("button",{name:"展开 Example/Tools"}));
   expect(screen.getByRole("button",{name:"查看 Second skill 的详情"})).toBeInTheDocument();
   expect(screen.queryByRole("button",{name:"查看 First skill 的详情"})).not.toBeInTheDocument();
+  fireEvent.keyDown(row,{key:"ArrowLeft"});
+  expect(screen.queryByRole("button",{name:"查看 Second skill 的详情"})).not.toBeInTheDocument();
+  fireEvent.keyDown(row,{key:"+"});
+  expect(screen.getByRole("button",{name:"查看 Second skill 的详情"})).toBeInTheDocument();
+  fireEvent.keyDown(row,{key:"-"});
+  expect(screen.queryByRole("button",{name:"查看 Second skill 的详情"})).not.toBeInTheDocument();
   rerender(<SkillBrowserWorkspace {...props}/>);
   expect(screen.queryByRole("button",{name:"查看 Second skill 的详情"})).not.toBeInTheDocument();
  });
@@ -497,4 +529,30 @@ it('detaches selected skill rows in one group operation',()=>{
  fireEvent.click(row);fireEvent.keyDown(row,{key:'a',ctrlKey:true});
  fireEvent.click(openRowActions(row).getByRole('menuitem',{name:'移出分组'}));
  expect(detach).toHaveBeenCalledWith(['one','two']);
+});
+
+it('drags multiple collapsed search results with stable repository identities',()=>{
+ const drag=vi.fn();const setData=vi.fn();
+ const extra:SkillTableItem={rowKey:'three',detailRequest:{skillId:'three'},name:'Third skill',sourceRepo:'Example/Other'};
+ render(<SkillBrowserWorkspace {...props} skills={[...skills,extra]} searchActive
+   folders={[{...folders[0],dragSourceRepo:'Example/Tools'},{key:'other',name:'Example/Other',path:'/demo/other',onOpen:vi.fn(),skillKeys:['three'],skillCount:1,dragSourceRepo:'Example/Other'}]}
+   onDragSkills={drag}/>);
+ const first=screen.getByRole('button',{name:'Example/Tools'}).closest('tr')!;
+ const second=screen.getByRole('button',{name:'Example/Other'}).closest('tr')!;
+ fireEvent.click(first);fireEvent.click(second,{ctrlKey:true});
+ fireEvent.dragStart(first,{dataTransfer:{setData}});
+ expect(drag).toHaveBeenCalledWith(expect.anything(),expect.arrayContaining(['one','two','three']));
+ const payload=JSON.parse(setData.mock.calls.find(([type])=>type===REPOSITORIES_DRAG)![1]);
+ expect(payload.repositories).toEqual(expect.arrayContaining(['Example/Tools','Example/Other']));
+ expect(payload.skillIds).toEqual([]);
+});
+it('keeps partial folders as explicit members when mixed with a complete repository',()=>{
+ const setData=vi.fn();const extra:SkillTableItem={rowKey:'three',detailRequest:{skillId:'three'},name:'Third skill'};
+ render(<SkillBrowserWorkspace {...props} skills={[...skills,extra]}
+ folders={[{...folders[0],dragSourceRepo:'Example/Tools'},{key:'partial',name:'Partial',path:'/demo/partial',onOpen:vi.fn(),skillKeys:['three'],skillCount:1}]}
+ onDragSkills={vi.fn()}/>);
+ const first=screen.getByRole('button',{name:'Example/Tools'}).closest('tr')!;
+ fireEvent.click(first);fireEvent.click(screen.getByRole('button',{name:'Partial'}).closest('tr')!,{ctrlKey:true});
+ fireEvent.dragStart(first,{dataTransfer:{setData}});
+ expect(setData).toHaveBeenCalledWith(REPOSITORIES_DRAG,JSON.stringify({repositories:['Example/Tools'],skillIds:['three']}));
 });

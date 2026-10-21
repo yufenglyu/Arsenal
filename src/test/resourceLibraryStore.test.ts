@@ -53,6 +53,24 @@ describe("resourceLibraryStore platform installs", () => {
     expect(useResourceLibraryStore.getState().isLoading).toBe(false);
   });
 
+  it("reloads after an in-flight read when a background mutation requires fresh data", async () => {
+    let resolveSkills!: (skills: SkillWithLinks[]) => void;
+    const pending = new Promise<SkillWithLinks[]>(resolve => { resolveSkills = resolve; });
+    const replacement = {...resourceSkill, id: "replacement"};
+    let reads = 0;
+    vi.mocked(invoke).mockImplementation(async command => {
+      if (command === "get_resource_library_skills") return ++reads === 1 ? pending : [replacement];
+      if (command === "get_skill_resource_library_dir") return "C:/library";
+      return [];
+    });
+    const first = useResourceLibraryStore.getState().loadResourceLibrary();
+    const fresh = useResourceLibraryStore.getState().loadResourceLibrary({fresh: true});
+    resolveSkills([resourceSkill]);
+    await Promise.all([first, fresh]);
+    expect(reads).toBe(2);
+    expect(useResourceLibraryStore.getState().skills).toEqual([replacement]);
+  });
+
   it("uses the resource-specific batch command", async () => {
     const result: BatchInstallResult = { succeeded: ["codex"], failed: [] };
     vi.mocked(invoke).mockResolvedValueOnce(result).mockResolvedValueOnce([resourceSkill]);

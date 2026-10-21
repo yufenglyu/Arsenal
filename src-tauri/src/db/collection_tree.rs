@@ -10,6 +10,7 @@ pub struct CollectionChange {
     pub parent_id: Option<String>,
     pub before_id: Option<String>,
     pub skill_ids: Option<Vec<String>>,
+    pub repositories: Option<Vec<String>>,
     pub source_collection_id: Option<String>,
     pub include_descendants: Option<bool>,
 }
@@ -38,7 +39,20 @@ pub async fn change(pool: &AppStore, request: CollectionChange) -> Result<Vec<Co
                 data.table_mut("collection_skills").retain(|_,row|!removed.contains(field(row,"collection_id")));
             },
             "assign" | "transfer" | "detach" => {
-                let ids=request.skill_ids.unwrap_or_default();
+                let mut ids=request.skill_ids.unwrap_or_default();
+                // Resolve whole-repository drops against the current snapshot in this transaction.
+                // Background sync may replace skill IDs while the browser still shows old rows.
+                for repository in request.repositories.unwrap_or_default() {
+                    let members:Vec<String>=data.table("skill_sources").values()
+                        .filter(|row|field(row,"source_repo").eq_ignore_ascii_case(&repository))
+                        .map(|row|field(row,"skill_id").to_owned())
+                        .filter(|skill|data.table("skills").get(skill).is_some_and(|row|row.get("is_central").and_then(Value::as_bool)!=Some(true)))
+                        .collect();
+                    if members.is_empty(){return Err("Repository not found".into());}
+                    ids.extend(members);
+                }
+                let mut seen=HashSet::new();
+                ids.retain(|id|seen.insert(id.clone()));
                 if ids.iter().any(|skill|!data.table("skills").contains_key(skill)) {return Err("Skill not found".into());}
                 if request.action=="transfer" {
                     let source=request.source_collection_id.as_deref().ok_or("Source collection required")?;
@@ -75,6 +89,35 @@ mod tests {
     use super::*;
     fn req(value: Value) -> CollectionChange { serde_json::from_value(value).unwrap() }
     async fn setup() -> AppStore { let store=AppStore::connect(":memory:").await.unwrap(); crate::db::init_database(&store).await.unwrap();store }
+    #[tokio::test]
+    async fn repository_drop_resolves_members_after_background_replacement() {
+        let store=setup().await;
+        let group=create_collection(&store,"Target",None).await.unwrap();
+        store.write(|d| {
+            d.table_mut("skills").insert("current".into(),json!({"id":"current","is_central":false}));
+            d.table_mut("skill_sources").insert("current".into(),json!({"skill_id":"current","source_repo":"example/research"}));
+            Ok(())
+        }).await.unwrap();
+        assert!(change(&store,req(json!({"action":"assign","id":group.id,"skillIds":["old"]}))).await.is_err());
+        change(&store,req(json!({"action":"assign","id":group.id,"repositories":["EXAMPLE/RESEARCH"],"skillIds":[]}))).await.unwrap();
+        assert!(store.read(|d|Ok(d.table("collection_skills").contains_key(&key2(&group.id,"current")))).unwrap());
+    }
+    #[tokio::test]
+    async fn missing_repository_rolls_back_and_mixed_members_are_deduplicated() {
+        let store=setup().await;
+        let group=create_collection(&store,"Target",None).await.unwrap();
+        store.write(|d| {
+            for (id,central) in [("member",false),("central",true)] {
+                d.table_mut("skills").insert(id.into(),json!({"id":id,"is_central":central}));
+                d.table_mut("skill_sources").insert(id.into(),json!({"skill_id":id,"source_repo":"example/tools"}));
+            }
+            Ok(())
+        }).await.unwrap();
+        assert!(change(&store,req(json!({"action":"assign","id":group.id,"skillIds":["member"],"repositories":["missing/repo"]}))).await.is_err());
+        assert!(store.read(|d|Ok(d.table("collection_skills").is_empty())).unwrap());
+        change(&store,req(json!({"action":"assign","id":group.id,"skillIds":["member"],"repositories":["example/tools","EXAMPLE/TOOLS"]}))).await.unwrap();
+        assert_eq!(store.read(|d|Ok(d.table("collection_skills").len())).unwrap(),1);
+    }
     #[tokio::test]
     async fn hierarchy_rejects_cycles_and_preserves_order_on_failure() {
         let store=setup().await;

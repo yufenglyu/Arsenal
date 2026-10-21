@@ -927,7 +927,7 @@ pub async fn update_collection(
 }
 
 pub async fn delete_collection(pool: &AppStore, collection_id: &str) -> Result<(), String> {
-    collection_tree::change(pool, collection_tree::CollectionChange {action:"delete".into(),id:Some(collection_id.into()),name:None,parent_id:None,before_id:None,skill_ids:None,source_collection_id:None,include_descendants:None}).await.map(|_|())
+    collection_tree::change(pool, collection_tree::CollectionChange {action:"delete".into(),id:Some(collection_id.into()),name:None,parent_id:None,before_id:None,skill_ids:None,repositories:None,source_collection_id:None,include_descendants:None}).await.map(|_|())
 }
 
 pub async fn add_skill_to_collection(

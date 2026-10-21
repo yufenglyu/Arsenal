@@ -75,7 +75,7 @@ let groupRequest = 0;
 export interface CollectionGroupChange {
   action: "create" | "rename" | "move" | "delete" | "assign" | "transfer" | "detach";
   id?: string; name?: string; parentId?: string | null; beforeId?: string | null;
-  skillIds?: string[]; sourceCollectionId?: string;
+  skillIds?: string[]; repositories?: string[]; sourceCollectionId?: string;
   includeDescendants?: boolean;
 }
 

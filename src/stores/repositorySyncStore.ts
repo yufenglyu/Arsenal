@@ -110,7 +110,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
             requestedRepositories:state.requestedRepositories?.map(row => row.toLowerCase() === repository.toLowerCase() ? target : row) ?? null,
             checkedAt:Object.fromEntries(Object.entries(state.checkedAt).filter(([row])=>row.toLowerCase() !== repository.toLowerCase())),
             applied:false, appliedRepositories:state.appliedRepositories.filter(row => row.toLowerCase() !== repository.toLowerCase())}));
-          await useResourceLibraryStore.getState().loadResourceLibrary();
+          await useResourceLibraryStore.getState().loadResourceLibrary({fresh:true});
           await useNotebookStore.getState().load();
           await get().recheckRepository(target);
         } catch (error) {
@@ -248,7 +248,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
         previewRequest = (async () => {
           try {
             if (!repositories?.length) {
-              await useResourceLibraryStore.getState().loadResourceLibrary();
+              await useResourceLibraryStore.getState().loadResourceLibrary({fresh:true});
               const scanError=useResourceLibraryStore.getState().error;
               if (scanError) throw new Error(scanError);
             }
@@ -421,7 +421,7 @@ registerTaskCompletion("apply_repository_update_item", async finished => {
   if (finished.batchId && useTaskQueueStore.getState().tasks.some(task =>
     task.batchId === finished.batchId && isTaskActive(task))) return;
   await Promise.all([
-    useResourceLibraryStore.getState().loadResourceLibrary(),
+    useResourceLibraryStore.getState().loadResourceLibrary({fresh:true}),
     useCentralSkillsStore.getState().loadCentralSkills(),
   ]);
 });
@@ -460,7 +460,7 @@ export function retainedSnapshotIds(): string[] {
 }
 
 registerTaskResult("update_source_backed_resource_skill", async () => {
-  await useResourceLibraryStore.getState().loadResourceLibrary();
+  await useResourceLibraryStore.getState().loadResourceLibrary({fresh:true});
 });
 
 for (const command of ["refresh_repository_stars", "refresh_repository"]) registerTaskResult(command, (step, result) => {
@@ -540,7 +540,7 @@ registerTaskFailure("apply_repository_snapshot", step => {
   useRepositorySyncStore.setState(state => ({updateErrors:{...state.updateErrors,[`mirror:${step.args.snapshotId}`]:step.error ?? i18n.t("workflow.operationFailed")}}));
 });
 registerTaskCompletion("apply_repository_snapshot", async () => {
-  await Promise.all([useResourceLibraryStore.getState().loadResourceLibrary(),useCentralSkillsStore.getState().loadCentralSkills()]);
+  await Promise.all([useResourceLibraryStore.getState().loadResourceLibrary({fresh:true}),useCentralSkillsStore.getState().loadCentralSkills()]);
 });
 
 function releaseSnapshots(repositories: RepositorySyncPreview[]) {

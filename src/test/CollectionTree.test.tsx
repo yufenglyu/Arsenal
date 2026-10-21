@@ -4,7 +4,7 @@ import {MemoryRouter} from 'react-router-dom';
 import {CollectionTree} from '@/components/collection/CollectionTree';
 import {useCollectionStore as store} from '@/stores/collectionStore';
 import {useResourceLibraryStore as resources} from '@/stores/resourceLibraryStore';
-import {COLLECTION_DRAG,SKILLS_DRAG,COLLECTION_SOURCE_DRAG} from '@/lib/collectionGroups';
+import {COLLECTION_DRAG,SKILLS_DRAG,REPOSITORIES_DRAG,COLLECTION_SOURCE_DRAG} from '@/lib/collectionGroups';
 const change=vi.fn().mockResolvedValue(undefined);
 const groups=[{id:'a',name:'Research',parent_id:null,created_at:'',updated_at:''},{id:'b',name:'Writing',parent_id:'a',created_at:'',updated_at:''},{id:'c',name:'Other',parent_id:null,created_at:'',updated_at:''}];
 beforeEach(()=>{localStorage.clear();vi.clearAllMocks();resources.setState({skills:[]});store.setState({collections:groups,groupDetails:[],selectedSkillIds:[],activeCollectionId:null,includeDescendants:true,loadGroupDetails:vi.fn().mockResolvedValue(undefined),changeGroup:change});});
@@ -36,4 +36,16 @@ it('moves groups inside another group and requires confirmation before subtree d
  fireEvent.drop(target,{dataTransfer:transfer({[COLLECTION_DRAG]:'a'})});expect(change).toHaveBeenLastCalledWith(expect.objectContaining({action:'move',id:'a',parentId:'c'}));change.mockClear();
  fireEvent.contextMenu(target);fireEvent.click(screen.getByRole('menuitem',{name:'删除分组'}));expect(change).not.toHaveBeenCalled();
  const dialog=screen.getByRole('dialog');expect(within(dialog).getByText(/技能文件保留/)).toBeInTheDocument();fireEvent.click(within(dialog).getByRole('button',{name:'确认'}));expect(change).toHaveBeenCalledWith(expect.objectContaining({action:'delete',id:'c'}));await act(async()=>{});
+});
+
+it('uses stable repository selectors instead of stale member IDs on drop',()=>{
+ setup();const target=screen.getByRole('button',{name:'Other 0'}).parentElement!;
+ const data=transfer({[SKILLS_DRAG]:'["obsolete"]',[REPOSITORIES_DRAG]:JSON.stringify({repositories:['example/research'],skillIds:['explicit']})});
+ fireEvent.drop(target,{dataTransfer:data});
+ expect(change).toHaveBeenCalledWith(expect.objectContaining({action:'assign',id:'c',repositories:['example/research'],skillIds:['explicit']}));
+});
+it('rejects malformed repository metadata without applying stale skill IDs',()=>{
+ setup();const target=screen.getByRole('button',{name:'Other 0'}).parentElement!;
+ fireEvent.drop(target,{dataTransfer:transfer({[SKILLS_DRAG]:'["obsolete"]',[REPOSITORIES_DRAG]:'{"repositories":[3],"skillIds":[]}'})});
+ expect(change).not.toHaveBeenCalled();
 });

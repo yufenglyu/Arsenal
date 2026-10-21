@@ -1,6 +1,7 @@
 import type {Collection, CollectionDetail} from "@/types";
 export const UNFILED_COLLECTION = "__unfiled__";
 export const COLLECTION_DRAG = "application/skillshub-collection";
+export const REPOSITORIES_DRAG = "application/skillshub-repositories";
 export const SKILLS_DRAG = "application/skillshub-skills";
 export const COLLECTION_SOURCE_DRAG = "application/skillshub-source-collection";
 export function collectionScope(items: Collection[], id: string, descendants = true): Set<string> {

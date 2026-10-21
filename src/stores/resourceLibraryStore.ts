@@ -52,7 +52,7 @@ interface ResourceLibraryState {
   deletingSkillId: string | null;
   error: string | null;
 
-  loadResourceLibrary: () => Promise<void>;
+  loadResourceLibrary: (options?: {fresh?: boolean}) => Promise<void>;
   installSkill: (
     skillId: string,
     agentIds: string[],
@@ -95,8 +95,11 @@ export const useResourceLibraryStore = create<ResourceLibraryState>((set, get) =
   deletingSkillId: null,
   error: null,
 
-  loadResourceLibrary: () => {
-    if (resourceLoad) return resourceLoad;
+  loadResourceLibrary: (options) => {
+    if (resourceLoad) {
+      // A mutation completed after the current read began: queue a new snapshot.
+      return options?.fresh ? resourceLoad.then(() => get().loadResourceLibrary()) : resourceLoad;
+    }
     resourceLoad = (async () => {
       set({ isLoading: true, error: null });
       if (!isTauriRuntime()) {
