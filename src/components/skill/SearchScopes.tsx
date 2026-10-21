@@ -1,69 +1,41 @@
+import { Popover } from "@base-ui/react/popover";
 import { Filter } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
 import { allSearchScopes, type SearchScope } from "@/lib/skillFilters";
-export function SearchScopes({
-  value,
-  onChange,
-}: {
+
+export function SearchScopes({ value, onChange }: {
   value: SearchScope[];
   onChange: (value: SearchScope[]) => void;
 }) {
   const { t } = useTranslation();
-  const container = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
   useEffect(() => {
-    const close = () => { if (container.current) container.current.open = false; };
-    const closeOutside = (event: Event) => {
-      if (event.target instanceof Node && !container.current?.contains(event.target)) close();
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || !container.current?.open) return;
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-      container.current.querySelector("summary")?.focus();
-    };
-    document.addEventListener("pointerdown", closeOutside, true);
-    document.addEventListener("focusin", closeOutside);
-    document.addEventListener("keydown", escape, true);
+    const close = () => setOpen(false);
     window.addEventListener("blur", close);
-    return () => {
-      document.removeEventListener("pointerdown", closeOutside, true);
-      document.removeEventListener("focusin", closeOutside);
-      document.removeEventListener("keydown", escape, true);
-      window.removeEventListener("blur", close);
-    };
+    return () => window.removeEventListener("blur", close);
   }, []);
-  return (
-    <details ref={container} className="relative shrink-0 text-xs" onBlur={event => {
-      if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
-    }}>
-      <summary
-        aria-label={t("workflow.searchScope")}
-        title={t("workflow.searchScope")}
-        className="flex size-8 cursor-pointer list-none items-center justify-center rounded-md hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
-      >
-        <Filter aria-hidden="true" className="size-4" />
-      </summary>
-      <div className="absolute right-0 z-30 min-w-32 rounded border bg-popover p-2 shadow">
-        {allSearchScopes.map((scope) => (
-          <label key={scope} className="flex items-center gap-2 p-1">
-            <input
-              type="checkbox"
-              checked={value.includes(scope)}
+  return <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Trigger render={<Button variant="ghost" size="icon" />}
+      aria-label={t("workflow.searchScope")} title={t("workflow.searchScope")}>
+      <Filter aria-hidden="true" />
+    </Popover.Trigger>
+    <Popover.Portal>
+      <Popover.Positioner align="end" sideOffset={4} className="z-[60]">
+        <Popover.Popup initialFocus={false} aria-label={t("workflow.searchScope")}
+          className="min-w-40 select-none rounded-md border border-border bg-popover p-3 text-sm text-popover-foreground shadow-md outline-none">
+          {allSearchScopes.map(scope => <label key={scope} className="flex items-center gap-2 p-1"
+            // Keep the native text-selection hit test away from a changing popup.
+            // The label click still toggles its checkbox, and keyboard focus is unaffected.
+            onMouseDown={event => { if (event.button === 0) event.preventDefault(); }}>
+            <input type="checkbox" checked={value.includes(scope)}
               disabled={value.length === 1 && value.includes(scope)}
-              onChange={() =>
-                onChange(
-                  value.includes(scope)
-                    ? value.filter((s) => s !== scope)
-                    : [...value, scope],
-                )
-              }
-            />
+              onChange={() => onChange(value.includes(scope) ? value.filter(s => s !== scope) : [...value, scope])} />
             {t(`workflow.scope.${scope}`)}
-          </label>
-        ))}
-      </div>
-    </details>
-  );
+          </label>)}
+        </Popover.Popup>
+      </Popover.Positioner>
+    </Popover.Portal>
+  </Popover.Root>;
 }

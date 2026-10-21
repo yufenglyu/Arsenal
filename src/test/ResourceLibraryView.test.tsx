@@ -1,3 +1,4 @@
+import userEvent from "@testing-library/user-event";
 import {useCollectionStore as groups} from "@/stores/collectionStore";
 import { openRowActions } from "./rowActions";
 import { AppStatusBar } from "@/components/layout/AppStatusBar";
@@ -165,28 +166,32 @@ import { invoke } from "@/lib/tauri";
 import { ResourceLibraryView } from "@/pages/ResourceLibraryView";
 
 describe("ResourceLibraryView delete", () => {
-  it("does not steal focus or hide scope labels during their mouse press", () => {
+  it("does not hide scope labels during their mouse press", async () => {
+    const user = userEvent.setup();
     render(<MemoryRouter><ResourceLibraryView /></MemoryRouter>);
-    const scope = screen.getByLabelText("技能名称");
-    const details = scope.closest("details")!;
-    const summary = details.querySelector("summary")!;
-    details.open = true;
-    summary.focus();
-    fireEvent.mouseDown(scope.closest("label")!);
-    expect(details.open).toBe(true);
-    expect(summary).toHaveFocus();
-    fireEvent.click(scope);
+    const trigger = screen.getByRole("button", {name: "搜索范围"});
+    await user.click(trigger);
+    const scope = await screen.findByLabelText("技能名称");
+    const press = new MouseEvent("mousedown", {bubbles:true, cancelable:true});
+    fireEvent(scope.closest("label")!, press);
+    expect(press.defaultPrevented).toBe(true);
+    expect(scope).toBeVisible();
+    expect(trigger).toHaveFocus();
+    await user.click(scope.closest("label")!);
     expect(scope).not.toBeChecked();
+    expect(scope).toBeVisible();
   });
   it("keeps the workspace mounted when excluding skill names from an active search", async () => {
+    const user = userEvent.setup();
     render(<MemoryRouter><ResourceLibraryView /><AppStatusBar /></MemoryRouter>);
     const search = screen.getByPlaceholderText("搜索技能仓库...");
     fireEvent.change(search, {target: {value: "resource-demo"}});
-    const nameScope = screen.getByLabelText("技能名称");
-    fireEvent.click(nameScope);
+    await user.click(screen.getByRole("button", {name: "搜索范围"}));
+    const nameScope = await screen.findByLabelText("技能名称");
+    await user.click(nameScope);
     expect(nameScope).not.toBeChecked();
     expect(search).toBeInTheDocument();
-    fireEvent.click(nameScope);
+    await user.click(nameScope);
     expect(nameScope).toBeChecked();
     expect(search).toBeInTheDocument();
   });
