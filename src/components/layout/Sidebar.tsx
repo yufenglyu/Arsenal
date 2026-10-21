@@ -328,7 +328,7 @@ export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {})
         <div className={cn("my-2", !expanded && "border-t border-sidebar-border/70")} />
 
         <section aria-label={t("sidebar.skillInstallation")}>
-        {expanded && <button type="button" aria-expanded={!installationCollapsed} onKeyDown={installationExpansionKeys} onClick={()=>setInstallationCollapsed(!installationCollapsed)} className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-sm font-semibold hover:bg-primary/10 hover:text-primary">
+        {expanded && <button type="button" aria-expanded={!installationCollapsed} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();setInstallationCollapsed(!installationCollapsed);}else installationExpansionKeys(event);}} onClick={event=>event.currentTarget.focus()} onDoubleClick={()=>setInstallationCollapsed(!installationCollapsed)} className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-sm font-semibold hover:bg-primary/10 hover:text-primary focus:bg-primary/10 focus:text-primary">
           <PackageCheck className="size-3.5 shrink-0"/><span>{t("sidebar.skillInstallation")}</span>
         </button>}
         {(!expanded || !installationCollapsed)&&<div className="space-y-0.5">

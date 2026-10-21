@@ -263,10 +263,12 @@ describe("Sidebar", () => {
     expect(within(section).getByText('软件平台')).toBeInTheDocument();
     expect(within(section).getByText('项目目录')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button',{name:'技能安装'}));
+    expect(screen.getByRole('button',{name:'技能安装'})).toHaveFocus();
+    fireEvent.doubleClick(screen.getByRole('button',{name:'技能安装'}));
     expect(screen.queryByRole('button',{name:'共享中心'})).not.toBeInTheDocument();
     view.unmount();renderSidebar();
     expect(screen.getByRole('button',{name:'技能安装'})).toHaveAttribute('aria-expanded','false');
-    fireEvent.click(screen.getByRole('button',{name:'技能安装'}));
+    fireEvent.doubleClick(screen.getByRole('button',{name:'技能安装'}));
     expect(screen.getByRole('button',{name:'共享中心'})).toBeInTheDocument();
     expect(screen.queryByText('AI 工具与能力管理')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button',{name:'折叠侧边栏'}));
@@ -281,11 +283,13 @@ describe("Sidebar", () => {
     const region=screen.getByTestId('repository-tree-region');
     expect(region).toHaveStyle({height:'240px'});
     fireEvent.click(title);
+    expect(title).toHaveAttribute('aria-expanded','true');
+    fireEvent.doubleClick(title);
     expect(title).toHaveAttribute('aria-expanded','false');
     expect(screen.queryByText('未分组')).not.toBeInTheDocument();
     expect(region.style.height).toBe('');
     expect(screen.getByRole('button',{name:'技能安装'})).toHaveAttribute('aria-expanded','true');
-    fireEvent.click(title);
+    fireEvent.doubleClick(title);
     expect(title).toHaveAttribute('aria-expanded','true');
     expect(screen.getByText('未分组')).toBeInTheDocument();
     expect(region).toHaveStyle({height:'240px'});

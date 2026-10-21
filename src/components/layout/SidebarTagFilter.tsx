@@ -22,6 +22,15 @@ export function SidebarTagFilter({
       return true;
     }
   });
+  function toggleOpen() {
+    const next = !open;
+    setOpen(next);
+    try {
+      localStorage.setItem("skillshub.tags.expanded", String(next));
+    } catch {
+      /* Keep the current session state. */
+    }
+  }
   const [height, setHeight] = useState(() => {
     try {
       const saved = Number(localStorage.getItem("skillshub.tags.height"));
@@ -95,15 +104,15 @@ export function SidebarTagFilter({
         <button
           type="button"
           aria-expanded={open}
-          onClick={() => {
-            setOpen(!open);
-            try {
-              localStorage.setItem("skillshub.tags.expanded", String(!open));
-            } catch {
-              /* In-memory state is sufficient. */
+          onClick={event => event.currentTarget.focus()}
+          onKeyDown={event => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              toggleOpen();
             }
           }}
-          className="flex min-w-0 flex-1 items-center gap-2 py-1 text-sm font-semibold text-muted-foreground"
+          onDoubleClick={toggleOpen}
+          className="flex min-w-0 flex-1 items-center gap-2 py-1 text-sm font-semibold text-muted-foreground focus:bg-primary/10 focus:text-primary"
         >
           <Tags className="size-4" />
           {t("central.tagFilter")}
