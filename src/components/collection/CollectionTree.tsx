@@ -1,4 +1,5 @@
-import {useEffect, useLayoutEffect, useRef, useState, type DragEvent} from "react";
+import {splitResourceLibrarySkillsByFolder} from "@/lib/skillFolders";
+import {useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent} from "react";
 import {useNavigate,useLocation} from "react-router-dom";
 import {useTranslation} from "react-i18next";
 import {ChevronRight, Folder, Inbox, Plus, Minus} from "lucide-react";
@@ -19,6 +20,14 @@ import {save} from "@tauri-apps/plugin-dialog";
 export function CollectionTree({count, onExport, onExpandedChange}: {count?: number; onExport?: () => void; onExpandedChange?: (expanded: boolean) => void}) {
   const {t}=useTranslation(); const navigate=useNavigate(); const {pathname}=useLocation(); const store=useCollectionStore(s=>s);
   const skills=useResourceLibraryStore(s=>s.skills);
+  const libraryDir=useResourceLibraryStore(s=>s.resourceLibraryDir);
+  const repositoryBySkill=useMemo(()=>{
+    const keys=new Map<string,string>();
+    const folders=splitResourceLibrarySkillsByFolder(skills,libraryDir).groups;
+    for(const folder of folders)for(const skill of folder.skills)keys.set(skill.id,skill.source_repo?`source:${skill.source_repo.toLowerCase()}`:`folder:${folder.relativePath}`);
+    for(const skill of skills)if(skill.source_repo)keys.set(skill.id,`source:${skill.source_repo.toLowerCase()}`);
+    return keys;
+  },[skills,libraryDir]);
   const tree=useRef<HTMLDivElement>(null); const menuRef=useRef<HTMLDivElement>(null);
   const [closed,setClosed]=useState<Set<string>>(()=>{try{return new Set(JSON.parse(localStorage.getItem('skillshub.groups.closed')??'[]'));}catch{return new Set();}});
   const [rootOpen,setRootOpen]=useState(()=>{try{return localStorage.getItem('skillshub.groups.open')!=='false';}catch{return true;}});
@@ -97,11 +106,17 @@ export function CollectionTree({count, onExport, onExpandedChange}: {count?: num
     }
     setClosed(old=>new Set([...old].filter(value=>value!==id)));
   }
+  function statistics(members?:Set<string>,total?:number) {
+    const selected=members?skills.filter(skill=>members.has(skill.id)):skills;
+    const repositories=new Set(selected.flatMap(skill=>{const key=repositoryBySkill.get(skill.id);return key?[key]:[];})).size;
+    const skillCount=total??selected.length;
+    return <span data-repository-count className="shrink-0 whitespace-nowrap text-xs font-normal tabular-nums" title={t('groups.countSummary',{repositories,skills:skillCount})}>{repositories}/{skillCount}</span>;
+  }
   function render(parentId:string|null,depth:number):React.ReactNode {
     return store.collections.filter(item=>(item.parent_id??null)===parentId).map(item=>{
       const hasChildren=store.collections.some(child=>child.parent_id===item.id);
       const expanded=!closed.has(item.id)||revealed.has(item.id);
-      const count=collectionMembers(store.groupDetails,collectionScope(store.collections,item.id,store.includeDescendants)).size;
+      const members=collectionMembers(store.groupDetails,collectionScope(store.collections,item.id,store.includeDescendants));
       return <div role="treeitem" key={item.id} data-group-id={item.id} aria-label={item.name} aria-selected={store.activeCollectionId===item.id} aria-expanded={hasChildren?expanded:undefined}>
         <div data-group-row draggable onDragStart={e=>{e.stopPropagation();e.dataTransfer.setData(COLLECTION_DRAG,item.id);e.dataTransfer.effectAllowed='move';}} onDragEnd={()=>setDrop(null)}
           onDragOver={e=>{if(!e.dataTransfer.types.some(type=>[COLLECTION_DRAG,SKILLS_DRAG].includes(type)))return;e.preventDefault();e.stopPropagation();const members=e.dataTransfer.types.includes(SKILLS_DRAG);e.dataTransfer.dropEffect=members&&!e.shiftKey?'copy':'move';const box=e.currentTarget.getBoundingClientRect();const ratio=(e.clientY-box.top)/box.height;setDrop({id:item.id,zone:members?'inside':ratio<.25?'before':ratio>.75?'after':'inside'});}}
@@ -110,7 +125,7 @@ export function CollectionTree({count, onExport, onExpandedChange}: {count?: num
           onContextMenu={e=>{e.preventDefault();setMenu({item,x:e.clientX,y:e.clientY});}}
           className={cn('flex items-center rounded-md border-y-2 border-transparent py-1 text-sm',store.activeCollectionId===item.id?'bg-primary/15 text-primary':'hover:bg-primary/10',memberGroups.has(item.id)&&'ring-1 ring-inset ring-primary bg-primary/20',drop?.id===item.id&&(drop.zone==='before'?'border-t-primary':drop.zone==='after'?'border-b-primary':'bg-primary/20'))} style={{paddingLeft:4+depth*16}}>
           <button tabIndex={-1} disabled={!hasChildren} className="inline-flex size-5 shrink-0 items-center justify-center" aria-label={t(expanded?'groups.collapse':'groups.expand',{name:item.name})} onClick={()=>setClosed(old=>{const next=new Set(old);if(next.has(item.id))next.delete(item.id);else next.add(item.id);return next;})}>{hasChildren&&<ChevronRight className={cn('size-3.5',expanded&&'rotate-90')}/>}</button>
-          <button data-group-select className="inline-flex min-w-0 flex-1 items-center gap-2 pr-2 text-left" onClick={e=>{e.currentTarget.focus();choose(item.id);}}><Folder className="size-3.5 shrink-0"/><span className="min-w-0 flex-1 truncate">{item.name}</span><span className="text-xs tabular-nums text-muted-foreground">{count}</span></button>
+          <button data-group-select className="inline-flex min-w-0 flex-1 items-center gap-2 pr-2 text-left" onClick={e=>{e.currentTarget.focus();choose(item.id);}}><Folder className="size-3.5 shrink-0"/><span className="min-w-0 flex-1 truncate">{item.name}</span>{statistics(members)}</button>
         </div>{hasChildren&&expanded&&<div role="group">{render(item.id,depth+1)}</div>}
       </div>;
     });
@@ -125,9 +140,9 @@ export function CollectionTree({count, onExport, onExpandedChange}: {count?: num
       if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();if(id)setClosed(old=>{const next=new Set(old);if(e.key==='ArrowRight')next.delete(id);else next.add(id);return next;});else setRootOpen(e.key==='ArrowRight');}
     }}>
       <div className="flex items-center" onDragOver={e=>{if(e.dataTransfer.types.includes(COLLECTION_DRAG))e.preventDefault();}} onDrop={e=>acceptDrop(e,'','inside')} onContextMenu={e=>{e.preventDefault();setMenu({item:null,x:e.clientX,y:e.clientY});}}>
-        <button data-group-select aria-expanded={rootExpanded} aria-label={t('sidebar.resourceLibrary')} aria-current={(pathname==='/resources'||pathname==='/')&&!store.activeCollectionId?'page':undefined} className={cn('flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-sm font-semibold', (pathname==='/resources'||pathname==='/')&&!store.activeCollectionId?'bg-hover-bg text-white':'hover:bg-primary/10')} onClick={e=>{e.currentTarget.focus();choose(null);}} onDoubleClick={()=>setRootOpen(!rootExpanded)} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();e.stopPropagation();setRootOpen(!rootExpanded);choose(null);}}}><SkillRepositoryIcon className="size-3.5 shrink-0"/><span className="min-w-0 flex-1 truncate text-left">{t('sidebar.resourceLibrary')}</span><span className="text-xs font-normal tabular-nums">{count??skills.length}</span></button>
+        <button data-group-select aria-expanded={rootExpanded} aria-label={t('sidebar.resourceLibrary')} aria-current={(pathname==='/resources'||pathname==='/')&&!store.activeCollectionId?'page':undefined} className={cn('flex min-w-0 flex-1 items-center gap-2 rounded-md pl-1 pr-2 py-1 text-sm font-semibold', (pathname==='/resources'||pathname==='/')&&!store.activeCollectionId?'bg-hover-bg text-white':'hover:bg-primary/10')} onClick={e=>{e.currentTarget.focus();choose(null);}} onDoubleClick={()=>setRootOpen(!rootExpanded)} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();e.stopPropagation();setRootOpen(!rootExpanded);choose(null);}}}><SkillRepositoryIcon className="size-3.5 shrink-0"/><span className="min-w-0 flex-1 truncate text-left">{t('sidebar.resourceLibrary')}</span>{statistics(undefined,count)}</button>
       </div>
-      {rootExpanded&&<div><button data-group-select className={cn('flex w-full items-center gap-2 rounded-md pl-6 pr-2 py-1 text-sm',store.activeCollectionId===UNFILED_COLLECTION&&'bg-primary/15 text-primary')} onClick={e=>{e.currentTarget.focus();choose(UNFILED_COLLECTION);}}><Inbox className="size-3.5"/><span className="flex-1 text-left">{t('groups.unfiled')}</span><span className="text-xs">{skills.filter(skill=>!assigned.has(skill.id)).length}</span></button>{render(null,0)}</div>}
+      {rootExpanded&&<div><button data-group-select className={cn('flex w-full items-center gap-2 rounded-md pl-6 pr-2 py-1 text-sm',store.activeCollectionId===UNFILED_COLLECTION&&'bg-primary/15 text-primary')} onClick={e=>{e.currentTarget.focus();choose(UNFILED_COLLECTION);}}><Inbox className="size-3.5"/><span className="flex-1 text-left">{t('groups.unfiled')}</span>{statistics(new Set(skills.filter(skill=>!assigned.has(skill.id)).map(skill=>skill.id)))}</button>{render(null,0)}</div>}
     </div>
     {menu&&<div ref={menuRef} role="menu" className="fixed z-50 min-w-44 rounded-md border border-border bg-popover p-1 shadow-md" style={{left:menu.x,top:menu.y}} onClick={e=>e.stopPropagation()} onKeyDown={e=>{if(e.key==='Escape'){setMenu(null);tree.current?.querySelector<HTMLButtonElement>('button')?.focus();}if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const buttons=Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const i=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[(i+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}}}>
       <button role="menuitem" className="group-menu-item" onClick={()=>open('create',undefined,menu.item?.id??null)}>{t(menu.item?'groups.createChild':'groups.create')}</button>

@@ -1695,6 +1695,7 @@
     "repair": "修复链接"
   },
   "groups": {
+    "countSummary": "{{repositories}} 个仓库 / {{skills}} 个技能",
     "detachItem": "移出分组",
     "export": "导出分组清单",
     "title": "分组",

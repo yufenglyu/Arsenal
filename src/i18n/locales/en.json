@@ -1705,6 +1705,7 @@
     "repair": "Repair links"
   },
   "groups": {
+    "countSummary": "{{repositories}} repositories / {{skills}} skills",
     "detachItem": "Remove from group",
     "export": "Export group list",
     "title": "Groups",
