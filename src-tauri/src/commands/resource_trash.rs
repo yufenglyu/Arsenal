@@ -5,17 +5,22 @@ use crate::{
     AppState,
 };
 use base64::Engine;
-use flate2::{read::GzDecoder, write::GzEncoder, Compression};
+use flate2::read::GzDecoder;
+#[path = "resource_trash_archive.rs"]
+mod archive;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+#[cfg(test)]
+use std::io::Write;
 use std::{
     collections::{BTreeMap, HashSet},
-    io::{Read, Write},
+    io::Read,
     path::{Component, Path, PathBuf},
 };
 use tauri::State;
 
-const LIMIT: u64 = 256 * 1024 * 1024;
+// Only the old inline JSON format used this bound. New file archives have no such cap.
+const LEGACY_JSON_LIMIT: u64 = 256 * 1024 * 1024;
 const OWNED_TABLES: &[&str] = &[
     "skills",
     "skill_sources",
@@ -52,9 +57,11 @@ pub struct Entry {
     pub phase: String,
 }
 
+#[cfg(test)]
 fn encode(payload: &Payload) -> Result<String, String> {
+    use flate2::{write::GzEncoder, Compression};
     let bytes = serde_json::to_vec(payload).map_err(|e| e.to_string())?;
-    if bytes.len() as u64 > LIMIT {
+    if bytes.len() as u64 > LEGACY_JSON_LIMIT {
         return Err("TRASH_TOO_LARGE".into());
     }
     let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
@@ -64,7 +71,7 @@ fn encode(payload: &Payload) -> Result<String, String> {
 }
 fn decode(value: &Value) -> Result<Payload, String> {
     let text = value["payload"].as_str().ok_or("TRASH_UNAVAILABLE")?;
-    if text.len() as u64 > LIMIT * 2 {
+    if text.len() as u64 > LEGACY_JSON_LIMIT * 2 {
         return Err("TRASH_TOO_LARGE".into());
     }
     let bytes = base64::engine::general_purpose::STANDARD
@@ -72,10 +79,10 @@ fn decode(value: &Value) -> Result<Payload, String> {
         .map_err(|_| "TRASH_UNAVAILABLE")?;
     let mut output = Vec::new();
     GzDecoder::new(bytes.as_slice())
-        .take(LIMIT + 1)
+        .take(LEGACY_JSON_LIMIT + 1)
         .read_to_end(&mut output)
         .map_err(|_| "TRASH_UNAVAILABLE")?;
-    if output.len() as u64 > LIMIT {
+    if output.len() as u64 > LEGACY_JSON_LIMIT {
         return Err("TRASH_TOO_LARGE".into());
     }
     serde_json::from_slice(&output).map_err(|_| "TRASH_UNAVAILABLE".into())
@@ -102,6 +109,10 @@ fn annotation_matches(row: &Value, selected: &HashSet<String>) -> bool {
             .any(|value| value.as_str().is_some_and(|id| selected.contains(id)))
     })
 }
+pub(crate) fn cleanup_archives(pool: &AppStore) {
+    archive::cleanup_unreferenced(pool);
+}
+
 pub(crate) async fn capture(
     pool: &AppStore,
     name: String,
@@ -113,11 +124,11 @@ pub(crate) async fn capture(
     if selected.is_empty() {
         return Err("TRASH_NOT_FOUND".into());
     }
+    cleanup_archives(pool);
     let root = crate::path_utils::path_without_verbatim_prefix(
         &db::get_skill_resource_library_dir(pool).await?,
     );
     let mut directories = Vec::new();
-    let mut size = 0u64;
     for path in paths {
         let path = crate::path_utils::path_without_verbatim_prefix(&path);
         repository_mirror::ensure_owned_path(&root, &path)?;
@@ -126,10 +137,6 @@ pub(crate) async fn capture(
         } else {
             BTreeMap::new()
         };
-        size += files.values().map(|bytes| bytes.len() as u64).sum::<u64>();
-        if size > LIMIT / 2 {
-            return Err("TRASH_TOO_LARGE".into());
-        }
         directories.push(Directory { path, files });
     }
     let mut installations = Vec::new();
@@ -140,10 +147,6 @@ pub(crate) async fn capture(
     for installation in &installations {
         if installation.link_type == "copy" && Path::new(&installation.installed_path).exists() {
             let files = remote_sources::local_skill_files(Path::new(&installation.installed_path))?;
-            size += files.values().map(|bytes| bytes.len() as u64).sum::<u64>();
-            if size > LIMIT / 2 {
-                return Err("TRASH_TOO_LARGE".into());
-            }
             copies.push(Directory {
                 path: installation.installed_path.clone().into(),
                 files,
@@ -196,7 +199,6 @@ pub(crate) async fn capture(
         installations,
         copies,
     };
-    let encoded = encode(&payload)?;
     let entry = Entry {
         id: uuid::Uuid::new_v4().to_string(),
         name,
@@ -207,12 +209,18 @@ pub(crate) async fn capture(
         reason: reason.into(),
         phase: "deleting".into(),
     };
-    pool.write(|data| {
-        data.table_mut("resource_trash")
-            .insert(entry.id.clone(), json!({"entry":entry,"payload":encoded}));
-        Ok(())
-    })
-    .await?;
+    archive::write(pool, &entry.id, &payload)?;
+    if let Err(error) = pool
+        .write(|data| {
+            data.table_mut("resource_trash")
+                .insert(entry.id.clone(), json!({"entry":entry,"archiveVersion":2}));
+            Ok(())
+        })
+        .await
+    {
+        archive::remove(pool, &entry.id);
+        return Err(error);
+    }
     Ok(entry)
 }
 fn exclusions(
@@ -275,7 +283,7 @@ fn exclusions(
     Ok(())
 }
 async fn phase(pool: &AppStore, id: &str, value: &str) -> Result<(), String> {
-    let (entry, payload) = read(pool, id)?;
+    let (entry, payload) = read_metadata(pool, id)?;
     pool.write(|data| {
         if value == "active" && entry.reason == "delete" {
             exclusions(data, &payload, id, true)?;
@@ -318,16 +326,29 @@ async fn phase(pool: &AppStore, id: &str, value: &str) -> Result<(), String> {
     .await
 }
 fn read(pool: &AppStore, id: &str) -> Result<(Entry, Payload), String> {
-    pool.read(|data| {
-        let row = data
-            .table("resource_trash")
+    read_payload(pool, id, true)
+}
+fn read_metadata(pool: &AppStore, id: &str) -> Result<(Entry, Payload), String> {
+    read_payload(pool, id, false)
+}
+fn read_payload(
+    pool: &AppStore,
+    id: &str,
+    include_files: bool,
+) -> Result<(Entry, Payload), String> {
+    let row = pool.read(|data| {
+        data.table("resource_trash")
             .get(id)
-            .ok_or("TRASH_NOT_FOUND")?;
-        Ok((
-            serde_json::from_value(row["entry"].clone()).map_err(|_| "TRASH_UNAVAILABLE")?,
-            decode(row)?,
-        ))
-    })
+            .cloned()
+            .ok_or_else(|| "TRASH_NOT_FOUND".to_owned())
+    })?;
+    let entry = serde_json::from_value(row["entry"].clone()).map_err(|_| "TRASH_UNAVAILABLE")?;
+    let payload = if row["archiveVersion"].as_u64() == Some(2) {
+        archive::read(pool, id, include_files)?
+    } else {
+        decode(&row)?
+    };
+    Ok((entry, payload))
 }
 pub(crate) fn list(pool: &AppStore) -> Result<Vec<Entry>, String> {
     pool.read(|data| {
@@ -588,11 +609,13 @@ pub(crate) async fn restore_locked(
         data.table_mut("resource_trash").remove(id);
         Ok(())
     })
-    .await
+    .await?;
+    archive::remove(pool, id);
+    Ok(())
 }
 
 fn directory_relative(root: &Path, entry: &Entry, pool: &AppStore) -> Result<String, String> {
-    let (_, payload) = read(pool, &entry.id)?;
+    let (_, payload) = read_metadata(pool, &entry.id)?;
     let path = &payload.directories.first().ok_or("UNSAFE_TARGET")?.path;
     Ok(path
         .strip_prefix(root)
@@ -609,12 +632,15 @@ pub(crate) async fn reimport_prepared(
 ) -> Result<github::GitHubRepoImportResult, String> {
     // Reimport creates fresh records. An overwrite must not target an old record
     // removed below, including requests persisted by older clients.
-    let selections: Vec<_> = selections.into_iter().map(|mut selection| {
-        if selection.resolution != github::DuplicateResolution::Rename {
-            selection.renamed_skill_id = None;
-        }
-        selection
-    }).collect();
+    let selections: Vec<_> = selections
+        .into_iter()
+        .map(|mut selection| {
+            if selection.resolution != github::DuplicateResolution::Rename {
+                selection.renamed_skill_id = None;
+            }
+            selection
+        })
+        .collect();
     // Validate the entire incoming selection before the old repository is touched.
     let candidates = super::repository_import_rules::candidates(&repo, snapshot)?;
     if selections.is_empty()
@@ -662,7 +688,7 @@ pub(crate) async fn reimport_prepared(
         skills::delete_resource_skill_bundle_impl(pool,&relative,skills::DeleteCentralSkillBundleOptions{cascade_uninstall:true}).await?;
         removed=true;
         let result=github::import_prepared_snapshot(pool,repo,snapshot,selections,app,None).await?;
-        let (_,payload)=read(pool,&entry.id)?;
+        let (_,payload)=read_metadata(pool,&entry.id)?;
         let new_ids:Vec<_>=result.imported_skills.iter().map(|skill|skill.imported_skill_id.clone()).collect();
         let old_ids=ids(&payload);
         pool.write(|data|{
@@ -733,12 +759,16 @@ pub async fn purge_resource_trash(
 }
 pub(crate) async fn purge(pool: &AppStore, ids: Vec<String>) -> Result<(), String> {
     pool.write(|data| {
-        for id in ids {
-            data.table_mut("resource_trash").remove(&id);
+        for id in &ids {
+            data.table_mut("resource_trash").remove(id);
         }
         Ok(())
     })
-    .await
+    .await?;
+    for id in &ids {
+        archive::remove(pool, id);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -918,21 +948,45 @@ mod tests {
     #[tokio::test]
     async fn reimport_selected_variant_does_not_treat_preview_id_as_deleted_update_target() {
         let (_temp, pool, repo, mut snapshot) = fixture().await;
-        snapshot.files.insert("plugins/demo/skills/shared/SKILL.md".into(),b"---\nname: shared\ndescription: variant\n---\nDifferent variant".to_vec());
-        let candidates=super::super::repository_import_rules::candidates(&repo,&snapshot).unwrap();
-        assert_eq!(candidates.len(),2);
-        let chosen=&candidates[0];
+        snapshot.files.insert(
+            "plugins/demo/skills/shared/SKILL.md".into(),
+            b"---\nname: shared\ndescription: variant\n---\nDifferent variant".to_vec(),
+        );
+        let candidates =
+            super::super::repository_import_rules::candidates(&repo, &snapshot).unwrap();
+        assert_eq!(candidates.len(), 2);
+        let chosen = &candidates[0];
         // Older clients sent the default rename input even for Overwrite.
-        let selections=vec![github::GitHubSkillImportSelection {source_path:chosen.source_path.clone(),resolution:github::DuplicateResolution::Overwrite,renamed_skill_id:Some(chosen.skill_id.clone())}];
-        let result=reimport_prepared(&pool,repo.clone(),&snapshot,selections,None).await.unwrap();
-        assert_eq!(result.imported_skills.len(),1);
-        assert_eq!(db::get_resource_library_skills(&pool).await.unwrap().len(),1);
-        let rules=super::super::repository_import_rules::load(&pool,"example/tools").await.unwrap().unwrap();
-        assert_eq!(rules.groups["shared"],vec![chosen.source_path.clone()]);
-        let next=super::super::repository_import_rules::update_candidates(&repo,&snapshot,Some(&rules)).unwrap();
-        assert_eq!(next.len(),1);
-        assert_eq!(next[0].source_path,chosen.source_path);
-        assert_eq!(db::notebooks::list(&pool).await.unwrap()[0].notebook,"preserved notebook");
+        let selections = vec![github::GitHubSkillImportSelection {
+            source_path: chosen.source_path.clone(),
+            resolution: github::DuplicateResolution::Overwrite,
+            renamed_skill_id: Some(chosen.skill_id.clone()),
+        }];
+        let result = reimport_prepared(&pool, repo.clone(), &snapshot, selections, None)
+            .await
+            .unwrap();
+        assert_eq!(result.imported_skills.len(), 1);
+        assert_eq!(
+            db::get_resource_library_skills(&pool).await.unwrap().len(),
+            1
+        );
+        let rules = super::super::repository_import_rules::load(&pool, "example/tools")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(rules.groups["shared"], vec![chosen.source_path.clone()]);
+        let next = super::super::repository_import_rules::update_candidates(
+            &repo,
+            &snapshot,
+            Some(&rules),
+        )
+        .unwrap();
+        assert_eq!(next.len(), 1);
+        assert_eq!(next[0].source_path, chosen.source_path);
+        assert_eq!(
+            db::notebooks::list(&pool).await.unwrap()[0].notebook,
+            "preserved notebook"
+        );
     }
     #[tokio::test]
     async fn failed_reimport_restores_original_repository_and_annotations() {
@@ -1044,6 +1098,133 @@ mod tests {
         );
     }
     #[tokio::test]
+    async fn repository_archive_does_not_expand_binary_files_into_json_number_arrays() {
+        let (_temp, pool, repo, _snapshot) = fixture().await;
+        let root = db::get_skill_resource_library_dir(&pool).await.unwrap();
+        let directory =
+            super::super::repository_address::directory(&pool, &root, &repo.owner, "example/tools")
+                .await
+                .unwrap();
+        let file = directory.join("large-resource.bin");
+        let mut output = std::fs::File::create(&file).unwrap();
+        let chunk = vec![122u8; 1024 * 1024];
+        for _ in 0..73 {
+            output.write_all(&chunk).unwrap();
+        }
+        drop(output);
+        let relative = directory
+            .strip_prefix(&root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        trash_bundle(
+            &pool,
+            &relative,
+            skills::DeleteCentralSkillBundleOptions {
+                cascade_uninstall: true,
+            },
+        )
+        .await
+        .unwrap();
+        let entry = list(&pool).unwrap().remove(0);
+        assert!(archive::path(&pool, &entry.id).unwrap().exists());
+        assert!(pool
+            .read(|data| Ok(data.table("resource_trash")[&entry.id]
+                .get("payload")
+                .is_none()))
+            .unwrap());
+        restore_locked(&pool, &entry.id, false).await.unwrap();
+        assert!(!archive::path(&pool, &entry.id).unwrap().exists());
+        assert_eq!(std::fs::metadata(&file).unwrap().len(), 73 * 1024 * 1024);
+        let mut restored = std::fs::File::open(&file).unwrap();
+        let mut buffer = vec![0; 1024 * 1024];
+        for _ in 0..73 {
+            restored.read_exact(&mut buffer).unwrap();
+            assert!(buffer.iter().all(|byte| *byte == 122));
+        }
+    }
+    #[tokio::test]
+    async fn archive_cleanup_preserves_live_records_and_only_discards_owned_orphans() {
+        let (_temp, pool, _repo, _snapshot) = fixture().await;
+        let skill = db::get_resource_library_skills(&pool)
+            .await
+            .unwrap()
+            .remove(0);
+        trash_skill(
+            &pool,
+            &skill.id,
+            skills::DeleteResourceSkillOptions {
+                cascade_uninstall: true,
+            },
+        )
+        .await
+        .unwrap();
+        let entry = list(&pool).unwrap().remove(0);
+        let live = archive::path(&pool, &entry.id).unwrap();
+        let orphan = archive::path(&pool, &uuid::Uuid::new_v4().to_string()).unwrap();
+        std::fs::write(&orphan, b"orphan").unwrap();
+        let other = live.parent().unwrap().join("personal.zip");
+        std::fs::write(&other, b"keep").unwrap();
+        cleanup_archives(&pool);
+        assert!(live.exists());
+        assert!(!orphan.exists());
+        assert!(other.exists());
+        restore_locked(&pool, &entry.id, false).await.unwrap();
+    }
+    #[tokio::test]
+    async fn legacy_inline_archive_remains_restorable() {
+        let (_temp, pool, _repo, _snapshot) = fixture().await;
+        let skill = db::get_resource_library_skills(&pool)
+            .await
+            .unwrap()
+            .remove(0);
+        trash_skill(
+            &pool,
+            &skill.id,
+            skills::DeleteResourceSkillOptions {
+                cascade_uninstall: true,
+            },
+        )
+        .await
+        .unwrap();
+        let entry = list(&pool).unwrap().remove(0);
+        let (_, payload) = read(&pool, &entry.id).unwrap();
+        let encoded = encode(&payload).unwrap();
+        pool.write(|data| {
+            data.table_mut("resource_trash")
+                .insert(entry.id.clone(), json!({"entry":entry,"payload":encoded}));
+            Ok(())
+        })
+        .await
+        .unwrap();
+        archive::remove(&pool, &entry.id);
+        restore_locked(&pool, &entry.id, false).await.unwrap();
+        assert!(Path::new(&skill.file_path).exists());
+    }
+    #[tokio::test]
+    async fn archive_write_failure_leaves_original_files_and_records_untouched() {
+        let (_temp, pool, _repo, _snapshot) = fixture().await;
+        let skills = db::get_resource_library_skills(&pool).await.unwrap();
+        std::fs::write(pool.directory().join("trash"), b"not a directory").unwrap();
+        assert!(trash_skill(
+            &pool,
+            &skills[0].id,
+            skills::DeleteResourceSkillOptions {
+                cascade_uninstall: true
+            }
+        )
+        .await
+        .is_err());
+        assert_eq!(
+            db::get_resource_library_skills(&pool).await.unwrap().len(),
+            skills.len()
+        );
+        assert!(skills
+            .iter()
+            .all(|skill| Path::new(&skill.file_path).exists()));
+        assert!(list(&pool).unwrap().is_empty());
+    }
+    #[tokio::test]
     async fn trash_survives_store_restart_without_exposing_payload_in_the_listing() {
         let (_temp, pool, _repo, _snapshot) = fixture().await;
         let skill = db::get_resource_library_skills(&pool)
@@ -1087,7 +1268,9 @@ mod tests {
         .await
         .unwrap();
         let entry = list(&pool).unwrap().remove(0);
+        assert!(archive::path(&pool, &entry.id).unwrap().exists());
         purge(&pool, vec![entry.id.clone()]).await.unwrap();
+        assert!(!archive::path(&pool, &entry.id).unwrap().exists());
         assert!(list(&pool).unwrap().is_empty());
         assert!(restore_locked(&pool, &entry.id, false).await.is_err());
         let rules = super::super::repository_import_rules::load(&pool, "example/tools")
