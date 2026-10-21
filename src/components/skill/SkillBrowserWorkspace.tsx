@@ -193,7 +193,14 @@ export function SkillBrowserWorkspace({ storageKey, skills = [], folders = [], s
   }
   const viewControl = allowFlatView ? <Button type="button" size="icon-sm" variant="ghost" title={t(flat ? "browser.groupedView" : "browser.flatView")} aria-label={t(flat ? "browser.groupedView" : "browser.flatView")} aria-pressed={flat} onClick={switchView}>{flat ? <FolderTree className="size-4"/> : <List className="size-4"/>}</Button> : null;
   return <div ref={root} className="flex min-h-0 min-w-0 flex-1 overflow-hidden" data-testid="skill-browser-workspace">
-    <section tabIndex={0} onKeyDown={expansionKeys} onMouseDown={event => { if (!(event.target as HTMLElement).closest("button,input,textarea,select,a")) event.currentTarget.focus({preventScroll:true}); }} className="flex min-w-0 flex-1 flex-col overflow-hidden outline-none" aria-label={t("browser.list")}>
+    <section tabIndex={0} onKeyDown={expansionKeys} onMouseDown={event => {
+      const target = event.target;
+      // Toolbar focus belongs to its controls. Hiding a details popup while the
+      // browser is still handling its label's mouse press can crash WebView.
+      if (!(target instanceof Element) || !listScroll.current?.contains(target)
+        || target.closest('button,input,textarea,select,a,label,summary,details,[contenteditable="true"],[role="menu"],[role="dialog"]')) return;
+      event.currentTarget.focus({preventScroll:true});
+    }} className="flex min-w-0 flex-1 flex-col overflow-hidden outline-none" aria-label={t("browser.list")}>
       <div className="flex h-11 shrink-0 items-center border-b border-border [&>header]:h-full [&>header]:flex-1 [&>header]:border-b-0" style={{paddingRight: scrollbarWidth}}>{typeof toolbar === "function" ? toolbar(viewControl) : <div className="flex h-full items-center gap-1 px-2">{toolbar}{viewControl}</div>}</div>
       <div ref={listScroll} className="skill-browser-list min-h-0 flex-1 overflow-y-auto overflow-x-hidden [overflow-anchor:none]">
         {loading && !groups.length ? <p className="p-8 text-center text-sm text-muted-foreground">{t("common.loading")}</p> : groups.length ? <SkillBrowserTable {...tableProps} onSelectionChange={keys=>{setSelectedRowKeys(keys);tableProps.onSelectionChange?.(keys);}} statusPath={pathname} statusCollections={collectionsMode} kind={flat ? "skill" : "folder"} tree visibleColumns={collectionsMode ? new Set([...visibleColumns].filter(column => !["skillCount", "githubStars", "installSummary"].includes(column))) : visibleColumns} skills={skills.map(skill => ({...skill, highlighted: selectedSkill && id(selectedSkill) === id(skill), onDetail: () => chooseSkill(skill)}))} folders={treeRows} onToggleColumn={toggleColumn} onResetColumns={resetColumns} stickyHeaderTop="0px" className="rounded-none border-0 shadow-none"/> : <p className="p-8 text-center text-sm text-muted-foreground">{t("browser.noMatches")}</p>}

@@ -165,6 +165,31 @@ import { invoke } from "@/lib/tauri";
 import { ResourceLibraryView } from "@/pages/ResourceLibraryView";
 
 describe("ResourceLibraryView delete", () => {
+  it("does not steal focus or hide scope labels during their mouse press", () => {
+    render(<MemoryRouter><ResourceLibraryView /></MemoryRouter>);
+    const scope = screen.getByLabelText("技能名称");
+    const details = scope.closest("details")!;
+    const summary = details.querySelector("summary")!;
+    details.open = true;
+    summary.focus();
+    fireEvent.mouseDown(scope.closest("label")!);
+    expect(details.open).toBe(true);
+    expect(summary).toHaveFocus();
+    fireEvent.click(scope);
+    expect(scope).not.toBeChecked();
+  });
+  it("keeps the workspace mounted when excluding skill names from an active search", async () => {
+    render(<MemoryRouter><ResourceLibraryView /><AppStatusBar /></MemoryRouter>);
+    const search = screen.getByPlaceholderText("搜索技能仓库...");
+    fireEvent.change(search, {target: {value: "resource-demo"}});
+    const nameScope = screen.getByLabelText("技能名称");
+    fireEvent.click(nameScope);
+    expect(nameScope).not.toBeChecked();
+    expect(search).toBeInTheDocument();
+    fireEvent.click(nameScope);
+    expect(nameScope).toBeChecked();
+    expect(search).toBeInTheDocument();
+  });
   async function switchBrowserViewMode(mode: "all" | "folders") {
     fireEvent.keyDown(await screen.findByRole("region", {name:"技能列表"}), {key:mode === "folders" ? "-" : "+"});
   }
