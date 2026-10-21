@@ -5,7 +5,7 @@ import { openRowActions } from "./rowActions";
 import { AppStatusBar } from "@/components/layout/AppStatusBar";
 import { useRepositorySyncStore } from "@/stores/repositorySyncStore";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { AgentWithStatus, SkillWithLinks } from "@/types";
 
@@ -588,7 +588,10 @@ describe("ResourceLibraryView delete", () => {
   });
 
   it("opens the delete confirmation immediately while the directory preview is pending", async () => {
-    mockPreviewDeleteResourceBundle.mockReturnValueOnce(new Promise(()=>{}));
+    const response=await mockPreviewDeleteResourceBundle("example");
+    mockPreviewDeleteResourceBundle.mockClear();
+    let finish!:(value:unknown)=>void;
+    mockPreviewDeleteResourceBundle.mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));
     render(<MemoryRouter><ResourceLibraryView/></MemoryRouter>);
     await switchBrowserViewMode("folders");
     const folderRow=await screen.findByRole("row",{name:/example/i});
@@ -596,6 +599,10 @@ describe("ResourceLibraryView delete", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(mockDeleteResourceBundle).not.toHaveBeenCalled();
     expect(within(screen.getByRole("dialog")).getByRole("button",{name:/删除目录$|Delete directory$/i})).toBeDisabled();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button",{name:/取消|Cancel/i}));
+    await act(async()=>{finish(response);});
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockDeleteResourceBundle).not.toHaveBeenCalled();
   });
 
   it("previews and confirms deleting a resource directory", async () => {
