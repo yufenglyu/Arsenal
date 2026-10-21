@@ -607,6 +607,14 @@ pub(crate) async fn reimport_prepared(
     selections: Vec<github::GitHubSkillImportSelection>,
     app: Option<&tauri::AppHandle>,
 ) -> Result<github::GitHubRepoImportResult, String> {
+    // Reimport creates fresh records. An overwrite must not target an old record
+    // removed below, including requests persisted by older clients.
+    let selections: Vec<_> = selections.into_iter().map(|mut selection| {
+        if selection.resolution != github::DuplicateResolution::Rename {
+            selection.renamed_skill_id = None;
+        }
+        selection
+    }).collect();
     // Validate the entire incoming selection before the old repository is touched.
     let candidates = super::repository_import_rules::candidates(&repo, snapshot)?;
     if selections.is_empty()
@@ -906,6 +914,25 @@ mod tests {
             restore_locked(&pool, &entry.id, false).await.unwrap_err(),
             "TRASH_RESTORE_CONFLICT"
         );
+    }
+    #[tokio::test]
+    async fn reimport_selected_variant_does_not_treat_preview_id_as_deleted_update_target() {
+        let (_temp, pool, repo, mut snapshot) = fixture().await;
+        snapshot.files.insert("plugins/demo/skills/shared/SKILL.md".into(),b"---\nname: shared\ndescription: variant\n---\nDifferent variant".to_vec());
+        let candidates=super::super::repository_import_rules::candidates(&repo,&snapshot).unwrap();
+        assert_eq!(candidates.len(),2);
+        let chosen=&candidates[0];
+        // Older clients sent the default rename input even for Overwrite.
+        let selections=vec![github::GitHubSkillImportSelection {source_path:chosen.source_path.clone(),resolution:github::DuplicateResolution::Overwrite,renamed_skill_id:Some(chosen.skill_id.clone())}];
+        let result=reimport_prepared(&pool,repo.clone(),&snapshot,selections,None).await.unwrap();
+        assert_eq!(result.imported_skills.len(),1);
+        assert_eq!(db::get_resource_library_skills(&pool).await.unwrap().len(),1);
+        let rules=super::super::repository_import_rules::load(&pool,"example/tools").await.unwrap().unwrap();
+        assert_eq!(rules.groups["shared"],vec![chosen.source_path.clone()]);
+        let next=super::super::repository_import_rules::update_candidates(&repo,&snapshot,Some(&rules)).unwrap();
+        assert_eq!(next.len(),1);
+        assert_eq!(next[0].source_path,chosen.source_path);
+        assert_eq!(db::notebooks::list(&pool).await.unwrap()[0].notebook,"preserved notebook");
     }
     #[tokio::test]
     async fn failed_reimport_restores_original_repository_and_annotations() {

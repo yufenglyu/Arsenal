@@ -66,7 +66,10 @@ export function enqueueGitHubImport(
   batchId?: string,
   reimport = false,
 ) {
-  const chosen = selections.filter((selection) => selection.resolution !== "skip");
+  const chosen = selections.filter((selection) => selection.resolution !== "skip").map(selection=>({
+    sourcePath:selection.sourcePath,resolution:selection.resolution,
+    ...(selection.resolution === "rename"?{renamedSkillId:selection.renamedSkillId?.trim()}:{}),
+  }));
   if (!chosen.length) return null;
   const repository = `${preview.repo.owner}/${preview.repo.repo}`.toLowerCase();
   const importUrl = /^[a-f0-9]{40}$/i.test(preview.repo.branch ?? "")

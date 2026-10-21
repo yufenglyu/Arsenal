@@ -25,8 +25,8 @@ it("defaults to one source variant and submits the alternative as skipped", () =
   expect(screen.getByText("已合并 1 份相同副本")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button",{name:"导入 1 项技能"}));
   expect(submitPreparedImport).toHaveBeenCalledWith("import",preview,[
-    expect.objectContaining({sourcePath:"skills/shared/SKILL.md",resolution:"overwrite"}),
-    expect.objectContaining({sourcePath:"plugins/demo/skills/shared/SKILL.md",resolution:"skip"}),
+    {sourcePath:"skills/shared/SKILL.md",resolution:"overwrite"},
+    {sourcePath:"plugins/demo/skills/shared/SKILL.md",resolution:"skip"},
   ]);
 });
 it("switches source variants without selecting both, including after select-all", () => {
@@ -39,4 +39,14 @@ it("switches source variants without selecting both, including after select-all"
   fireEvent.click(screen.getByRole("checkbox",{name:"全选"}));
   variants=screen.getAllByRole("checkbox",{name:"Shared"});
   expect(variants[0]).toBeChecked();expect(variants[1]).not.toBeChecked();
+});
+
+it("submits only the newly selected variant without an update target id",()=>{
+  render(<TaskImportReview taskId="reimport" onLater={vi.fn()}/>);
+  fireEvent.click(screen.getAllByRole("checkbox",{name:"Shared"})[1]);
+  fireEvent.click(screen.getByRole("button",{name:"导入 1 项技能"}));
+  expect(submitPreparedImport).toHaveBeenCalledWith("reimport",preview,[
+    {sourcePath:"skills/shared/SKILL.md",resolution:"skip"},
+    {sourcePath:"plugins/demo/skills/shared/SKILL.md",resolution:"overwrite"},
+  ]);
 });

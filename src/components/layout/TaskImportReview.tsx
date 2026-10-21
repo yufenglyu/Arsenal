@@ -92,7 +92,8 @@ function ImportChoices({
         resolution: choices[skill.sourcePath].selected
           ? choices[skill.sourcePath].resolution
           : "skip",
-        renamedSkillId: choices[skill.sourcePath].rename.trim(),
+        ...(choices[skill.sourcePath].selected && choices[skill.sourcePath].resolution === "rename"
+          ? {renamedSkillId: choices[skill.sourcePath].rename.trim()} : {}),
       })),
     );
     setError(!result);
