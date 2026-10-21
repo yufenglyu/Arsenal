@@ -47,7 +47,7 @@ function ImportChoices({
       preview.skills.map((skill) => [
         skill.sourcePath,
         {
-          selected: true,
+          selected: skill.recommended !== false,
           resolution: (skill.conflict
             ? "skip"
             : "overwrite") as DuplicateResolution,
@@ -57,6 +57,7 @@ function ImportChoices({
     ),
   );
   const [error, setError] = useState(false);
+  const selectableCount = preview.skills.filter(skill => skill.recommended !== false).length;
   const selected = preview.skills.filter(
     (skill) => choices[skill.sourcePath]?.selected,
   );
@@ -73,10 +74,15 @@ function ImportChoices({
     );
   });
   const patch = (path: string, change: Partial<(typeof choices)[string]>) =>
-    setChoices((previous) => ({
-      ...previous,
-      [path]: { ...previous[path], ...change },
-    }));
+    setChoices(previous => {
+      const next = {...previous};
+      const skill = preview.skills.find(item => item.sourcePath === path);
+      if (change.selected && skill && (skill.variantCount ?? 0) > 1) {
+        for (const variant of preview.skills) if (variant.skillName.trim().toLowerCase() === skill.skillName.trim().toLowerCase()) next[variant.sourcePath] = {...next[variant.sourcePath], selected:false};
+      }
+      next[path] = {...next[path], ...change};
+      return next;
+    });
   const submit = () => {
     const result = submitPreparedImport(
       taskId,
@@ -99,13 +105,13 @@ function ImportChoices({
             type="checkbox"
             checked={
               !!preview.skills.length &&
-              selected.length === preview.skills.length
+              selected.length === selectableCount
             }
             ref={(input) => {
               if (input)
                 input.indeterminate =
                   selected.length > 0 &&
-                  selected.length < preview.skills.length;
+                  selected.length < selectableCount;
             }}
             onChange={(event) => {
               const checked = event.target.checked;
@@ -113,7 +119,7 @@ function ImportChoices({
                 Object.fromEntries(
                   Object.entries(previous).map(([key, item]) => [
                     key,
-                    { ...item, selected: checked },
+                    { ...item, selected: checked && preview.skills.find(skill => skill.sourcePath === key)?.recommended !== false },
                   ]),
                 ),
               );
@@ -139,12 +145,18 @@ function ImportChoices({
               <label className="flex min-w-0 items-center gap-2 text-sm">
                 <input
                   type="checkbox"
+                  aria-label={skill.skillName}
                   checked={item.selected}
                   onChange={(event) =>
                     patch(skill.sourcePath, { selected: event.target.checked })
                   }
                 />
-                <span className="break-all">{skill.skillName}</span>
+                <span className="min-w-0">
+                  <span className="block break-all">{skill.skillName}</span>
+                  <span className="block truncate text-xs text-muted-foreground" title={skill.sourcePath}>{skill.sourcePath}</span>
+                  {!!skill.duplicatePaths?.length && <span className="block text-xs text-muted-foreground" title={skill.duplicatePaths.join("\n")}>{t("githubImport.exactCopies",{count:skill.duplicatePaths.length})}</span>}
+                  {(skill.variantCount ?? 0)>1 && <span className="block text-xs text-muted-foreground">{t("githubImport.sourceVariants",{count:skill.variantCount})}</span>}
+                </span>
                 {skill.conflict && (
                   <span className="text-xs text-muted-foreground">
                     {t("workflow.batch.nameConflict")}

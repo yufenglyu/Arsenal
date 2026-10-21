@@ -1264,7 +1264,11 @@ async fn update_github_repo_source_group(
         });
     }
 
-    let candidates = github_import::fetch_repo_skill_candidates(&repo_ref, auth).await?;
+    let mut repo_ref = repo_ref;
+    repo_ref.branch = remote_ref.clone();
+    let snapshot = github_import::fetch_mirror_snapshot(&repo_ref, auth).await?;
+    let rules = super::repository_import_rules::load(pool, repo).await?;
+    let candidates = super::repository_import_rules::update_candidates(&repo_ref, &snapshot, rules.as_ref())?;
     let existing_keys = group
         .iter()
         .map(|(source, skill)| skill_source_match_keys(source, skill))
@@ -1291,13 +1295,12 @@ async fn update_github_repo_source_group(
             skipped_skills: Vec::new(),
         }
     } else {
-        github_import::import_github_repo_skills_impl(
-            pool,
-            &format!("https://github.com/{repo}"),
-            selections,
-            app,
-        )
-        .await?
+        let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
+        super::repository_address::recover(pool).await?;
+        if super::repository_import_rules::load(pool, repo).await? != rules { return Err("PREVIEW_EXPIRED".into()); }
+        github_import::import_prepared_snapshot_with_directories(
+            pool, repo_ref, &snapshot, selections, app, None, &HashMap::new(), None,
+        ).await?
     };
     let imported_ids = result
         .imported_skills
@@ -2903,6 +2906,7 @@ mod repository_file_tests {
             updated_at: "2026-10-10".into(),
         };
         let candidate = github_import::RemoteSkillCandidate {
+            duplicate_paths: Vec::new(),
             skill_id: "last30days".into(),
             skill_name: "last30days".into(),
             description: None,

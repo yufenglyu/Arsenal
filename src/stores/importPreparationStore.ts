@@ -133,7 +133,7 @@ registerTaskExecutor(PREPARE_GITHUB_IMPORT, async (args) => {
   }
 });
 registerTaskInputRequirement(PREPARE_GITHUB_IMPORT, (result) =>
-  (result as GitHubRepoPreview).skills.some((skill) => !!skill.conflict));
+  (result as GitHubRepoPreview).skills.some((skill) => !!skill.conflict || (skill.variantCount ?? 0) > 1));
 registerTaskResult(PREPARE_GITHUB_IMPORT, (step, result) => {
   const queue = useTaskQueueStore.getState();
   const task = queue.tasks.find((task) => task.batchId === step.args.requestId);
@@ -151,11 +151,11 @@ registerTaskResult(PREPARE_GITHUB_IMPORT, (step, result) => {
   }
   enqueueGitHubImport(String(step.args.repoUrl), preview, preview.skills.map((skill) => ({
     sourcePath: skill.sourcePath,
-    resolution: "overwrite",
+    resolution: skill.recommended === false ? "skip" : "overwrite",
   })), task.batchId);
 });
 for (const command of ["import_github_repo_skills", "add_local_resource_skills"]) {
   registerTaskResult(command, async () => {
-    await useResourceLibraryStore.getState().loadResourceLibrary();
+    await useResourceLibraryStore.getState().loadResourceLibrary({fresh:true});
   });
 }

@@ -225,6 +225,8 @@ pub struct Coverage {
 #[derive(Clone, Serialize, Deserialize)]
 struct Snapshot {
     version: u32,
+    #[serde(default)]
+    import_rules: Option<super::repository_import_rules::ImportRules>,
     repo: github::GitHubRepoRef,
     contents: github::GitHubRepoSnapshot,
     originals: Vec<(db::SkillSource, db::Skill)>,
@@ -323,8 +325,7 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<Vec<github::RemoteSkillCandi
             return Err("UNSAFE_SNAPSHOT_PATH".into());
         }
     }
-    let candidates =
-        github::build_repo_skill_candidates_from_snapshot(&snapshot.repo, &snapshot.contents)?;
+    let candidates = super::repository_import_rules::update_candidates(&snapshot.repo, &snapshot.contents, snapshot.import_rules.as_ref())?;
     let mut targets = HashSet::new();
     for candidate in &candidates {
         if !targets.insert(candidate.skill_directory_name.to_lowercase()) {
@@ -583,6 +584,7 @@ pub async fn check_with_retained(
             }
             let snapshot = Snapshot {
                 version: 1,
+                import_rules: super::repository_import_rules::load(pool, &repository).await?,
                 repo,
                 contents,
                 originals,
@@ -682,6 +684,9 @@ async fn apply_contents(pool: &AppStore, id: &str, snapshot: &Snapshot) -> Resul
     linker::normalize_resource_backed_central_records_impl(pool).await?;
     let candidates = validate_snapshot(snapshot)?;
     let repository = format!("{}/{}", snapshot.repo.owner, snapshot.repo.repo);
+    if super::repository_import_rules::load(pool, &repository).await? != snapshot.import_rules {
+        return Err("PREVIEW_EXPIRED".into());
+    }
     let root = db::get_skill_resource_library_dir(pool).await?;
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     let mut current = remote_sources::github_repo_source_groups(pool, false)
@@ -801,6 +806,7 @@ async fn apply_contents(pool: &AppStore, id: &str, snapshot: &Snapshot) -> Resul
                 None,
                 None,
                 &directories,
+                None,
             )
             .await?;
         }
@@ -1130,6 +1136,7 @@ mod tests {
             .unwrap();
         let snapshot = Snapshot {
             version: 1,
+            import_rules: None,
             repo: resolved,
             contents,
             originals: vec![],
@@ -1198,6 +1205,7 @@ mod tests {
             pool,
             Snapshot {
                 version: 1,
+                import_rules: None,
                 repo,
                 contents,
                 originals: vec![],
@@ -1206,6 +1214,7 @@ mod tests {
         )
     }
     async fn capture(pool: &AppStore, mut snapshot: Snapshot) -> Snapshot {
+        snapshot.import_rules = super::super::repository_import_rules::load(pool, "example/fixtures").await.unwrap();
         linker::normalize_resource_backed_central_records_impl(pool)
             .await
             .unwrap();
@@ -1321,7 +1330,7 @@ mod tests {
     async fn mirror_imports_all_overwrites_edits_and_removes_extra_files_and_skills() {
         let (_dir, pool, snapshot) = fixture().await;
         // Simulate a previous selective import of only one remote skill.
-        github::import_prepared_snapshot(
+        github::import_prepared_snapshot_with_directories(
             &pool,
             snapshot.repo.clone(),
             &snapshot.contents,
@@ -1331,6 +1340,8 @@ mod tests {
                 renamed_skill_id: None,
             }],
             None,
+            None,
+            &std::collections::HashMap::new(),
             None,
         )
         .await
@@ -1527,6 +1538,46 @@ mod tests {
         apply(&pool, &id).await.unwrap();
         assert!(!target.join("empty").exists());
         assert!(!target.join(".git").exists());
+    }
+    #[tokio::test]
+    async fn new_import_deduplicates_and_future_mirrors_keep_the_source_choice() {
+        let (_dir, pool, mut snapshot) = fixture().await;
+        snapshot.contents.files.clear();
+        let content = b"---\nname: shared\ndescription: demo\n---\nOriginal".to_vec();
+        for root in ["skills/shared", "plugins/demo/skills/shared"] {
+            snapshot.contents.files.insert(format!("{root}/SKILL.md"),content.clone());
+            snapshot.contents.files.insert(format!("{root}/scripts/run.py"),b"same".to_vec());
+        }
+        let selections = ["skills/shared/SKILL.md","plugins/demo/skills/shared/SKILL.md"].into_iter().map(|path|github::GitHubSkillImportSelection {
+            source_path:path.into(),resolution:github::DuplicateResolution::Overwrite,renamed_skill_id:None,
+        }).collect();
+        let result = github::import_prepared_snapshot(&pool,snapshot.repo.clone(),&snapshot.contents,selections,None,None).await.unwrap();
+        assert_eq!(result.imported_skills.len(),1);
+        assert_eq!(db::get_resource_library_skills(&pool).await.unwrap().len(),1);
+        snapshot = capture(&pool,snapshot).await;
+        assert!(snapshot.import_rules.is_some());
+        // The unselected distribution changes and another platform variant appears.
+        snapshot.contents.files.insert("plugins/demo/skills/shared/scripts/run.py".into(),b"different".to_vec());
+        snapshot.contents.files.insert(".claude/skills/shared/SKILL.md".into(),content.clone());
+        snapshot.contents.files.insert("skills/shared/scripts/run.py".into(),b"updated canonical".to_vec());
+        let report = preview(&pool,&snapshot).await.unwrap();
+        assert!(report.added.is_empty());
+        assert_eq!(report.modified.len(),1);
+        let id = persist_snapshot(&pool,&snapshot).await.unwrap();
+        apply(&pool,&id).await.unwrap();
+        let skills = db::get_resource_library_skills(&pool).await.unwrap();
+        assert_eq!(skills.len(),1);
+        assert_eq!(std::fs::read(Path::new(&skills[0].file_path).parent().unwrap().join("scripts/run.py")).unwrap(),b"updated canonical");
+        // New logical skills still arrive, but their identical copies only arrive once.
+        snapshot = capture(&pool,snapshot).await;
+        for root in ["skills/new", "plugins/demo/skills/new"] {
+            snapshot.contents.files.insert(format!("{root}/SKILL.md"),b"---\nname: new\ndescription: new\n---\nNew".to_vec());
+        }
+        let report = preview(&pool,&snapshot).await.unwrap();
+        assert_eq!(report.added.len(),1);
+        let id = persist_snapshot(&pool,&snapshot).await.unwrap();
+        apply(&pool,&id).await.unwrap();
+        assert_eq!(db::get_resource_library_skills(&pool).await.unwrap().len(),2);
     }
     #[tokio::test]
     async fn duplicate_skill_names_in_different_plugins_are_both_imported() {
@@ -1976,6 +2027,7 @@ mod tests {
         };
         let snapshot = Snapshot {
             version: 1,
+            import_rules: None,
             repo: github::GitHubRepoRef {
                 owner: "example".into(),
                 repo: "fixtures".into(),

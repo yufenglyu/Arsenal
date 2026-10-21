@@ -133,8 +133,8 @@ function buildInitialSelections(
       skill.sourcePath,
       {
         selected: shouldFilterToPreferred
-          ? preferredMatches?.has(skill.sourcePath) === true
-          : true,
+          ? preferredMatches?.has(skill.sourcePath) === true && (preferredMatches.size === 1 || skill.recommended !== false)
+          : skill.recommended !== false,
         resolution: skill.conflict ? "skip" : "overwrite",
         renamedSkillId: skill.skillId,
       },
@@ -549,13 +549,16 @@ export function GitHubRepoImportWizard({
     skill: GitHubSkillPreview,
     next: Partial<SelectionState>,
   ) {
-    setSelectionState((current) => ({
-      ...current,
-      [skill.sourcePath]: {
-        ...current[skill.sourcePath],
-        ...next,
-      },
-    }));
+    setSelectionState((current) => {
+      const changed = {...current};
+      if (next.selected && (skill.variantCount ?? 0) > 1) {
+        for (const variant of preview?.skills ?? []) if (variant.skillName.trim().toLowerCase() === skill.skillName.trim().toLowerCase()) {
+          changed[variant.sourcePath] = {...changed[variant.sourcePath], selected: false};
+        }
+      }
+      changed[skill.sourcePath] = {...changed[skill.sourcePath], ...next};
+      return changed;
+    });
   }
 
   function startRenameEditing(skill: GitHubSkillPreview) {
@@ -1292,6 +1295,9 @@ export function GitHubRepoImportWizard({
                                     {skill.skillName}
                                   </div>
                                 </div>
+                                <div className="mt-1 truncate text-xs text-muted-foreground" title={skill.sourcePath}>{skill.sourcePath}</div>
+                                {!!skill.duplicatePaths?.length && <div className="mt-1 text-xs text-muted-foreground" title={skill.duplicatePaths.join("\n")}>{t("githubImport.exactCopies", {count:skill.duplicatePaths.length})}</div>}
+                                {(skill.variantCount ?? 0) > 1 && <div className="mt-1 text-xs text-muted-foreground">{t("githubImport.sourceVariants", {count:skill.variantCount})}</div>}
                                 <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
                                   {skill.description ||
                                     t("githubImport.githubImportNoDescription")}

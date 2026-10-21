@@ -57,6 +57,11 @@ pub struct GitHubSkillPreview {
     pub skill_directory_name: String,
     pub download_url: String,
     pub conflict: Option<GitHubSkillConflict>,
+    #[serde(default)]
+    pub duplicate_paths: Vec<String>,
+    #[serde(default)]
+    pub variant_count: usize,
+    pub recommended: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -132,6 +137,8 @@ struct SkillFrontmatter {
 pub(crate) struct RemoteSkillCandidate {
     pub(crate) source_path: String,
     pub(crate) source_manifest_path: String,
+    #[serde(default)]
+    pub(crate) duplicate_paths: Vec<String>,
     pub(crate) skill_id: String,
     pub(crate) skill_name: String,
     pub(crate) description: Option<String>,
@@ -320,7 +327,9 @@ async fn preview_github_repo_import_impl(
         repo.branch = fetch_repo_head_ref(&repo, auth.as_deref()).await?;
     }
     cache_repository_stars(pool, &repo).await?;
-    let candidates = fetch_repo_skill_candidates(&repo, auth.as_deref()).await?;
+    let client = github_client()?;
+    let snapshot = download_repo_snapshot(&client, &repo, auth.as_deref()).await?;
+    let candidates = super::repository_import_rules::candidates(&repo, &snapshot)?;
     let skills = build_preview_skills(pool, &repo, &candidates).await?;
 
     if skills.is_empty() {
@@ -346,11 +355,13 @@ pub(crate) async fn import_github_repo_snapshot_impl(
         .map(str::trim)
         .filter(|value| !value.is_empty());
     let mut selections = Vec::new();
+    let mut selected_names = HashSet::new();
 
     for skill in preview.skills {
         if let Some(filter) = filter {
             let matches_filter = skill.skill_id.eq_ignore_ascii_case(filter)
                 || skill.skill_directory_name.eq_ignore_ascii_case(filter)
+                || skill.duplicate_paths.iter().any(|path|path.eq_ignore_ascii_case(filter))
                 || skill.source_path.eq_ignore_ascii_case(filter)
                 || skill
                     .source_path
@@ -359,6 +370,7 @@ pub(crate) async fn import_github_repo_snapshot_impl(
                 continue;
             }
         }
+        if !selected_names.insert(skill.skill_name.trim().to_lowercase()) { continue; }
         selections.push(GitHubSkillImportSelection {
             source_path: skill.source_path,
             resolution: if skill.conflict.is_some() && !input.overwrite {
@@ -441,6 +453,21 @@ pub(crate) async fn import_prepared_snapshot(
     app: Option<&AppHandle>,
     operation: Option<&super::github_cancellation::Operation>,
 ) -> Result<GitHubRepoImportResult, String> {
+    let candidates = super::repository_import_rules::candidates(&repo, snapshot)?;
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+    // Prefer a retained selection over a skipped alias, independent of request order.
+    let mut selections = selections;
+    selections.sort_by_key(|item|item.resolution == DuplicateResolution::Skip);
+    for mut selection in selections {
+        let candidate = candidates.iter().find(|candidate| candidate.source_path == selection.source_path || candidate.duplicate_paths.contains(&selection.source_path))
+            .ok_or_else(||format!("Selected skill '{}' is no longer available in the preview.",selection.source_path))?;
+        selection.source_path = candidate.source_path.clone();
+        if seen.insert(selection.source_path.clone()) { normalized.push(selection); }
+    }
+    let selections = normalized;
+    let selected = selections.iter().filter(|item|item.resolution != DuplicateResolution::Skip).map(|item|item.source_path.clone()).collect();
+    let rules = super::repository_import_rules::selected_rules(&candidates, &selected);
     import_prepared_snapshot_with_directories(
         pool,
         repo,
@@ -449,10 +476,12 @@ pub(crate) async fn import_prepared_snapshot(
         app,
         operation,
         &HashMap::new(),
+        Some(&rules),
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn import_prepared_snapshot_with_directories(
     pool: &AppStore,
     repo: GitHubRepoRef,
@@ -461,6 +490,7 @@ pub(crate) async fn import_prepared_snapshot_with_directories(
     app: Option<&AppHandle>,
     operation: Option<&super::github_cancellation::Operation>,
     directories: &HashMap<String, String>,
+    import_rules: Option<&super::repository_import_rules::ImportRules>,
 ) -> Result<GitHubRepoImportResult, String> {
     let candidates = build_repo_skill_candidates_from_snapshot(&repo, snapshot)?;
     if candidates.is_empty() {
@@ -741,6 +771,15 @@ pub(crate) async fn import_prepared_snapshot_with_directories(
 
     if !imported_skills.is_empty() {
         stage_repository_readme(snapshot, &repository_dir, &mut files_transaction)?;
+    }
+
+    if !imported_skills.is_empty() {
+        if let Some(rules) = import_rules {
+            let repository = format!("{}/{}",repo.owner,repo.repo).to_lowercase();
+            let row = database_transaction.data_mut().table_mut("repository_mirrors").entry(repository.clone())
+                .or_insert_with(||serde_json::json!({"repository":repository,"last_snapshot_id":null}));
+            row["import_rules"] = serde_json::to_value(rules).map_err(|e|e.to_string())?;
+        }
     }
 
     database_transaction
@@ -1034,6 +1073,7 @@ async fn build_preview_skills(
     let existing_skills = db::get_resource_library_skills(pool).await?;
     let repository = format!("{}/{}", repo.owner, repo.repo);
     let mut skills = Vec::with_capacity(candidates.len());
+    let mut recommended_names = HashSet::new();
     for candidate in candidates {
         // An ID collision elsewhere is resolved by namespacing during import.
         // Only files at the actual destination would be overwritten.
@@ -1070,6 +1110,9 @@ async fn build_preview_skills(
             skill_directory_name: candidate.skill_directory_name.clone(),
             download_url: candidate.download_url.clone(),
             conflict,
+            duplicate_paths: candidate.duplicate_paths.clone(),
+            variant_count: candidates.iter().filter(|item|item.skill_name.trim().eq_ignore_ascii_case(candidate.skill_name.trim())).count(),
+            recommended: recommended_names.insert(candidate.skill_name.trim().to_lowercase()),
         });
     }
     Ok(skills)
@@ -1445,15 +1488,6 @@ pub(crate) fn normalize_github_repo_input(input: &str) -> Result<String, String>
     Err("Enter a GitHub repository as owner/repo or https://github.com/owner/repo.".to_string())
 }
 
-pub(crate) async fn fetch_repo_skill_candidates(
-    repo: &GitHubRepoRef,
-    auth_token: Option<&str>,
-) -> Result<Vec<RemoteSkillCandidate>, String> {
-    let client = github_client()?;
-    let snapshot = download_repo_snapshot(&client, repo, auth_token).await?;
-    build_repo_skill_candidates_from_snapshot(repo, &snapshot)
-}
-
 pub(crate) async fn fetch_repo_skill_manifest_paths(
     repo: &GitHubRepoRef,
     auth_token: Option<&str>,
@@ -1573,6 +1607,7 @@ pub(crate) fn build_repo_skill_candidates_from_snapshot(
 
         candidates.push(RemoteSkillCandidate {
             source_path: manifest.source_path.clone(),
+            duplicate_paths: Vec::new(),
             source_manifest_path: manifest.source_manifest_path.clone(),
             skill_id,
             skill_name: frontmatter.name,

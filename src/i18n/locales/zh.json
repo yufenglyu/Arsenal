@@ -1018,6 +1018,8 @@
     "alreadyCentral": "已在共享中心"
   },
   "githubImport": {
+    "exactCopies": "已合并 {{count}} 份相同副本",
+    "sourceVariants": "{{count}} 个同名版本，选择一份导入",
     "title": "GitHub 导入",
     "desc": "从 GitHub 仓库预览并导入技能",
     "sync": "同步",
@@ -1234,6 +1236,7 @@
       "conflict": "目标已存在，请重新处理冲突",
       "other": "操作失败，请检查配置与目标状态后重试",
       "invalidRepository": "请输入 owner/repo 或 https://github.com/owner/repo 格式的 GitHub 仓库地址",
+      "IMPORT_SOURCE_MISSING": "已选导入来源已移除，请重新导入并选择版本。",
       "PREVIEW_EXPIRED": "检查快照已过期，请重新检查仓库。",
       "SNAPSHOT_UNAVAILABLE": "检查快照缺失或损坏，请重新检查仓库。",
       "LOCAL_IDENTITY_CHANGED": "技能来源或存储位置已改变，请重新检查后同步。",

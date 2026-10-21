@@ -19,3 +19,5 @@ pub mod notebook_repository;
 pub mod repository_mirror;
 
 pub mod repository_address;
+
+pub(crate) mod repository_import_rules;

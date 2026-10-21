@@ -357,6 +357,9 @@ export interface GitHubSkillPreview {
   skillDirectoryName: string;
   downloadUrl: string;
   conflict?: GitHubSkillConflict | null;
+  duplicatePaths?: string[];
+  variantCount?: number;
+  recommended?: boolean;
 }
 
 export interface GitHubRepoPreview {

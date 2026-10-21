@@ -1020,6 +1020,8 @@
     "alreadyCentral": "Already in Shared Hub"
   },
   "githubImport": {
+    "exactCopies": "{{count}} identical copies merged",
+    "sourceVariants": "{{count}} same-name variants; choose one to import",
     "title": "GitHub Import",
     "desc": "Preview and import skills from a GitHub repository",
     "sync": "Sync",
@@ -1236,6 +1238,7 @@
       "conflict": "The target already exists. Resolve the conflict again.",
       "other": "Operation failed. Check settings and the target, then retry.",
       "invalidRepository": "Enter a GitHub repository as owner/repo or https://github.com/owner/repo.",
+      "IMPORT_SOURCE_MISSING": "The selected source was removed. Import the repository again to choose a version.",
       "PREVIEW_EXPIRED": "The check snapshot expired. Check the repository again.",
       "SNAPSHOT_UNAVAILABLE": "The check snapshot is missing or damaged. Check again.",
       "LOCAL_IDENTITY_CHANGED": "Skill ownership or location changed. Check again before mirroring.",
