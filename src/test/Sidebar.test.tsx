@@ -520,7 +520,7 @@ describe("Sidebar", () => {
       </MemoryRouter>
     );
     // The collections icon button should be highlighted (exact match)
-    fireEvent.click(screen.getByRole("button",{name:"Frontend 0"}));
+    fireEvent.click(screen.getByRole("button",{name:"Frontend 0/0"}));
     expect(defaultCollectionState.selectGroup).toHaveBeenCalledWith("col-1");
   });
 
