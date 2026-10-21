@@ -502,7 +502,12 @@ export function TaskCenter() {
                         </span>
                       </span>
                     </button>
-                    <div className="shrink-0">{action(batch)}</div>
+                    <div className="flex shrink-0 items-center gap-2">{action(batch)}
+                      <Button variant="ghost" size="icon" title={t("workflow.deleteTaskRecord",{name:batchTitle})} aria-label={t("workflow.deleteTaskRecord",{name:batchTitle})} onClick={()=>{
+                        if(batch.report!==undefined)state.dismissReport();
+                        else {batch.tasks.forEach(task=>useTaskQueueStore.getState().remove(task.id));if(batch.legacy)useAppStatusStore.getState().resetStatus();}
+                      }}><ActionIcon action="delete"/></Button>
+                    </div>
                   </div>
                   {batch.status === "running" && (
                     <div
@@ -546,28 +551,6 @@ export function TaskCenter() {
                       ) : (
                         <TaskBatchDetails batch={batch} />
                       ))}
-                    {open &&
-                      !activeStatus(batch.status) &&
-                      batch.report === undefined &&
-                      batch.status !== "awaiting_input" && (
-                        <div className="flex justify-end">
-                          <Button
-                            variant="ghost"
-                            aria-label={t("workflow.deleteTaskRecord", {
-                              name: batchTitle,
-                            })}
-                            onClick={() => {
-                              batch.tasks.forEach((task) =>
-                                useTaskQueueStore.getState().remove(task.id),
-                              );
-                              if (batch.legacy)
-                                useAppStatusStore.getState().resetStatus();
-                            }}
-                          >
-                            <ActionIcon action="delete" />{t("workflow.deleteRecord")}
-                          </Button>
-                        </div>
-                      )}
                   </div>
                 </article>
               );

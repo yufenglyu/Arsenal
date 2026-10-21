@@ -134,6 +134,7 @@ beforeEach(() => {
     migratingRepository: null,
     reportCheckedAt: null,
     reportGeneration: null,
+    dismissedRepositories: [],
     repositories: null,
     requestedRepositories: null,
   });
@@ -560,4 +561,29 @@ it("keeps multiple batches expanded without resetting import choices", () => {
   expand("导入技能 example/skills");
   expect(screen.getByText("核对风险")).toBeVisible();
   expect(screen.getByRole("combobox", {name: "同名处理：Alpha"})).toBeVisible();
+});
+
+it("groups expanded review details and removes the unrelated address action",()=>{
+  updates.setState({preview:{repositories:[repo({localModified:true})]},reportGeneration:"review"});
+  render(<TaskCenter/>);open();
+  const section=screen.getByRole("region",{name:"example/repo"});
+  expect(section).toHaveClass("rounded-md","border");
+  const disclosure=within(section).getByText("核对风险").closest("details")!;
+  expect(disclosure).toHaveClass("open:border-border","open:bg-muted/20");
+  expect(screen.queryByRole("button",{name:"修改仓库地址"})).not.toBeInTheDocument();
+});
+it("deletes an import awaiting selection without submitting it",()=>{
+  queue.setState({tasks:[prepared()]});render(<TaskCenter/>);open();
+  const batch=screen.getByRole("article");
+  fireEvent.click(within(batch).getByRole("button",{name:/删除任务记录/}));
+  expect(queue.getState().tasks).toHaveLength(0);
+  expect(screen.queryByRole("article")).not.toBeInTheDocument();
+});
+it("deletes one pending repository without hiding the other repository",()=>{
+  updates.setState({preview:{repositories:[repo({localModified:true}),repo({repository:"example/other",snapshotId:"other",localModified:true})]},reportGeneration:"delete-one"});
+  render(<TaskCenter/>);open();
+  fireEvent.click(screen.getByRole("button",{name:"删除任务记录：example/repo"}));
+  expect(updates.getState().preview?.repositories.map(row=>row.repository)).toEqual(["example/other"]);
+  expect(screen.queryByRole("region",{name:"example/repo"})).not.toBeInTheDocument();
+  expect(screen.getByRole("region",{name:"example/other"})).toBeInTheDocument();
 });

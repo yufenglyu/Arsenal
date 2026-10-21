@@ -850,7 +850,7 @@ impl ImportDirectoryTransaction {
         let parent = resource_root
             .parent()
             .ok_or("Resource library has no parent directory")?;
-        let root = parent.join(format!(".skillshub-import-{}", uuid::Uuid::new_v4()));
+        let root = parent.join(format!(".arsenal-import-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&root).map_err(|e| format!("Failed to stage skill update: {e}"))?;
         Ok(Self {
             root,
@@ -965,7 +965,7 @@ impl Drop for ImportDirectoryTransaction {
             }
         }
         // Never erase recovery copies if the OS prevents rollback.
-        if restored && !self.committed {
+        if restored {
             let _ = std::fs::remove_dir_all(&self.root);
         }
     }
@@ -3841,7 +3841,7 @@ mod tests {
     }
 
     #[test]
-    fn committed_swap_keeps_new_skill_and_preserves_recovery_copy() {
+    fn committed_swap_keeps_new_skill_and_cleans_staging_directory() {
         let temp = tempdir().unwrap();
         let library = temp.path().join("library");
         let existing = library.join("demo");
@@ -3866,11 +3866,7 @@ mod tests {
             std::fs::read_to_string(existing.join("asset.txt")).unwrap(),
             "asset"
         );
-        assert_eq!(
-            std::fs::read(staging_root.join("old-0/SKILL.md")).unwrap(),
-            b"old"
-        );
-        assert!(staging_root.join("committed").exists());
+        assert!(!staging_root.exists(), "committed import must remove its staging directory");
     }
 
     #[test]
@@ -5387,21 +5383,25 @@ pub(crate) async fn recover_import_transactions(pool: &AppStore) -> Result<(), S
         .collect::<HashSet<_>>();
     for entry in std::fs::read_dir(parent).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
-        if !entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with(".skillshub-import-")
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let transaction_id = name.strip_prefix(".arsenal-import-")
+            .or_else(|| name.strip_prefix(".skillshub-import-"));
+        if !transaction_id.is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
             || !entry.file_type().map_err(|e| e.to_string())?.is_dir()
         {
             continue;
         }
         let root = entry.path();
-        if root.join("committed").exists() || root.join("recovered").exists() {
+        if root.join("committed").is_file() || root.join("recovered").is_file() {
+            // Completed transactions can be discarded. A locked directory is retried next time.
+            let _ = std::fs::remove_dir_all(&root);
             continue;
         }
         let committed = db::imports::has_receipt(pool, root.to_string_lossy().as_ref()).await?;
         if committed {
             std::fs::write(root.join("committed"), b"").map_err(|e| e.to_string())?;
+            let _ = std::fs::remove_dir_all(&root);
             continue;
         }
         let mut swaps = Vec::new();
@@ -5461,6 +5461,68 @@ pub(crate) async fn recover_import_transactions(pool: &AppStore) -> Result<(), S
             }
         }
         std::fs::write(root.join("recovered"), b"").map_err(|e| e.to_string())?;
+        let _ = std::fs::remove_dir_all(&root);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod import_cleanup_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn recovery_cleans_completed_legacy_and_current_transactions_and_keeps_unrelated_dirs() {
+        let temp = tempfile::tempdir().unwrap();
+        let pool = AppStore::open(&temp.path().join("state")).unwrap();
+        db::init_database(&pool).await.unwrap();
+        let library = temp.path().join("library");
+        std::fs::create_dir(&library).unwrap();
+        db::set_skill_resource_library_dir(&pool, &library.to_string_lossy()).await.unwrap();
+        for prefix in [".arsenal-import-", ".skillshub-import-"] {
+            for marker in ["committed", "recovered", "receipt"] {
+                let root = temp.path().join(format!("{prefix}{}", uuid::Uuid::new_v4()));
+                std::fs::create_dir(&root).unwrap();
+                std::fs::write(root.join("old-copy"), b"previous payload").unwrap();
+                if marker == "receipt" {
+                    pool.write(|data| {data.table_mut("import_transaction_receipts").insert(root.to_string_lossy().into_owned(), serde_json::json!({"id":root.to_string_lossy()})); Ok(())}).await.unwrap();
+                } else {
+                    std::fs::write(root.join(marker), b"").unwrap();
+                }
+                recover_import_transactions(&pool).await.unwrap();
+                assert!(!root.exists(), "completed {prefix}{marker} must be cleaned");
+            }
+        }
+        let unrelated = temp.path().join(".skillshub-import-personal");
+        std::fs::create_dir(&unrelated).unwrap();
+        std::fs::write(unrelated.join("committed"), b"").unwrap();
+        recover_import_transactions(&pool).await.unwrap();
+        assert!(unrelated.exists());
+    }
+
+    #[tokio::test]
+    async fn interrupted_legacy_transaction_restores_old_files_before_cleanup() {
+        let temp = tempfile::tempdir().unwrap();
+        let pool = AppStore::open(&temp.path().join("state")).unwrap();
+        db::init_database(&pool).await.unwrap();
+        let library = temp.path().join("library");
+        let target = library.join("demo");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("SKILL.md"), b"old").unwrap();
+        db::set_skill_resource_library_dir(&pool, &library.to_string_lossy()).await.unwrap();
+        let mut transaction = ImportDirectoryTransaction::new(&library).unwrap();
+        assert!(transaction.root.file_name().unwrap().to_string_lossy().starts_with(".arsenal-import-"));
+        let staged = transaction.root.join("new");
+        std::fs::create_dir(&staged).unwrap();
+        std::fs::write(staged.join("SKILL.md"), b"new").unwrap();
+        transaction.install(&staged, &target, true).unwrap();
+        let old_root = transaction.root.clone();
+        let legacy_root = temp.path().join(format!(".skillshub-import-{}",uuid::Uuid::new_v4()));
+        let journal = serde_json::to_vec(&(target.clone(),Some(legacy_root.join("old-0")))).unwrap();
+        std::mem::forget(transaction);
+        std::fs::rename(&old_root,&legacy_root).unwrap();
+        std::fs::write(legacy_root.join("swap-0.json"),journal).unwrap();
+        recover_import_transactions(&pool).await.unwrap();
+        assert_eq!(std::fs::read(target.join("SKILL.md")).unwrap(), b"old");
+        assert!(!legacy_root.exists());
+    }
 }

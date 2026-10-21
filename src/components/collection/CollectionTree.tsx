@@ -3,7 +3,7 @@ import {splitResourceLibrarySkillsByFolder} from "@/lib/skillFolders";
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent} from "react";
 import {useNavigate,useLocation} from "react-router-dom";
 import {useTranslation} from "react-i18next";
-import {ChevronRight, Folder, Inbox, Plus, Minus, FolderPlus, Pencil, FileDown, FolderMinus, Trash2, Check, ListTree} from "lucide-react";
+import {ChevronRight, Folder, Inbox, Plus, Minus, FolderPlus, Pencil, FileDown, Trash2, Check, ListTree} from "lucide-react";
 import {toast} from "sonner";
 import {useCollectionStore} from "@/stores/collectionStore";
 import {useResourceLibraryStore} from "@/stores/resourceLibraryStore";
@@ -155,10 +155,6 @@ export function CollectionTree({count, onExport, onExpandedChange}: {count?: num
         <button role="menuitem" className="group-menu-item" onClick={()=>open('create',undefined,menu.item?.id??null)}><FolderPlus/>{t(menu.item?'groups.createChild':'groups.create')}</button>
         {menu.item&&<button role="menuitem" className="group-menu-item" onClick={()=>open('rename',menu.item!)}><Pencil/>{t('groups.rename')}</button>}
       </div>
-      {menu.item&&<><div role="separator" className="my-1 border-t border-border"/><div role="group" aria-label={t('groups.menu.members')}>
-        <button role="menuitem" className="group-menu-item" disabled={!store.selectedSkillIds.length} onClick={()=>{void change({action:'assign',id:menu.item!.id,skillIds:store.selectedSkillIds});setMenu(null);}}><Plus/>{t('groups.addSelected')}</button>
-        <button role="menuitem" className="group-menu-item" disabled={!store.selectedSkillIds.length} onClick={()=>{void change({action:'detach',id:menu.item!.id,skillIds:store.selectedSkillIds});setMenu(null);}}><FolderMinus/>{t('groups.detachSelected')}</button>
-      </div></>}
       {(menu.item||onExport)&&<><div role="separator" className="my-1 border-t border-border"/><div role="group" aria-label={t('groups.menu.export')}>
         <button role="menuitem" className="group-menu-item" onClick={()=>{if(menu.item)void exportGroup(menu.item);else{setMenu(null);onExport?.();}}}><FileDown/>{t(menu.item?'groups.export':'resource.exportDirectoryList')}</button>
       </div></>}

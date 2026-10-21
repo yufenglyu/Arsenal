@@ -30,6 +30,9 @@ export function hasRepositoryChanges(item: RepositorySyncPreview): boolean {
 }
 
 interface RepositorySyncState {
+  dismissedRepositories: string[];
+  dismissRepositoryTask: (repository:string) => void;
+  dismissReport: () => void;
   invalidateRepositories: (repositories:string[]) => void;
   applySnapshots: (choices: {repository: string; snapshotId: string; allowDeletions: boolean}[], generation: string | null) => number;
   migratingRepository: string | null;
@@ -178,14 +181,17 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
         const requested = [...new Set(repositories.map(repo => repo.toLowerCase()))].filter(repo => !activeRechecks.has(repo) && !useTaskQueueStore.getState().tasks.some(task => isTaskActive(task) && task.locks.some(lock => lock === "repo:*" || lock === `repo:${repo}`)));
         if (!requested.length) return;
         useTaskReviewStore.getState().forget(get().preview?.repositories.flatMap(row => requested.includes(row.repository.toLowerCase()) && row.snapshotId ? [row.snapshotId] : []) ?? []);
+        const generation=getReportTaskGeneration();
+        set(state=>({dismissedRepositories:state.dismissedRepositories.filter(repo=>!requested.includes(repo))}));
         requested.forEach(repo => activeRechecks.add(repo));
         set(state => ({ checkingRepository: [...activeRechecks][0], preview: state.preview ? {...state.preview, repositories: state.preview.repositories.map(row => requested.includes(row.repository.toLowerCase()) ? {...row, snapshotId: null, error: null} : row)} : null }));
         try {
           const reports: RepositorySyncPreviewReport[] = await Promise.all(requested.map(async repo => {
-            try { return await checkInBackground([repo], getReportTaskGeneration()); }
+            try { return await checkInBackground([repo], generation); }
             catch (error) { return {repositories: [{repository: repo, snapshotId: null, added: [], modified: [], deleted: [], unchanged: [], error: String(error)}]} satisfies RepositorySyncPreviewReport; }
           }));
-          const report = {repositories: reports.flatMap(r => r.repositories), coverage: reports.flatMap(r => r.coverage ?? [])};
+          if(generation!==get().reportGeneration)return;
+          const report = {repositories: reports.flatMap(r => r.repositories).filter(row=>!get().dismissedRepositories.includes(row.repository.toLowerCase())), coverage: reports.flatMap(r => r.coverage ?? [])};
           set((state) => ({
             preview: state.preview ? {
               ...state.preview,
@@ -238,7 +244,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
           releaseSnapshots(get().preview?.repositories ?? []);
           useTaskQueueStore.getState().clearCheckHistory();
           set({preview: null, checkedAt: {}, reportCheckedAt: null, updateErrors: {},
-            reportGeneration: crypto.randomUUID(), repositories: null, applied: false,
+            reportGeneration: crypto.randomUUID(), dismissedRepositories: [], repositories: null, applied: false,
             appliedRepositories: [], includeAdded: true, removeDeleted: false});
         }
         set({
@@ -246,6 +252,8 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
           error: null,
           requestedRepositories: repositories ?? null,
         });
+        set(state=>({dismissedRepositories:repositories?.length?state.dismissedRepositories.filter(repo=>!repositories.some(requested=>requested.toLowerCase()===repo)):[]}));
+        const generation=getReportTaskGeneration();
         previewRequest = (async () => {
           try {
             if (!repositories?.length) {
@@ -253,7 +261,10 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
               const scanError=useResourceLibraryStore.getState().error;
               if (scanError) throw new Error(scanError);
             }
-            const preview = await checkInBackground(repositories);
+            if(generation!==get().reportGeneration)return;
+            const result = await checkInBackground(repositories,generation);
+            if(generation!==get().reportGeneration)return;
+            const preview={...result,repositories:result.repositories.filter(row=>!get().dismissedRepositories.includes(row.repository.toLowerCase()))};
             toast.info(i18n.t("workflow.checkFinished", {count: preview.repositories.reduce<number>((sum, repo) => sum + repo.added.length + repo.modified.length + repo.deleted.length, 0), failures: preview.repositories.filter(repo => repo.error).length}), {action:{label:i18n.t("workflow.viewResults"),onClick:() => get().setOpen(true)}});
             set({
               preview: get().preview ?? preview,
@@ -265,7 +276,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
               appliedRepositories: [],
             });
           } catch (error) {
-            if (error instanceof CheckPaused) return;
+            if (error instanceof CheckPaused || generation!==get().reportGeneration) return;
             set({ error: String(error) });
             toast.error(i18n.t("workflow.checkFailedNotification"), {action:{label:i18n.t("workflow.viewResults"),onClick:() => get().setOpen(true)}});
           } finally {
@@ -275,6 +286,29 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
           previewRequest = null;
         });
         return previewRequest;
+      },
+      dismissedRepositories: [],
+      dismissRepositoryTask: repository => {
+        const key=repository.toLowerCase();
+        const rows=get().preview?.repositories??[];
+        const removed=rows.filter(row=>row.repository.toLowerCase()===key);
+        const queue=useTaskQueueStore.getState();
+        const related=queue.tasks.filter(task=>task.parentReportGeneration===get().reportGeneration && (task.locks.includes(`repo:${key}`)||task.steps.some(step=>Array.isArray(step.args.repositories)&&step.args.repositories.some(value=>String(value).toLowerCase()===key))));
+        if(!related.some(isTaskActive))releaseSnapshots(removed);
+        related.forEach(task=>queue.remove(task.id));
+        set(state=>({dismissedRepositories:[...new Set([...state.dismissedRepositories,key])],
+          preview:state.preview?{...state.preview,repositories:state.preview.repositories.filter(row=>row.repository.toLowerCase()!==key)}:null,
+          checkedAt:Object.fromEntries(Object.entries(state.checkedAt).filter(([repo])=>repo.toLowerCase()!==key))}));
+        if(!get().preview?.repositories.length&&!useTaskQueueStore.getState().tasks.some(task=>!task.clearRequested&&task.parentReportGeneration===get().reportGeneration))get().dismissReport();
+      },
+      dismissReport: () => {
+        const generation=get().reportGeneration;
+        const queue=useTaskQueueStore.getState();
+        const related=queue.tasks.filter(task=>generation&&task.parentReportGeneration===generation);
+        if(!related.some(isTaskActive))releaseSnapshots(get().preview?.repositories??[]);
+        related.forEach(task=>queue.remove(task.id));
+        set({preview:null,error:null,reportCheckedAt:null,checkedAt:{},updateErrors:{},reportGeneration:crypto.randomUUID(),
+          repositories:null,requestedRepositories:null,isChecking:false,checkingRepository:null,applied:false,appliedRepositories:[],dismissedRepositories:[]});
       },
       invalidateRepositories: repositories => {
         const affected=new Set(repositories.map(repository=>repository.toLowerCase()));
@@ -302,7 +336,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
         }
         useTaskQueueStore.getState().clearCheckHistory();
         set({preview:null, reportCheckedAt:null, checkedAt:{}, updateErrors:{}, error:null,
-          reportGeneration:crypto.randomUUID(), repositories:null, requestedRepositories:null,
+          reportGeneration:crypto.randomUUID(), dismissedRepositories:[], repositories:null, requestedRepositories:null,
           applied:false, appliedRepositories:[]});
       },
       dismissFailedCheck: (repository) => {
@@ -347,6 +381,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
         } : {}) };
       },
       partialize: (state) => ({
+        dismissedRepositories: state.dismissedRepositories,
         updateErrors: state.updateErrors,
         checkedAt: state.checkedAt,
         reportCheckedAt: state.reportCheckedAt,
@@ -494,7 +529,7 @@ registerTaskResult(
         ? {...row, status: "pending", reason: undefined} : row);
     const scope = Array.isArray(step.args.repositories) ? new Set((step.args.repositories as string[]).map(repo => repo.toLowerCase())) : null;
     releaseSnapshots((useRepositorySyncStore.getState().preview?.repositories ?? []).filter(old => rawReport.repositories.some(next=>next.repository.toLowerCase()===old.repository.toLowerCase() && next.snapshotId!==old.snapshotId)));
-    const report = {...rawReport, repositories:rawReport.repositories.filter(repo => !scope || scope.has(repo.repository.toLowerCase()))};
+    const report = {...rawReport, repositories:rawReport.repositories.filter(repo => (!scope || scope.has(repo.repository.toLowerCase()))&&!useRepositorySyncStore.getState().dismissedRepositories.includes(repo.repository.toLowerCase()))};
     useRepositorySyncStore.setState((state) => ({
       updateErrors: Object.fromEntries(Object.entries(state.updateErrors).filter(([key]) =>
         !report.repositories.some(repo => !repo.error && (key.startsWith(`${repo.repository.toLowerCase()}:`) || key === `mirror:${repo.snapshotId}`)))),

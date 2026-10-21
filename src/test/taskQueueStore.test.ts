@@ -8,6 +8,8 @@ import {
   useTaskQueueStore as queue,
   waitForTask,
   taskErrorMessage,
+  registerTaskInputRequirement,
+  registerTaskResult,
 } from "@/stores/taskQueueStore";
 it("explains snapshot error codes returned as repository report strings",()=>{
  expect(taskErrorMessage("IMPORT_SOURCE_MISSING")).toBe(i18n.t("workflow.errors.IMPORT_SOURCE_MISSING"));
@@ -69,8 +71,8 @@ describe("background queue", () => {
     invoke.mockImplementationOnce(() => new Promise<void>(resolve => {finish = resolve;})).mockResolvedValue(undefined);
     const id = queue.getState().enqueue(input("stopping", ["repo:one"]));
     const waiter = waitForTask(id);
-    queue.getState().cancel(id);
     queue.getState().remove(id);
+    expect(queue.getState().tasks.find(task => task.id === id)?.cancelRequested).toBe(true);
     expect(queue.getState().tasks.find(task => task.id === id)?.clearRequested).toBe(true);
     const next = queue.getState().enqueue(input("next", ["repo:one"]));
     expect(invoke).toHaveBeenCalledTimes(1);
@@ -78,6 +80,16 @@ describe("background queue", () => {
     expect((await waiter).status).toBe("cancelled");
     await waitForTask(next);
     expect(queue.getState().tasks.map(task => task.id)).toEqual([next]);
+  });
+  it("does not submit new work after a running preparation was deleted",async()=>{
+    const command="test_deleted_preparation";const submit=vi.fn();
+    registerTaskInputRequirement(command,()=>false);registerTaskResult(command,submit);
+    let finish!:(value:unknown)=>void;
+    invoke.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+    const id=queue.getState().enqueue({...input("preparing"),steps:[{command,label:"prepare",args:{}}]});
+    const waiter=waitForTask(id);queue.getState().remove(id);finish({});
+    expect((await waiter).status).toBe("cancelled");
+    expect(submit).not.toHaveBeenCalled();
   });
   it("clears running tasks safely without releasing their target locks early", async () => {
     let finish!: () => void;

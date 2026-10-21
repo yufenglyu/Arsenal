@@ -11,7 +11,7 @@ export function TaskDisclosure({
   small?: boolean;
 }) {
   return (
-    <details className="group/task-fold py-2">
+    <details className="group/task-fold rounded-md border border-transparent px-3 py-2 open:border-border open:bg-muted/20">
       <summary
         className={`flex cursor-pointer list-none items-center gap-2 rounded-sm focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden ${small ? "text-xs text-muted-foreground" : "text-sm"}`}
       >

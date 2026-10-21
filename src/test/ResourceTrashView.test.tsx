@@ -28,3 +28,18 @@ it("supports confirmed emptying and filters without hiding the saved total",asyn
   fireEvent.click(dialog.getByRole("button",{name:"确认"}));
   await waitFor(()=>expect(purge).toHaveBeenCalledTimes(2));
 });
+
+it("keeps toolbar actions as icons and restores multiple selected rows from the context menu",async()=>{
+  render(<ResourceTrashView/>);
+  expect(screen.queryByRole("button",{name:"恢复所选"})).not.toBeInTheDocument();
+  const clear=screen.getByRole("button",{name:"清空回收站"});
+  expect(clear.textContent).toBe("");expect(clear.querySelector("svg")).not.toBeNull();
+  const first=screen.getByRole("button",{name:"example/one"}).closest("tr")!;
+  const second=screen.getByRole("button",{name:"Second skill"}).closest("tr")!;
+  expect(first.closest("table")?.parentElement?.parentElement).toHaveClass("rounded-none","border-0","shadow-none");
+  fireEvent.click(first);fireEvent.click(second,{ctrlKey:true});
+  fireEvent.click(openRowActions(first).getByRole("menuitem",{name:"恢复"}));
+  expect(restore).not.toHaveBeenCalled();
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button",{name:"确认"}));
+  await waitFor(()=>{expect(restore).toHaveBeenCalledWith("one");expect(restore).toHaveBeenCalledWith("two");});
+});

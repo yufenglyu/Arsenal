@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RepositoryAddressButton } from "@/components/skill/RepositoryAddressButton";
 import { useRepositorySyncStore } from "@/stores/repositorySyncStore";
 import {
   isTaskActive,
@@ -112,7 +111,6 @@ function Changes({ repo }: { repo: RepositorySyncPreview }) {
           ))}
         </TaskDisclosure>
       )}
-      <RepositoryAddressButton repository={repo.repository} />
     </div>
   );
 }
@@ -154,12 +152,13 @@ export function TaskRepositoryReview({ batch }: { batch: TaskBatch; onLater?: ()
       const risk = repositoryRisk(row);
       const accepted = !!repo?.snapshotId && selection.approved.includes(repo.snapshotId);
       const selectable = eligible(row) && approved(row);
-      return <section key={row.repository} className="border-b border-border py-3" aria-label={row.repository}>
+      return <section key={row.repository} className="rounded-md border border-border p-3" aria-label={row.repository}>
         <div className="flex items-center gap-2">
           {selectable && <input type="checkbox" aria-label={row.repository} checked={!selection.excluded.includes(repo!.snapshotId!)} onChange={event => selection.select(repo!.snapshotId!, event.target.checked)} />}
           <span className="min-w-0 flex-1 break-all text-sm">{row.repository}</span>
           <span className={`text-xs ${row.error ? "text-destructive" : "text-muted-foreground"}`}>{running && owner?.cancelRequested ? t("workflow.stopping") : running ? t(`workflow.taskStatus.${owner?.status === "queued" ? "queued" : "running"}`) : row.needsCheck ? t("workflow.batch.needsCheck") : completed(row) ? t(row.applied ? "workflow.updated" : "workflow.changeType.unchanged") : risk && !accepted ? t("workflow.flow.risk") : t("workflow.flow.ready")}</span>
           {running && owner ? <Button variant="ghost" disabled={owner.cancelRequested} onClick={() => useTaskQueueStore.getState().cancel(owner.id)}><ActionIcon action="stop" />{t("workflow.stopTask")}</Button> : row.needsCheck ? <Button variant="outline" disabled={state.migratingRepository?.toLowerCase() === row.repository.toLowerCase()} onClick={() => void state.recheckRepository(row.repository)}><RefreshCw />{t("workflow.recheck")}</Button> : null}
+          <Button variant="ghost" size="icon" title={t("workflow.deleteTaskRecord",{name:row.repository})} aria-label={t("workflow.deleteTaskRecord",{name:row.repository})} onClick={()=>state.dismissRepositoryTask(row.repository)}><ActionIcon action="delete"/></Button>
           {accepted && selectable && <Button variant="ghost" onClick={() => selection.forget([repo!.snapshotId!])}><ActionIcon action="back" />{t("workflow.flow.withdraw")}</Button>}
         </div>
         {row.error && <p className="mt-1 text-xs text-destructive">{taskErrorMessage(row.error, "update")}</p>}

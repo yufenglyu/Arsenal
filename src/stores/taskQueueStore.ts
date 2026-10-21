@@ -244,7 +244,6 @@ export const useTaskQueueStore = create<State>()(
         const task = get().tasks.find(task => task.id === id);
         if (!task) return;
         if (isTaskActive(task)) {
-          if (!task.cancelRequested) return;
           get().cancel(id);
           if (running.has(id)) {
             // Hide the record, but retain its lock and notify waiters at completion.
@@ -378,7 +377,10 @@ async function execute(id: string) {
         }
       }
       try {
-        await handlers.get(step.command)?.(step, result);
+        // A deleted preparation must not enqueue a new import after its request finishes.
+        // Committed writes still run their refresh handlers even when their record is hidden.
+        if(state().tasks.find(task=>task.id===id)?.clearRequested && inputRequirements.has(step.command))step.status="cancelled";
+        else await handlers.get(step.command)?.(step, result);
       } catch {
         /* The operation succeeded; a refresh failure must not rerun a committed write. */
       }

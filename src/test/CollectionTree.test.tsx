@@ -72,7 +72,9 @@ it('keeps unfiled and recycle bin after custom groups and gives every menu actio
  expect(rows.at(-2)).toHaveTextContent('未分类');expect(rows.at(-1)).toHaveTextContent('回收站');
  fireEvent.contextMenu(screen.getByRole('button',{name:'Research 0/0'}).parentElement!);
  const menu=screen.getByRole('menu');
- expect(within(menu).getAllByRole('group')).toHaveLength(5);
- expect(within(menu).getAllByRole('separator')).toHaveLength(4);
+ expect(within(menu).queryByRole('menuitem',{name:'添加所选技能'})).not.toBeInTheDocument();
+ expect(within(menu).queryByRole('menuitem',{name:'从分组移除所选技能'})).not.toBeInTheDocument();
+ expect(within(menu).getAllByRole('group')).toHaveLength(4);
+ expect(within(menu).getAllByRole('separator')).toHaveLength(3);
  for(const item of menu.querySelectorAll('button'))expect(item.querySelector('svg')).not.toBeNull();
 });

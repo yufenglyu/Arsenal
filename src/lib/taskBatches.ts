@@ -32,6 +32,7 @@ export const repositoryHasDeletions = (repo: RepositorySyncPreview) =>
   );
 
 export interface ReportState {
+  dismissedRepositories?: string[];
   preview: RepositorySyncPreviewReport | null;
   reportGeneration: string | null;
   reportCheckedAt: number | null;
@@ -139,7 +140,7 @@ export function reportRows(
     const current = rows.get(key)!;
     if (current.error && (applyTask || /PREVIEW_EXPIRED|SNAPSHOT_UNAVAILABLE|LOCAL_IDENTITY_CHANGED|LOCAL_CONTENT_CHANGED/i.test(current.error))) rows.set(key, {...current, needsCheck: true});
   }
-  return [...rows.values()].sort((a, b) => a.repository.localeCompare(b.repository));
+  return [...rows.values()].filter(row=>!state.dismissedRepositories?.includes(row.repository.toLowerCase())).sort((a, b) => a.repository.localeCompare(b.repository));
 }
 
 export function buildTaskBatches(

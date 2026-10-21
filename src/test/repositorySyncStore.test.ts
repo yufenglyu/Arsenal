@@ -294,3 +294,17 @@ it("invalidates only repositories whose library content changed", () => {
   expect(state.checkedAt).toEqual({"example/two":2});
   expect(state.appliedRepositories).toEqual(["example/two"]);
 });
+
+it("keeps a deleted repository removed when its running recheck returns",async()=>{
+  vi.restoreAllMocks();queue.setState({tasks:[]});
+  const one={repository:"example/one",added:[],modified:[],deleted:[],unchanged:[]};
+  const two={...one,repository:"example/two"};
+  useRepositorySyncStore.setState({preview:{repositories:[one,two]},reportGeneration:"dismiss-running",dismissedRepositories:[],isChecking:false,checkingRepository:null,migratingRepository:null});
+  let finish!:(value:RepositorySyncPreviewReport)=>void;
+  vi.spyOn(useResourceLibraryStore.getState(),"previewRepositorySync").mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  const pending=useRepositorySyncStore.getState().recheckRepository("example/one");
+  useRepositorySyncStore.getState().dismissRepositoryTask("example/one");
+  finish({repositories:[one]});await pending;
+  expect(useRepositorySyncStore.getState().preview?.repositories).toEqual([two]);
+  expect(queue.getState().tasks.filter(task=>!task.clearRequested)).toHaveLength(0);
+});
