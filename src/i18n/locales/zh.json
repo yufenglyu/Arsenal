@@ -1239,7 +1239,7 @@
       "LOCAL_IDENTITY_CHANGED": "技能来源或存储位置已改变，请重新检查后同步。",
       "TARGET_DIRECTORY_CONFLICT": "目标目录存在重复归属或未托管文件，未覆盖本地内容；请处理目录占用后重试。",
       "SNAPSHOT_LINK_UNAVAILABLE": "远端符号链接失效或形成循环；请修复仓库中的链接后重试。",
-      "UNSAFE_TARGET": "资源库目标路径无法安全写入。",
+      "UNSAFE_TARGET": "技能仓库目标路径无法安全写入。",
       "UNSAFE_INSTALL_TARGET": "安装目标已改变，无法安全同步。",
       "UNSAFE_SNAPSHOT_PATH": "远端包含不支持或冲突的路径，未执行同步。",
       "SNAPSHOT_CACHE_FULL": "检查快照存储已达到容量限制。",
@@ -1486,7 +1486,7 @@
         "missing_source": "来源缺失",
         "outside_scope": "本次范围外"
       },
-      "libraryChanged": "资源库已变化；以上数量仍是检查时的记录，可重新检查。"
+      "libraryChanged": "技能仓库已变化；以上数量仍是检查时的记录，可重新检查。"
     },
     "address": {
       "title": "修改仓库地址",
@@ -1677,7 +1677,7 @@
       "protocolRegister": "返回链接注册失败，请检查系统权限。",
       "protocolVerify": "返回链接注册未通过系统核验，可能被其他副本覆盖。请从要使用的 Arsenal 中重新修复。",
       "protocolInstalledOnly": "macOS 请通过安装应用注册返回链接。",
-      "noteRepositoryMissing": "仓库不存在或未导入资源库",
+      "noteRepositoryMissing": "来源仓库不存在或尚未导入技能仓库",
       "noteUriPath": "Obsidian 将 # 和 ^ 解释为文档定位符，请先手动重命名此笔记，再重新关联。",
       "noteTemplate": "属性模板无效：请使用带 --- 的 YAML Front Matter，检查重复字段、占位符和 YAML 格式。",
       "noteDatabase": "无法保存仓库笔记"
