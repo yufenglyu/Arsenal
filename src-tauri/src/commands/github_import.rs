@@ -347,7 +347,7 @@ async fn preview_github_repo_import_impl(
 
     if skills.is_empty() {
         return Err(
-            "No importable skills found in this repository. Supported layouts are repo-root skill directories, a skills/ or skill-package/ directory, or plugin skills under plugins/*/skills/."
+            "No importable skills found in this repository. Skills are discovered by SKILL.md at the repository root or in nested directories."
                 .to_string(),
         );
     }
@@ -508,7 +508,7 @@ pub(crate) async fn import_prepared_snapshot_with_directories(
     let candidates = build_repo_skill_candidates_from_snapshot(&repo, snapshot)?;
     if candidates.is_empty() {
         return Err(
-            "No importable skills found in this repository. Supported layouts are repo-root skill directories, a skills/ or skill-package/ directory, or plugin skills under plugins/*/skills/."
+            "No importable skills found in this repository. Skills are discovered by SKILL.md at the repository root or in nested directories."
                 .to_string(),
         );
     }
@@ -1690,32 +1690,25 @@ fn classify_skill_manifest_path(path: &str) -> Option<SnapshotSkillManifest> {
         return None;
     }
 
-    let source_path = normalized.to_string();
-    match source_parts {
-        [skill_dir] if *skill_dir != ".github" && *skill_dir != "skills" => {
-            Some(SnapshotSkillManifest {
-                source_path,
-                source_manifest_path: normalized.to_string(),
-                root_directory: "/".to_string(),
-                skill_directory_name: (*skill_dir).to_string(),
-                skill_md_path: normalized.to_string(),
-            })
-        }
-        _ if source_parts
-            .iter()
-            .position(|part| matches!(*part, "skills" | "skill-package"))
-            .is_some_and(|index| index + 1 < source_parts.len()) =>
-        {
-            Some(SnapshotSkillManifest {
-                source_path,
-                source_manifest_path: normalized.to_string(),
-                root_directory: source_parts[..source_parts.len() - 1].join("/"),
-                skill_directory_name: source_parts.last()?.to_string(),
-                skill_md_path: normalized.to_string(),
-            })
-        }
-        _ => None,
+    // SKILL.md defines the skill boundary; category/plugin directory names do not.
+    // Apply the same discovery rule to preview, sparse downloads and update mirrors.
+    if !is_safe_repo_relative_path(normalized)
+        || source_parts.iter().any(|part| matches!(*part, ".git" | "node_modules"))
+        || source_parts == [".github"]
+    {
+        return None;
     }
+    Some(SnapshotSkillManifest {
+        source_path: normalized.to_string(),
+        source_manifest_path: normalized.to_string(),
+        root_directory: if source_parts.len() == 1 {
+            "/".to_string()
+        } else {
+            source_parts[..source_parts.len() - 1].join("/")
+        },
+        skill_directory_name: source_parts.last()?.to_string(),
+        skill_md_path: normalized.to_string(),
+    })
 }
 
 async fn download_repo_snapshot(
@@ -3603,6 +3596,212 @@ mod tests {
                 .map(|(path, content)| (path.to_string(), content.as_bytes().to_vec()))
                 .collect::<HashMap<_, _>>(),
         }
+    }
+
+    // Actual public paths; payloads are synthetic so this regression is offline.
+    fn categorized_research_snapshot() -> GitHubRepoSnapshot {
+        let mut snapshot = GitHubRepoSnapshot::default();
+        for path in include_str!("testdata/orchestra-skill-paths.txt")
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.is_empty())
+        {
+            let directory = path.rsplit_once('/').unwrap().0;
+            let name = directory.rsplit('/').next().unwrap();
+            snapshot.files.insert(
+                path.into(),
+                sample_frontmatter(name, "Research skill").into_bytes(),
+            );
+            snapshot.files.insert(
+                format!("{directory}/references/guide.md"),
+                format!("Guide for {name}").into_bytes(),
+            );
+        }
+        snapshot
+    }
+
+    #[tokio::test]
+    async fn categorized_research_repository_previews_imports_and_updates_all_98_skills() {
+        let pool = setup_test_db().await;
+        let library = tempdir().unwrap();
+        db::set_skill_resource_library_dir(&pool, &library.path().to_string_lossy())
+            .await
+            .unwrap();
+        let repo = GitHubRepoRef {
+            owner: "Orchestra-Research".into(),
+            repo: "AI-Research-SKILLs".into(),
+            branch: "773a52944ba4747a18bd4ae9ade53fff041adcbc".into(),
+            normalized_url: "https://github.com/Orchestra-Research/AI-Research-SKILLs".into(),
+            stars: None,
+        };
+        let snapshot = categorized_research_snapshot();
+        let candidates = super::super::repository_import_rules::candidates(&repo, &snapshot).unwrap();
+        assert_eq!(
+            candidates.len(),
+            98,
+            "category folders must not hide 97 skills"
+        );
+        let preview = build_preview_skills(&pool, &repo, &candidates)
+            .await
+            .unwrap();
+        assert_eq!(preview.len(), 98);
+        let selections = candidates
+            .iter()
+            .map(|candidate| GitHubSkillImportSelection {
+                source_path: candidate.source_path.clone(),
+                resolution: DuplicateResolution::Overwrite,
+                renamed_skill_id: None,
+            })
+            .collect();
+        let imported = import_prepared_snapshot(&pool, repo.clone(), &snapshot, selections, None, None)
+            .await
+            .unwrap();
+        assert_eq!(imported.imported_skills.len(), 98);
+        assert!(imported.skipped_skills.is_empty());
+        for skill in &imported.imported_skills {
+            let directory = Path::new(&skill.target_directory);
+            assert!(directory.join("SKILL.md").is_file());
+            assert!(directory.join("references/guide.md").is_file());
+            assert_eq!(
+                std::fs::read_dir(directory).unwrap().count(),
+                2,
+                "do not copy sibling skill directories"
+            );
+        }
+        let rules =
+            super::super::repository_import_rules::load(&pool, "Orchestra-Research/AI-Research-SKILLs")
+                .await
+                .unwrap()
+                .unwrap();
+        let updated =
+            super::super::repository_import_rules::update_candidates(&repo, &snapshot, Some(&rules))
+                .unwrap();
+        assert_eq!(updated.len(), 98);
+        assert!(updated.iter().all(|candidate| imported
+            .imported_skills
+            .iter()
+            .any(|skill| skill.source_path == candidate.source_path)));
+    }
+
+    #[test]
+    fn nested_manifest_discovery_is_independent_of_category_names_and_depth() {
+        for path in [
+            "category/tool/SKILL.md",
+            "catalog/research/models/tool/SKILL.md",
+            ".agents/skills/tool/SKILL.md",
+            "skills/SKILL.md",
+        ] {
+            let manifest = classify_skill_manifest_path(path).expect("valid nested manifest");
+            assert_eq!(manifest.source_path, path);
+            assert_eq!(
+                manifest.skill_directory_name,
+                path.split('/').rev().nth(1).unwrap()
+            );
+        }
+        for path in [
+            "category/tool/README.md",
+            "../tool/SKILL.md",
+            "catalog/../tool/SKILL.md",
+            "node_modules/tool/SKILL.md",
+            ".git/tool/SKILL.md",
+            ".github/SKILL.md",
+        ] {
+            assert!(classify_skill_manifest_path(path).is_none(), "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn categorized_sparse_download_keeps_all_skill_resources() {
+        let snapshot = repo_snapshot(&[
+            (
+                "category/research/tool/SKILL.md",
+                sample_frontmatter("tool", "Nested skill"),
+            ),
+            ("category/research/tool/references/guide.md", "guide".into()),
+        ]);
+        let mut entries: Vec<_> = snapshot.files.iter().map(|(path, bytes)| serde_json::json!({"path":path,"type":"blob","mode":"100644","size":bytes.len()})).collect();
+        entries.push(
+            serde_json::json!({"path":"demo.mp4","type":"blob","mode":"100644","size":700_000_000}),
+        );
+        let tree = serde_json::json!({"truncated":false,"tree":entries});
+        let downloaded = snapshot_from_tree_if_sparse(&tree, |path| {
+            let bytes = snapshot
+                .files
+                .get(&path)
+                .expect("do not fetch unrelated media")
+                .clone();
+            async move { Ok(bytes) }
+        })
+        .await
+        .unwrap()
+        .expect("skill-only snapshot");
+        assert_eq!(downloaded.files, snapshot.files);
+        let completed = complete_mirror_snapshot(&tree, GitHubRepoSnapshot::default(), |path| {
+            let bytes = snapshot
+                .files
+                .get(&path)
+                .expect("complete nested resources only")
+                .clone();
+            async move { Ok(bytes) }
+        })
+        .await
+        .unwrap();
+        assert_eq!(completed.files, snapshot.files);
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires live access to the reported public repository"]
+    async fn live_orchestra_repository_discovers_and_imports_98_skills() {
+        let repo = GitHubRepoRef {
+            owner: "Orchestra-Research".into(),
+            repo: "AI-Research-SKILLs".into(),
+            branch: "773a52944ba4747a18bd4ae9ade53fff041adcbc".into(),
+            normalized_url: "https://github.com/Orchestra-Research/AI-Research-SKILLs".into(),
+            stars: None,
+        };
+        let snapshot = fetch_mirror_snapshot(&repo, None).await.unwrap();
+        let candidates = super::super::repository_import_rules::candidates(&repo, &snapshot).unwrap();
+        assert_eq!(candidates.len(), 98);
+        let pool = setup_test_db().await;
+        let library = tempdir().unwrap();
+        db::set_skill_resource_library_dir(&pool, &library.path().to_string_lossy())
+            .await
+            .unwrap();
+        assert_eq!(
+            build_preview_skills(&pool, &repo, &candidates)
+                .await
+                .unwrap()
+                .len(),
+            98
+        );
+        let selections = candidates
+            .iter()
+            .map(|candidate| GitHubSkillImportSelection {
+                source_path: candidate.source_path.clone(),
+                resolution: DuplicateResolution::Overwrite,
+                renamed_skill_id: None,
+            })
+            .collect();
+        let result = import_prepared_snapshot(&pool, repo.clone(), &snapshot, selections, None, None)
+            .await
+            .unwrap();
+        assert_eq!(result.imported_skills.len(), 98);
+        for skill in &result.imported_skills {
+            assert!(Path::new(&skill.target_directory)
+                .join("SKILL.md")
+                .is_file());
+        }
+        let rules =
+            super::super::repository_import_rules::load(&pool, "Orchestra-Research/AI-Research-SKILLs")
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            super::super::repository_import_rules::update_candidates(&repo, &snapshot, Some(&rules))
+                .unwrap()
+                .len(),
+            98
+        );
+        println!("public repository: 98 previewed, 98 imported to an isolated library, 98 retained on update");
     }
 
     fn root_repo_snapshot() -> GitHubRepoSnapshot {
