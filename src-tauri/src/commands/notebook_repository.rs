@@ -312,7 +312,9 @@ mod tests {
     #[tokio::test]
     async fn internal_writes_reject_stale_drafts_and_linked_notes() {
         let dir = tempfile::tempdir().unwrap();
-        let pool = open_test_store(&dir.path().join("db.sqlite")).await.unwrap();
+        let pool = open_test_store(&dir.path().join("db.sqlite"))
+            .await
+            .unwrap();
         let mut row = Repository::new(1, "fixture/project".into());
         row.notebook = "original".into();
         put(&pool, &row).await.unwrap();
@@ -345,7 +347,9 @@ mod tests {
     #[tokio::test]
     async fn local_repository_identity_is_shared_by_members_and_survives_root_remapping() {
         let dir = tempfile::tempdir().unwrap();
-        let pool = open_test_store(&dir.path().join("db.sqlite")).await.unwrap();
+        let pool = open_test_store(&dir.path().join("db.sqlite"))
+            .await
+            .unwrap();
         let root = dir.path().join("library");
         let skill_dir = root.join("fixture/project/one");
         std::fs::create_dir_all(&skill_dir).unwrap();

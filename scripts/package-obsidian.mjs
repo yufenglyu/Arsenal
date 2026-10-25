@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const plugin = join(root, "integrations/obsidian-skillshub");
+const plugin = join(root, "integrations/obsidian-arsenal");
 const args = process.argv.slice(2);
 let output = join(root, "release-assets");
 let install = true, tests = true;

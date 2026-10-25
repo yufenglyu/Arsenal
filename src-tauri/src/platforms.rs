@@ -245,8 +245,12 @@ mod tests {
         assert!(platforms
             .iter()
             .any(|platform| platform.id == "claude-code"));
-        assert!(agents_from_definitions(&platforms).iter().any(|agent| agent.id == "central"));
-        assert!(agents_from_definitions(&[]).iter().any(|agent| agent.id == "central"));
+        assert!(agents_from_definitions(&platforms)
+            .iter()
+            .any(|agent| agent.id == "central"));
+        assert!(agents_from_definitions(&[])
+            .iter()
+            .any(|agent| agent.id == "central"));
         assert!(
             platforms
                 .iter()
@@ -354,7 +358,9 @@ mod tests {
 }
 
 pub fn persist_platform_rename(old_id: &str, agent: &Agent) -> Result<(), String> {
-    let Some(dir) = platform_dir() else { return Ok(()); };
+    let Some(dir) = platform_dir() else {
+        return Ok(());
+    };
     crate::config_store::update_path(&catalog_path(&dir), |config| {
         if let Some(platform) = config.platforms.iter_mut().find(|p| p.id == old_id) {
             platform.id = agent.id.clone();

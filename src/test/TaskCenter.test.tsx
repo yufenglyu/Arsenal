@@ -52,6 +52,11 @@ const history = () =>
   fireEvent.click(screen.getByRole("tab", { name: /历史记录/ }));
 const current = () =>
   fireEvent.click(screen.getByRole("tab", { name: /当前任务/ }));
+const openRepositoryDetails = () => {
+  const button = screen.getByRole("button", {name: "查看详情"});
+  if (button.getAttribute("aria-expanded") === "false") fireEvent.click(button);
+  return button;
+};
 function mockEnqueue() {
   return vi.spyOn(queue.getState(), "enqueue").mockImplementation((input) => {
     const id = `child-${queue.getState().tasks.length}`;
@@ -141,6 +146,51 @@ beforeEach(() => {
   useAppStatusStore.setState({ task: null });
 });
 afterEach(() => vi.restoreAllMocks());
+it("logs repository check progress and safe results instead of an empty timestamp", () => {
+  updates.setState({reportGeneration: "log"});
+  queue.setState({tasks: [{...task("check", "running"), parentReportGeneration: "log", locks: ["repo:example/repo"], steps: [{command: CHECK_REPOSITORIES, label: "example/repo", args: {repositories: ["example/repo"]}, status: "running"}]}]});
+  render(<TaskCenter />); open(); expand("更新技能仓库");
+  fireEvent.click(screen.getByRole("tab", {name: "日志"}));
+  const log = within(screen.getByRole("region", {name: "日志"}));
+  expect(log.getByText(/example\/repo/)).toHaveTextContent("检查中");
+  expect(log.queryByText("未记录检查时间")).not.toBeInTheDocument();
+});
+it("shows completed-write refresh warnings in task details and the shared log", () => {
+  const warning="操作已完成，但列表刷新失败：文件被占用。请刷新列表，不要重复同步。";
+  queue.setState({tasks:[{...task("example/warning", "success"),steps:[{command:"refresh_repository",label:"example/warning",args:{repository:"example/warning"},status:"success",warning}]}]});
+  render(<TaskCenter />);open();history();
+  expand("刷新仓库 example/warning");
+  expect(screen.getByRole("alert")).toHaveTextContent(warning);
+  fireEvent.click(screen.getByRole("tab",{name:"日志"}));
+  expect(within(screen.getByRole("region",{name:"日志"})).getByRole("alert")).toHaveTextContent(warning);
+});
+it("explains the repository risk before listing unrelated additions", () => {
+  updates.setState({preview: {repositories: [repo({added: [{skillId: "new", name: "New skill", sourcePath: "skills/new/SKILL.md"}], deleted: [{skillId: "old", name: "Old skill", sourcePath: "skills/old/SKILL.md"}]})]}});
+  render(<TaskCenter />); open();
+  const detail = openRepositoryDetails();
+  const risk = within(document.getElementById(detail.getAttribute("aria-controls")!)!);
+  expect(risk.getByLabelText(/同步范围：仓库 example\/repo/)).toHaveAttribute("title", expect.stringContaining("包含删除"));
+  expect(risk.queryByText(/同步范围/)).not.toBeInTheDocument();
+  expect(risk.getByText("含删除或替换")).toBeVisible();
+  expect(risk.getByText("核对风险").parentElement).toContainElement(risk.getByText("含删除或替换"));
+  expect(risk.getByText("其他变更")).toBeVisible();
+  expect(risk.getByText("New skill")).not.toBeVisible();
+  expect(risk.getByText("Old skill")).toBeVisible();
+  expect(risk.getByText("skills/old/SKILL.md")).toBeVisible();
+});
+it("logs completed check summaries and sanitized failures", () => {
+  const result = repo({added: [{skillId: "new", name: "New"}], documentChanges: [{path: "README.md", status: "modified"}]});
+  updates.setState({reportGeneration: "log", preview: {repositories: [result, repo({repository: "example/failure", error: "NETWORK_ERROR"})]}});
+  queue.setState({tasks: [{...task("checked", "success"), parentReportGeneration: "log", steps: [{command: CHECK_REPOSITORIES, label: "Check", args: {repositories: ["example/repo", "example/failure"], unused: "hidden-value"}, status: "success", result: {repositories: [result, {repository: "example/failure", error: "NETWORK_ERROR: hidden-value"}]}}]}]});
+  render(<TaskCenter />); open(); fireEvent.click(screen.getByRole("tab", {name: "日志"}));
+  const log = within(screen.getByRole("region", {name: "日志"}));
+  expect(log.getByText(/example\/repo/)).toHaveTextContent("新增 1 · 修改 1 · 删除 0 · 无变化 1；仓库文档变更 1");
+  expect(log.getByText(/example\/failure/)).not.toHaveTextContent("成功");
+  expect(log.queryByText(/hidden-value|NETWORK_ERROR/)).not.toBeInTheDocument();
+  current();
+  expect(screen.queryByRole("region", {name: "日志"})).not.toBeInTheDocument();
+  expect(screen.getByRole("region", {name: "example/failure"})).toBeVisible();
+});
 it("excludes AI work from all task counts and history without deleting it", () => {
   queue.setState({
     tasks: [
@@ -161,7 +211,7 @@ it("excludes AI work from all task counts and history without deleting it", () =
   expect(screen.getByRole("tab", { name: "历史记录 0" })).toBeInTheDocument();
   expect(queue.getState().tasks).toHaveLength(4);
 });
-it("uses current/history tabs with keyboard navigation", () => {
+it("uses current/history/log tabs with keyboard navigation", () => {
   render(<TaskCenter />);
   open();
   const tab = screen.getByRole("tab", { name: "当前任务 0" });
@@ -171,6 +221,46 @@ it("uses current/history tabs with keyboard navigation", () => {
     "true",
   );
   expect(screen.getByText("暂无历史记录")).toBeVisible();
+  fireEvent.keyDown(screen.getByRole("tab", {name: "历史记录 0"}), {key: "ArrowRight"});
+  expect(screen.getByRole("tab", {name: "日志"})).toHaveFocus();
+  expect(screen.getByText("暂无操作日志")).toBeVisible();
+  fireEvent.keyDown(screen.getByRole("tab", {name: "日志"}), {key: "ArrowRight"});
+  expect(tab).toHaveFocus();
+  fireEvent.keyDown(tab, {key: "End"});
+  expect(screen.getByRole("tab", {name: "日志"})).toHaveAttribute("aria-selected", "true");
+  fireEvent.keyDown(screen.getByRole("tab", {name: "日志"}), {key: "Home"});
+  expect(tab).toHaveFocus();
+});
+it("shares one live log across repository checks, sync, import and refresh operations", () => {
+  const checking = {...task("checking", "running"), parentReportGeneration:"latest", createdAt:4,
+    steps:[{command:CHECK_REPOSITORIES,label:"Check",args:{repositories:["example/check"]},status:"running" as const}]};
+  updates.setState({reportGeneration:"latest"});
+  queue.setState({tasks:[
+    {...task("imported", "success", "import"),createdAt:1,steps:[{command:"import_github_repo_skills",label:"Import",args:{},result:{importedSkills:[{skillName:"Tool"}]}}]},
+    {...task("example/refresh", "failed"),createdAt:2,steps:[{command:"refresh_repository",label:"example/refresh",args:{},error:"NETWORK_ERROR: hidden-value"}]},
+    {...task("example/synced", "success", "update"),createdAt:3,steps:[{command:"apply_repository_snapshot",label:"example/synced",args:{snapshotId:"hidden-value"}}]},
+    checking,
+  ]});
+  render(<TaskCenter />);open();
+  const dialog=screen.getByRole("dialog");
+  expect(dialog.querySelector('footer svg.lucide-circle-help')).toBeNull();
+  history();
+  expect(dialog.querySelector('footer')).not.toHaveTextContent("历史记录");
+  expect(dialog.querySelector('footer')).not.toHaveTextContent("关闭窗口后");
+  fireEvent.click(screen.getByRole("tab",{name:"日志"}));
+  const log=within(screen.getByRole("region",{name:"日志"}));
+  expect(log.getByText(/example\/check/)).toHaveTextContent("检查中");
+  expect(log.getByText(/example\/synced/)).toHaveTextContent("同步仓库 · 成功");
+  expect(log.getByText(/Tool/)).toBeVisible();
+  expect(log.getByText(/example\/refresh/)).not.toHaveTextContent("成功");
+  expect(log.queryByText(/hidden-value|NETWORK_ERROR/)).not.toBeInTheDocument();
+  const result=repo({repository:"Example/check",modified:[],unchanged:[]});
+  act(()=>queue.setState(state=>({tasks:state.tasks.map(item=>item.id===checking.id?{...item,status:"success",steps:[{...checking.steps[0],status:"success",result:{repositories:[result]}}]}:item)})));
+  expect(log.getAllByText(/example\/check/i)).toHaveLength(1);
+  expect(log.getByText(/example\/check/i)).toHaveTextContent("成功");
+  act(()=>queue.setState(state=>({tasks:[...state.tasks,{...task("next-refresh", "queued"),createdAt:5,steps:[{command:"refresh_repository",label:"example/next",args:{}}]}]})));
+  expect(log.getByText(/example\/next/)).toHaveTextContent("等待中");
+  expect(dialog.querySelector('footer')).toBeNull();
 });
 it("keeps completed batches until explicitly archived", () => {
   queue.setState({
@@ -399,7 +489,7 @@ it("shows file progress and retains detailed file/skill information in logs", ()
   expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuemax", "8");
   fireEvent.click(screen.getByText("日志"));
   expect(screen.getByText("当前文件：scripts/run.py")).toBeVisible();
-  expect(screen.getByText("b/SKILL.md")).toBeVisible();
+  expect(within(screen.getByRole("region", {name: "日志"})).getByText(/b\/SKILL.md/)).toBeVisible();
 });
 it("requires inline deletion confirmation and invalidates it when the snapshot changes", () => {
   const enqueue = mockEnqueue();
@@ -417,7 +507,7 @@ it("requires inline deletion confirmation and invalidates it when the snapshot c
   const submit = () =>
     screen.getByRole("button", { name: /同步已选 [01] 个仓库/ });
   expect(submit()).toBeDisabled();
-  fireEvent.click(screen.getByText("核对风险"));
+  openRepositoryDetails();
   fireEvent.click(screen.getByRole("button", {name: "允许删除并选中"}));
   expect(submit()).toBeEnabled();
   act(() =>
@@ -433,7 +523,7 @@ it("requires inline deletion confirmation and invalidates it when the snapshot c
     }),
   );
   expect(submit()).toBeDisabled();
-  fireEvent.click(screen.getByText("核对风险"));
+  openRepositoryDetails();
   fireEvent.click(screen.getByRole("button", {name: "允许删除并选中"}));
   fireEvent.click(submit());
   expect(enqueue).toHaveBeenCalledOnce();
@@ -448,6 +538,29 @@ it("requires inline deletion confirmation and invalidates it when the snapshot c
   });
   expect(screen.getAllByRole("article")).toHaveLength(1);
 });
+it.each(["overwrite", "deletion"] as const)("shows and retains the %s confirmation state until it is withdrawn or the snapshot changes", (kind) => {
+  const risk = kind === "deletion" ? {deleted: [{skillId: "removed", name: "Removed"}]} : {localModified: true};
+  updates.setState({preview: {repositories: [repo(risk)]}});
+  render(<TaskCenter />); open();
+  const row = () => within(screen.getByRole("region", {name: "example/repo"}));
+  expect(row().getByText("需确认")).toBeVisible();
+  const detail = openRepositoryDetails();
+  const approve = kind === "deletion" ? "允许删除并选中" : "允许覆盖并选中";
+  fireEvent.click(row().getByRole("button", {name: approve}));
+  expect(detail).toHaveAttribute("aria-expanded", "false");
+  expect(row().getByText("已确认")).toBeVisible();
+  expect(row().getByRole("checkbox", {name: "example/repo"})).toBeChecked();
+  fireEvent.click(row().getByRole("checkbox", {name: "example/repo"}));
+  expect(row().getByText("已确认")).toBeVisible();
+  fireEvent.click(row().getByRole("button", {name: "撤回确认"}));
+  expect(row().getByText("需确认")).toBeVisible();
+  openRepositoryDetails();
+  fireEvent.click(row().getByRole("button", {name: approve}));
+  act(() => updates.setState({preview: {repositories: [repo({...risk, snapshotId: "new-snapshot"})]}}));
+  expect(row().getByText("需确认")).toBeVisible();
+  expect(row().queryByText("已确认")).not.toBeInTheDocument();
+});
+
 it("requires confirmation for deleted files even when no skill is removed", () => {
   updates.setState({
     preview: {
@@ -458,7 +571,7 @@ it("requires confirmation for deleted files even when no skill is removed", () =
   });
   render(<TaskCenter />);
   open();
-  fireEvent.click(screen.getByText("核对风险"));
+  openRepositoryDetails();
   expect(screen.getByRole("button", {name: "允许删除并选中"})).toBeVisible();
   expect(screen.queryByRole("checkbox", { name: /确认删除/ })).not.toBeInTheDocument();
   expect(
@@ -537,6 +650,37 @@ it("selects routine repositories in bulk and excludes unconfirmed risk and faile
   expect(enqueue).toHaveBeenCalledTimes(98);
   expect(enqueue.mock.calls.every(([input]) => input.steps[0].args.snapshotId !== "risk")).toBe(true);
 });
+it("selects only ready repositories and shows partial selection explicitly", () => {
+  updates.setState({preview:{repositories:[
+    ...Array.from({length:3},(_,i)=>repo({repository:`example/ready-${i}`,snapshotId:`ready-${i}`})),
+    repo({repository:"example/risky",snapshotId:"risk",localModified:true}),
+  ]}});
+  render(<TaskCenter />);open();
+  const all=screen.getByRole("checkbox",{name:"选择所有可同步仓库"});
+  expect(all).toBeChecked();
+  fireEvent.click(all);
+  expect(screen.getByRole("button",{name:"同步已选 0 个仓库"})).toBeDisabled();
+  fireEvent.click(all);
+  expect(screen.getByRole("button",{name:"同步已选 3 个仓库"})).toBeEnabled();
+  fireEvent.click(screen.getByRole("button",{name:/^可同步/}));
+  fireEvent.click(screen.getByRole("checkbox",{name:"example/ready-0"}));
+  expect(all).toBePartiallyChecked();
+  expect(screen.getByRole("button",{name:"同步已选 2 个仓库"})).toBeEnabled();
+});
+it("omits selection descriptions and places bulk recheck beside the batch delete action", () => {
+  const recheck=vi.spyOn(updates.getState(),"recheckRepositories").mockResolvedValue();
+  updates.setState({preview:{repositories:[repo({error:"IMPORT_SOURCE_MISSING",snapshotId:null})]}});
+  render(<TaskCenter />);open();
+  expect(screen.getByRole("checkbox",{name:"选择所有可同步仓库"})).toBeDisabled();
+  expect(screen.queryByText("暂无可同步项，请先确认或重查")).not.toBeInTheDocument();
+  expect(screen.queryByText(/已选 \d+ 个仓库待同步/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/\d+ 项需确认 · \d+ 项需重查/)).not.toBeInTheDocument();
+  const retry=screen.getByRole("button",{name:"重新检查 1 项"});
+  expect(retry.parentElement).toContainElement(screen.getByRole("button",{name:"删除任务记录：更新技能仓库"}));
+  expect(within(screen.getByRole("complementary",{name:"仓库任务筛选"})).queryByRole("button",{name:/重新检查/})).not.toBeInTheDocument();
+  fireEvent.click(retry);
+  expect(recheck).toHaveBeenCalledWith(["example/repo"]);
+});
 it("keeps other repository rechecks and sync available while one repository is checking", () => {
   const recheck = vi.spyOn(updates.getState(), "recheckRepository").mockResolvedValue();
   updates.setState({checkingRepository: "example/first", preview: {repositories: [repo(), repo({repository: "example/second", error: "NETWORK_ERROR", snapshotId: null}), repo({repository: "example/third", error: "NETWORK_ERROR", snapshotId: null})]}});
@@ -559,7 +703,7 @@ it("keeps multiple batches expanded without resetting import choices", () => {
   updates.setState({preview: {repositories: [repo({deleted: [{skillId: "old", name: "Old"}]})]}});
   render(<TaskCenter />); open();
   expand("导入技能 example/skills");
-  expect(screen.getByText("核对风险")).toBeVisible();
+  expect(screen.getByRole("button", {name: "查看详情"})).toBeVisible();
   expect(screen.getByRole("combobox", {name: "同名处理：Alpha"})).toBeVisible();
 });
 
@@ -568,8 +712,11 @@ it("groups expanded review details and removes the unrelated address action",()=
   render(<TaskCenter/>);open();
   const section=screen.getByRole("region",{name:"example/repo"});
   expect(section).toHaveClass("rounded-md","border");
-  const disclosure=within(section).getByText("核对风险").closest("details")!;
-  expect(disclosure).toHaveClass("open:border-border","open:bg-muted/20");
+  const disclosure=within(section).getByRole("button", {name: "查看详情"});
+  expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(disclosure);
+  expect(disclosure).toHaveAttribute("aria-expanded", "true");
+  expect(document.getElementById(disclosure.getAttribute("aria-controls")!)).toHaveClass("border-border","bg-muted/20");
   expect(screen.queryByRole("button",{name:"修改仓库地址"})).not.toBeInTheDocument();
 });
 it("deletes an import awaiting selection without submitting it",()=>{

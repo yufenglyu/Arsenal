@@ -49,6 +49,31 @@ beforeEach(() => {
   });
 });
 afterEach(() => vi.restoreAllMocks());
+it("keeps a repository's structural failure instead of the batch's partial-check summary", () => {
+  const bad = {...repo,error:"IMPORT_SOURCE_MISSING",snapshotId:null};
+  const good = {...repo,repository:"example/good",snapshotId:"good"};
+  updates.setState({preview:{repositories:[bad,good]}});
+  const failed = {...task("partial", "partial"), steps:[{command:CHECK_REPOSITORIES,label:"Check",args:{repositories:["example/repo","example/good"]},status:"partial" as const,error:"Partial batch summary",result:{repositories:[bad,good]}}]};
+  const rows = reportRows(updates.getState(), [failed]);
+  expect(rows.find(row=>row.repository==="example/repo")?.error).toBe("IMPORT_SOURCE_MISSING");
+  expect(rows.find(row=>row.repository==="example/good")).toMatchObject({status:"success",error:undefined,needsCheck:false});
+});
+it("does not revive an old sync failure while rechecking its snapshot", () => {
+  const failed = {...task("apply", "failed"), steps: [{command: "apply_repository_snapshot", label: "Apply", args: {snapshotId: "snapshot"}, status: "failed" as const, error: "LOCAL_IDENTITY_CHANGED"}]};
+  const checking = {...task("recheck", "running"), createdAt: 2, steps: [{command: CHECK_REPOSITORIES, label: "Check", args: {repositories: ["example/repo"]}, status: "running" as const}]};
+  updates.setState({updateErrors: {"mirror:snapshot": "LOCAL_IDENTITY_CHANGED"}});
+  expect(reportRows(updates.getState(), [failed, checking])[0]).toMatchObject({status: "running", needsCheck: false, error: undefined});
+});
+it.each(["failed", "cancelled", "interrupted"] as const)("keeps settled %s checks retryable", status => {
+  updates.setState({preview: null});
+  const checked = {...task("check", status), steps: [{command: CHECK_REPOSITORIES, label: "Check", args: {repositories: ["example/repo"]}, status}]};
+  expect(reportRows(updates.getState(), [checked])[0]).toMatchObject({status, needsCheck: true});
+});
+it.each(["queued", "running"] as const)("does not count %s checks as needing recheck", status => {
+  updates.setState({preview: null});
+  const checking = {...task("check", status), steps: [{command: CHECK_REPOSITORIES, label: "Check", args: {repositories: ["example/repo"]}, status}]};
+  expect(reportRows(updates.getState(), [checking])[0]).toMatchObject({status, needsCheck: false});
+});
 it("finishes a checked no-change repository without retaining an apply snapshot",()=>{
   updates.setState({preview:{repositories:[{...repo,deleted:[],remoteRef:'a'.repeat(40),snapshotId:null}]}});
   expect(reportRows(updates.getState(),[])[0]).toMatchObject({status:'success',pending:false,needsCheck:false});

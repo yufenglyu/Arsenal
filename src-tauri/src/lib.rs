@@ -2,6 +2,7 @@ pub mod commands;
 pub mod config_store;
 pub mod db;
 mod db_config;
+mod desktop;
 pub mod path_utils;
 pub mod platform_icons;
 pub mod platforms;
@@ -42,6 +43,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(desktop::window_state_plugin())
         .setup(|app| {
             let db_dir = path_utils::app_data_dir();
             let pool = tauri::async_runtime::block_on(open_app_store(&db_dir))
@@ -55,6 +57,7 @@ pub fn run() {
             })
             .map_err(std::io::Error::other)?;
             app.manage(AppState { db: pool });
+            desktop::setup(app)?;
             #[cfg(all(windows, not(debug_assertions)))]
             if app.config().identifier == "com.iamzhihuix.skillsmanage" {
                 if let Err(error) = protocol::register(app.handle()) {
@@ -77,6 +80,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            desktop::exit_app,
             commands::notebook_repository::ensure_repository_notebook,
             commands::notebook_repository::save_internal_notebook,
             commands::notebook_repository::get_notebook_settings,
@@ -211,8 +215,13 @@ pub fn run() {
             commands::remote_sources::explain_skill_stream,
             commands::remote_sources::refresh_skill_explanation,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                desktop::save_window_state(app);
+            }
+        });
 }
 
 #[cfg(test)]
@@ -229,7 +238,10 @@ mod current_config_startup_tests {
         drop(storage::store::Store::open(&current).unwrap());
         let pool = open_app_store(&current).await.unwrap();
         assert_eq!(pool.directory(), current);
-        assert_eq!(fs::read(legacy.join("config.json")).unwrap(), b"legacy fixture");
+        assert_eq!(
+            fs::read(legacy.join("config.json")).unwrap(),
+            b"legacy fixture"
+        );
         assert!(!current.join("migrations/arsenal-paths-v2").exists());
     }
 

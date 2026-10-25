@@ -94,28 +94,39 @@ export function reportRows(
       for (const name of names) {
         const previous = rows.get(name.toLowerCase());
         const status = step.status ?? task.status;
-        if (status === "success" && previous) {
+        const checked = (step.result as {repositories?: RepositorySyncPreview[]} | undefined)?.repositories?.find(repo => repo.repository.toLowerCase() === name.toLowerCase());
+        const outcome = !["queued", "running"].includes(status) && checked ? (checked.error ? "failed" : "success") : status;
+        if (outcome === "success" && previous) {
           // A later successful retry clears the older failed step, while preserving
           // the report's snapshot and change inventory.
           rows.set(name.toLowerCase(), {
             ...previous,
-            status: previous.preview?.error ? "failed" : "success",
-            error: previous.preview?.error ?? undefined,
-            needsCheck: needsSnapshotCheck(previous.preview),
+            status: (checked ? checked.error : previous.preview?.error) ? "failed" : "success",
+            error: (checked ? checked.error : previous.preview?.error) ?? undefined,
+            needsCheck: needsSnapshotCheck(checked ?? previous.preview),
           });
         } else
           rows.set(name.toLowerCase(), {
             repository: name,
             ...previous,
-            status,
-            error: step.error ?? previous?.error,
-            needsCheck: status !== "success" || needsSnapshotCheck(previous?.preview),
+            status: outcome,
+            error: ["queued", "running"].includes(status) ? undefined : checked?.error ?? previous?.error ?? step.error,
+            // An in-flight check has no outcome yet. Retry counts describe
+            // settled failures or expired results, never queued work.
+            needsCheck: !["queued", "running"].includes(status) &&
+              (outcome !== "success" || needsSnapshotCheck(checked ?? previous?.preview)),
             pending: previous?.pending ?? false,
           });
       }
     }
   for (const [key, row] of rows) {
-    const lastCheck = Math.max(-1, ...tasks.filter(task => task.steps.some(step => step.command === CHECK_REPOSITORIES && step.status === "success" && Array.isArray(step.args.repositories) && step.args.repositories.some(name => typeof name === "string" && name.toLowerCase() === key))).map(task => task.createdAt));
+    // A fresh check supersedes stale apply failures while it is still running.
+    if (["queued", "running"].includes(row.status)) continue;
+    const lastCheck = Math.max(-1, ...tasks.filter(task => task.steps.some(step => {
+      if (step.command !== CHECK_REPOSITORIES || !Array.isArray(step.args.repositories) || !step.args.repositories.some(name => typeof name === "string" && name.toLowerCase() === key)) return false;
+      const checked = (step.result as {repositories?: RepositorySyncPreview[]} | undefined)?.repositories?.find(repo => repo.repository.toLowerCase() === key);
+      return step.status === "success" || (!!checked && !checked.error && !["queued", "running"].includes(step.status ?? task.status));
+    })).map(task => task.createdAt));
     const applyTask = [...tasks]
       .reverse()
       .find((task) => task.createdAt >= lastCheck &&

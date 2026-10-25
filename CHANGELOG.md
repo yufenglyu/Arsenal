@@ -2,6 +2,19 @@
 
 [English](CHANGELOG.md) | [简体中文](CHANGELOG.zh.md)
 
+## 1.5.0 - 2026-10-25
+
+- Remember the main window's size, position and maximized state. Closing hides the app to the system tray; left-click restores it, and the right-click menu offers Show main window and Quit. Confirm quitting while tasks are active.
+- Add a repository update workspace with a left filter sidebar, compact change summaries and consistent icon actions. Keep Current tasks, History and a shared operation Log in the task header; remove task search boxes and redundant footer hints.
+- Put risk notices and approval on one title row. Approval changes the repository state to Confirmed, selects it for synchronization and collapses its details; rechecking a changed snapshot requires a fresh approval.
+- Show recognized failure causes and recovery advice for imports, checks, metadata refreshes, synchronization and AI tasks. Preserve backend error codes, reject missing check results, and report view-refresh warnings separately from completed writes.
+- Fix repository metadata refreshes for shared-directory links into the library. Retry counts now describe settled failures or expired results rather than queued checks.
+- Retry transient Windows file-sharing failures during atomic metadata publication, retaining the committed file and reporting persistent failures after a bounded wait.
+- Retain selected source variants during updates, deduplicate identical skill packages, support categorized directories and moved sources, and exclude script test fixtures and ordinary lowercase guides from skill discovery. Keep a previously installed root package scoped when its source moves.
+- Add recoverable deletion and repository reimport through the recycle bin, including binary payload archives, skill-name filtering and safer conflict handling.
+- Refine library toolbar geometry, group selection, sidebar counts and notebook controls. Display Arsenal branding while retaining existing note property keys, plugin ID and navigation protocols.
+- Update bilingual usage documentation and screenshots with fictional data, including update review, actionable failures and the unified log.
+
 ## 1.4.1 - 2026-10-19
 
 - Remove automatic legacy configuration and installation-link migration, which could abort startup on macOS when an old link points to missing data.

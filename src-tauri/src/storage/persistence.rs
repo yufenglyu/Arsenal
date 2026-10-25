@@ -55,11 +55,19 @@ fn replace(source: &Path, target: &Path) -> Result<(), String> {
     }
     let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
     let target: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
-    if unsafe { MoveFileExW(source.as_ptr(), target.as_ptr(), 1 | 8) } == 0 {
-        Err(std::io::Error::last_os_error().to_string())
-    } else {
-        Ok(())
+    // Windows readers may briefly deny rename/delete sharing. Retry the same
+    // atomic replacement, never remove the committed target to work around it.
+    for attempt in 0..8 {
+        if unsafe { MoveFileExW(source.as_ptr(), target.as_ptr(), 1 | 8) } != 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if attempt == 7 || !matches!(error.raw_os_error(), Some(5 | 32 | 33)) {
+            return Err(error.to_string());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10 << attempt.min(3)));
     }
+    unreachable!()
 }
 #[cfg(not(windows))]
 fn replace(source: &Path, target: &Path) -> Result<(), String> {
@@ -431,6 +439,34 @@ mod tests {
     use super::*;
     use crate::storage::store::Store;
     use serde_json::json;
+
+    #[cfg(windows)]
+    #[test]
+    fn atomic_replacement_waits_for_a_temporary_windows_reader() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("manifest.json");
+        let source = dir.path().join("pending.json");
+        fs::write(&target, b"previous").unwrap();
+        fs::write(&source, b"next").unwrap();
+        // An ordinary reader allowing read sharing but denying delete sharing.
+        let reader = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&target)
+            .unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            drop(reader);
+        });
+        replace(&source, &target).unwrap();
+        release.join().unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"next");
+        assert!(!source.exists());
+        let missing = dir.path().join("missing");
+        assert!(replace(&missing, &target).is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"next");
+    }
 
     #[tokio::test]
     async fn parallel_large_encoding_deduplicates_and_keeps_atomic_publication() {

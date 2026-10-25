@@ -58,17 +58,24 @@ Configure custom platforms and skill paths. Shared-directory discovery depends o
 
 **Refresh repository information** retrieves metadata, stars and documentation. **Update skill library** checks source content and lets you confirm synchronization. These are separate operations, available for a batch or a single repository.
 
-Review additions, modifications, deletions and document changes by repository, then expand skills to inspect the affected files. Select repositories to update; retry failed checks individually.
+Use the left sidebar to filter Pending, Ready, Needs confirmation, Needs recheck, Completed or All. Review additions, modifications, deletions and document changes by repository, then expand skills to inspect affected files. Select all applies only to repositories ready to sync. Approving a risk changes the row to Confirmed and collapses its details; a fresh snapshot needs a fresh approval.
 
 ![Repository update review expanded to file-level changes, with a separate retry for a failed repository](docs/images/product/review-en.png)
 
-> Source updates mirror the selected repositories. They overwrite local skill content and process upstream deletions. Keep personal knowledge in remarks or notes, and back up local edits you want to preserve.
+> Source updates mirror the selected repository scope and retained import choices. They can overwrite local skill content and process upstream deletions. Keep personal knowledge in remarks or notes, and back up local edits you want to preserve. Reimport a repository when you want to change its selected source variants.
 
 ## Batch work, with attention where it is needed
 
-Tasks start with a batch summary. Skill selection, import conflicts and update reviews expand inside the corresponding row, keeping other tasks in context. Completed items can stay folded while errors and retry actions remain easy to find.
+Tasks start with a compact batch summary. Skill selection, import conflicts and update reviews expand inside the corresponding row. Current tasks, History and Log share the same header. The log records repository results and operation warnings; it is available without scrolling to the bottom of a batch.
 
 ![Task center showing an import, a single-repository refresh and a library update with their own states and actions](docs/images/product/tasks-en.png)
+
+![Unified operation log showing check results and actionable failures](docs/images/product/log-en.png)
+
+- **Diagnose failures:** task rows and the log show recognized causes and recovery advice, such as a timeout, authorization failure, occupied file or expired snapshot. Unknown exceptions identify the operation and diagnostic code; old records cannot recover a cause that was never saved.
+- **Retry safely:** Needs recheck counts settled failures or expired results, not waiting checks. Retry individual repositories or use the update header's retry icon. A completed write with a view-refresh warning remains completed, preventing an unnecessary repeat write.
+
+![Failed check with a specific reason and recovery advice](docs/images/product/errors-en.png)
 
 - **Resume checks:** progress is recorded per repository, so unfinished work can continue after stopping or restarting.
 - **Keep working:** closing the task window leaves background work running.
@@ -79,7 +86,9 @@ Tasks start with a batch summary. Skill selection, import conflicts and update r
 
 Read documents beside the library and record when a skill helps, what inputs it needs and where its limits are. AI can suggest remarks and tags for you to edit and confirm. Link longer practical records to Obsidian notes with stable identifiers.
 
-See the [companion integration](integrations/) for Obsidian setup and requirements. AI features require a configured service and send relevant content to your selected provider.
+See the [companion integration](integrations/obsidian-arsenal/README.md) for Obsidian setup and requirements. AI features require a configured service and send relevant content to your selected provider.
+
+Deleted library items go to the recycle bin, where you can search by repository or skill name and restore recoverable records. Reimport lets you choose upstream skills again; review conflicts before replacing content. Emptying the recycle bin permanently removes its recovery data.
 
 ## Get started
 
@@ -90,9 +99,11 @@ See the [companion integration](integrations/) for Obsidian setup and requiremen
 
 Default shortcuts: `Ctrl/Cmd + K` for global search, `Ctrl/Cmd + F` for page search, `F3` to switch repository / flat views, and `F5` to refresh the list. Shortcuts can be changed in Settings.
 
+The main window remembers its size, position and maximized state. Closing it hides Arsenal to the system tray and leaves tasks running. Left-click the tray icon to restore it; the right-click menu offers **Show main window** and **Quit**. Quit asks for confirmation when tasks are active. Tray click support depends on the desktop environment on Linux.
+
 ### Local data and backups
 
-Skills and configuration are stored locally, with local and WebDAV backups available. Windows portable mode keeps `arsenal.exe` beside the `.arsenal` data directory. Exit and back up before upgrading; preserve your existing `.arsenal` instead of replacing it with packaged defaults.
+Skills and configuration are stored locally, with local and WebDAV backups available. Windows portable mode keeps `arsenal.exe` beside the `.arsenal` data directory. Choose **Quit** from the tray menu and back up before upgrading; closing the window only hides it. Preserve your existing `.arsenal` instead of replacing it with packaged defaults.
 
 Arsenal reads the current `.arsenal` configuration directly. Legacy configuration directories and pointers are not migrated or modified automatically.
 

@@ -1,6 +1,6 @@
 [package]
 name = "arsenal"
-version = "1.4.1"
+version = "1.5.0"
 description = "AI tools and capabilities management"
 authors = ["yufenglyu"]
 license = "Apache-2.0"
@@ -40,7 +40,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tokio = { version = "1", features = ["sync"] }
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-window-state = "=2.4.1"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"

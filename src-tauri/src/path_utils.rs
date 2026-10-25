@@ -1046,12 +1046,25 @@ mod tests {
         let exe = temp.path().join("app");
         std::fs::create_dir_all(exe.join(".skillshub")).unwrap();
         std::fs::create_dir_all(&home).unwrap();
-        assert_eq!(resolve_app_data_dir_from(Some(&exe), &home), home.join(".arsenal"));
+        assert_eq!(
+            resolve_app_data_dir_from(Some(&exe), &home),
+            home.join(".arsenal")
+        );
         let custom = temp.path().join("custom/.skillshub");
         std::fs::write(exe.join("skillshub-config-path"), custom.to_str().unwrap()).unwrap();
-        assert_eq!(resolve_app_data_dir_from(Some(&exe), &home), home.join(".arsenal"));
-        std::fs::write(home.join(".skillshub-config-path"), custom.to_str().unwrap()).unwrap();
-        assert_eq!(resolve_app_data_dir_from(None, &home), home.join(".arsenal"));
+        assert_eq!(
+            resolve_app_data_dir_from(Some(&exe), &home),
+            home.join(".arsenal")
+        );
+        std::fs::write(
+            home.join(".skillshub-config-path"),
+            custom.to_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_app_data_dir_from(None, &home),
+            home.join(".arsenal")
+        );
     }
 
     #[test]

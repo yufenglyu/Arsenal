@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import {taskErrorMessage} from "@/lib/taskErrors";
 import { invoke, isTauriRuntime } from "@/lib/tauri";
 import {
   AddLocalResourceSkillsInput,
@@ -214,9 +215,17 @@ export const useResourceLibraryStore = create<ResourceLibraryState>((set, get) =
       "preview_source_backed_resource_repository_updates",
       { repositories: repositories ?? null, ...(retainedSnapshotIds ? {retainedSnapshotIds} : {}) }
     );
-    const skills = await invoke<SkillWithLinks[]>("get_resource_library_skills");
-    set({ skills });
-    return preview;
+    try {
+      const skills = await invoke<SkillWithLinks[]>("get_resource_library_skills");
+      set({ skills, error: null });
+      return preview;
+    } catch (error) {
+      // The remote check already produced a valid snapshot. A failed list reload
+      // must not discard it or make the user repeat the check unnecessarily.
+      const message = taskErrorMessage(error, "check", "preview_source_backed_resource_repository_updates");
+      set({error: message});
+      return {...preview, viewRefreshError: message};
+    }
   },
 
   syncSourceBackedSkills: async (options) => {

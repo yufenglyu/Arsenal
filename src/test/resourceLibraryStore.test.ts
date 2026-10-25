@@ -138,6 +138,13 @@ describe("resourceLibraryStore platform installs", () => {
       options: { includeAdded: true, removeDeleted: true },
     });
   });
+  it("retains a completed repository check if only refreshing the list fails", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({repositories: []}).mockRejectedValueOnce(new Error("File private-value in use (os error 32)"));
+    const report = await useResourceLibraryStore.getState().previewRepositorySync();
+    expect(report.repositories).toEqual([]);
+    expect(report).toHaveProperty("viewRefreshError");
+    expect(JSON.stringify(report)).not.toContain("private-value");
+  });
 
   it("removes only the central copy and reloads the resource skill", async () => {
     const restoredSkill = {

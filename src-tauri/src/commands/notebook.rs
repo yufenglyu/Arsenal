@@ -1,5 +1,5 @@
-use crate::AppState;
 use super::notebook_repository as db;
+use crate::AppState;
 pub(super) static WRITE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 use base64::Engine;
 use notify::Watcher;
@@ -78,9 +78,18 @@ pub fn valid_relative(value: &str) -> bool {
 
 // Settings accept either separator and an optional vault-root prefix.
 pub fn normalize_note_folder(value: &str) -> Result<String, String> {
-    let normalized = value.trim().replace('\\', "/")
-        .split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>().join("/");
-    let normalized = if normalized.is_empty() { "SkillsHub".into() } else { normalized };
+    let normalized = value
+        .trim()
+        .replace('\\', "/")
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("/");
+    let normalized = if normalized.is_empty() {
+        "Arsenal".into()
+    } else {
+        normalized
+    };
     if !valid_relative(&normalized) {
         return Err("notePath".into());
     }
@@ -387,7 +396,8 @@ pub fn validate_template(template: &str) -> Result<(), String> {
 }
 
 fn configured_template(pool: &crate::db::AppStore) -> Result<String, String> {
-    Ok(crate::db::load_config(pool)?.settings
+    Ok(crate::db::load_config(pool)?
+        .settings
         .get("obsidian_property_template")
         .filter(|s| !s.trim().is_empty())
         .cloned()
@@ -727,7 +737,12 @@ pub async fn preview_notebook_properties(
 ) -> Result<String, String> {
     let repository = db::get(&state.db, id).await?;
     let categories = db::categories(&state.db).await?;
-    properties_with_template("", &repository, &categories, &configured_template(&state.db)?)
+    properties_with_template(
+        "",
+        &repository,
+        &categories,
+        &configured_template(&state.db)?,
+    )
 }
 
 #[tauri::command]
@@ -785,7 +800,12 @@ pub async fn bind_notebook(
         }
     }
     let categories = db::categories(&state.db).await?;
-    let text = properties_with_template(&text, &repository, &categories, &configured_template(&state.db)?)?;
+    let text = properties_with_template(
+        &text,
+        &repository,
+        &categories,
+        &configured_template(&state.db)?,
+    )?;
     write_checked(
         &path,
         if create {
@@ -822,7 +842,12 @@ pub async fn save_notebook(
     }
     let next = if update_properties {
         let categories = db::categories(&state.db).await?;
-        properties_with_template(&current, &repository, &categories, &configured_template(&state.db)?)?
+        properties_with_template(
+            &current,
+            &repository,
+            &categories,
+            &configured_template(&state.db)?,
+        )?
     } else {
         let prefix = parts(&current)?.0;
         let separator = if prefix.ends_with("---") { "\n" } else { "" };
@@ -1060,7 +1085,11 @@ pub async fn notebook_asset(
 }
 
 #[tauri::command]
-pub fn watch_notebook(app: tauri::AppHandle, state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+pub fn watch_notebook(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
     let runtime = app.state::<NotebookRuntime>();
     let mut slot = runtime.watcher.lock().map_err(|_| "operation")?;
     *slot = None;
@@ -1165,7 +1194,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
         let state = AppState {
-            db: db::open_test_store(&root.join("test.sqlite")).await.unwrap(),
+            db: db::open_test_store(&root.join("test.sqlite"))
+                .await
+                .unwrap(),
         };
         let mut repository = db::Repository::new(1, "example/project".into());
         let binding = binding_for_note(
@@ -1240,7 +1271,8 @@ mod tests {
 
     #[test]
     fn property_display_uses_yaml_without_changing_file_bytes() {
-        let original = "---\n\"skillshub_tags\": [\"one\", \"two\"]\n\"skillshub_stars\": 42\n---\nbody";
+        let original =
+            "---\n\"skillshub_tags\": [\"one\", \"two\"]\n\"skillshub_stars\": 42\n---\nbody";
         let file = snapshot(original, "note.md").unwrap();
         assert!(file.properties.contains("skillshub_tags:\n- one\n- two"));
         assert!(file.properties.contains("skillshub_stars: 42"));
@@ -1253,7 +1285,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
         let state = AppState {
-            db: db::open_test_store(&root.join("test.sqlite")).await.unwrap(),
+            db: db::open_test_store(&root.join("test.sqlite"))
+                .await
+                .unwrap(),
         };
         let mut repo = db::Repository::new(101, "fixture/identity".into());
         repo.obsidian = Some(binding_for_path(&root, "old.md").unwrap());
@@ -1327,7 +1361,13 @@ mod tests {
         assert_eq!(values["skillshub_tags"][0].as_str(), Some("中文"));
         assert_eq!(
             values["skillshub_uri"].as_str(),
-            Some(format!("skillshub://repository/{}?tab=notebook", repo.repository_uid).as_str())
+            Some(
+                format!(
+                    "skillshub://repository/{}?tab=notebook",
+                    repo.repository_uid
+                )
+                .as_str()
+            )
         );
         repo.stars = None;
         let next = properties(&next, &repo, &[]).unwrap();
@@ -1430,7 +1470,13 @@ fn yaml_templates_keep_types_escape_values_and_protect_identity() {
     );
     assert_eq!(
         data["skillshub_uri"].as_str(),
-        Some(format!("skillshub://repository/{}?tab=notebook", repo.repository_uid).as_str())
+        Some(
+            format!(
+                "skillshub://repository/{}?tab=notebook",
+                repo.repository_uid
+            )
+            .as_str()
+        )
     );
     assert!(front.contains("name: example/project"));
     for invalid in [
@@ -1454,18 +1500,38 @@ mod folder_tests {
     use super::*;
     #[test]
     fn normalizes_vault_relative_directories_and_rejects_escape() {
-        for input in [r"\附件\SkillsHub", "附件/SkillsHub", "/附件/SkillsHub/", r"附件\SkillsHub\"] {
-            assert_eq!(normalize_note_folder(input).unwrap(), "附件/SkillsHub");
+        for input in [
+            r"\附件\Arsenal",
+            "附件/Arsenal",
+            "/附件/Arsenal/",
+            r"附件\Arsenal\",
+        ] {
+            assert_eq!(normalize_note_folder(input).unwrap(), "附件/Arsenal");
         }
-        assert_eq!(normalize_note_folder("").unwrap(), "SkillsHub");
-        for input in [r"..\outside", "a/../outside", "./SkillsHub", r"C:\outside", "CON", ".obsidian"] {
+        assert_eq!(normalize_note_folder("").unwrap(), "Arsenal");
+        for input in [
+            r"..\outside",
+            "a/../outside",
+            "./Arsenal",
+            r"C:\outside",
+            "CON",
+            ".obsidian",
+        ] {
             assert!(normalize_note_folder(input).is_err());
         }
         let root = tempfile::tempdir().unwrap();
-        let folder = normalize_note_folder(r"\附件\SkillsHub").unwrap();
+        let folder = normalize_note_folder(r"\附件\Arsenal").unwrap();
         let canonical_root = std::fs::canonicalize(root.path()).unwrap();
-        let path = safe_path(&canonical_root, &format!("{folder}/project@example.md"), true).unwrap();
+        let path = safe_path(
+            &canonical_root,
+            &format!("{folder}/project@example.md"),
+            true,
+        )
+        .unwrap();
         write_checked(&path, None, "# Fixture").unwrap();
-        assert_eq!(read_file(&root.path().join("附件/SkillsHub/project@example.md")).unwrap(), "# Fixture");
+        assert_eq!(
+            read_file(&root.path().join("附件/Arsenal/project@example.md")).unwrap(),
+            "# Fixture"
+        );
     }
 }

@@ -49,7 +49,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "arsenal"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -74,6 +74,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-shell",
  "tauri-plugin-single-instance",
+ "tauri-plugin-window-state",
  "tempfile",
  "tokio",
  "uuid",
@@ -4624,6 +4625,21 @@ dependencies = [
  "tracing",
  "windows-sys 0.60.2",
  "zbus",
+]
+
+[[package]]
+name = "tauri-plugin-window-state"
+version = "2.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73736611e14142408d15353e21e3cca2f12a3cfb523ad0ce85999b6d2ef1a704"
+dependencies = [
+ "bitflags 2.11.0",
+ "log",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

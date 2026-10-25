@@ -14,11 +14,11 @@ export function NotebookSettings() {
   const { t } = useTranslation();
   const config = useNotebookStore(s => s.config);
   const [vault, setVault] = useState("");
-  const [folder, setFolder] = useState("SkillsHub");
+  const [folder, setFolder] = useState("Arsenal");
   const [template, setTemplate] = useState(defaultTemplate.template);
   const [busy, setBusy] = useState(false);
   useEffect(() => { void useNotebookStore.getState().loadConfig(); }, []);
-  useEffect(() => { setVault(config.obsidian_vault_path ?? ""); setFolder(config.obsidian_note_folder ?? "SkillsHub"); setTemplate(config.obsidian_property_template || defaultTemplate.template); }, [config]);
+  useEffect(() => { setVault(config.obsidian_vault_path ?? ""); setFolder(config.obsidian_note_folder ?? "Arsenal"); setTemplate(config.obsidian_property_template || defaultTemplate.template); }, [config]);
   return (
     <Card>
       <details className="group/notebook-settings">
@@ -57,7 +57,10 @@ export function NotebookSettings() {
             <Input id="notebook-folder" value={folder} disabled={busy} onChange={e => setFolder(e.target.value)} />
           </div>
           <div className="space-y-2">
-            <label htmlFor="notebook-template" className="block text-sm">{t("notebookSettings.template")}</label>
+            <div className="flex items-center gap-1">
+              <label htmlFor="notebook-template" className="text-sm">{t("notebookSettings.template")}</label>
+              <HintIcon text={t("notebookSettings.templateIdentity")} className="text-xs [&_svg]:size-[1em]" />
+            </div>
             <Textarea id="notebook-template" className="min-h-64 font-mono" value={template} disabled={busy} onChange={e => setTemplate(e.target.value)} />
           </div>
           <div className="flex flex-wrap justify-end gap-2">

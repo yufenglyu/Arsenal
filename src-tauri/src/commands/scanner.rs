@@ -1222,7 +1222,7 @@ mod tests {
 
     async fn setup_test_db() -> AppStore {
         use crate::db;
-        use crate::db::AppStore as AppStore;
+        use crate::db::AppStore;
         let pool = AppStore::connect(":memory:").await.expect("in-memory DB");
         db::init_database(&pool).await.expect("init");
         pool
@@ -1244,7 +1244,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_scan_all_skills_impl_empty_dirs() {
-        use crate::db::AppStore as AppStore;
+        use crate::db::AppStore;
 
         // Build a pool with tables but no seeded agents so the test is
         // isolated from whatever the user has installed on their machine.

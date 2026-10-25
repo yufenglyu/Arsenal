@@ -299,6 +299,30 @@ fn empty_report(repository: &str) -> RepositorySyncPreview {
         error: None,
     }
 }
+fn single_package_source(snapshot: &Snapshot) -> Option<&str> {
+    if snapshot.originals.is_empty() {
+        return None;
+    }
+    if let Some(source) = snapshot
+        .import_rules
+        .as_ref()
+        .and_then(|rules| rules.package_source.as_deref())
+    {
+        return Some(source);
+    }
+    (snapshot
+        .originals
+        .iter()
+        .all(|(source, _)| source.source_path.as_deref() == Some("SKILL.md"))
+        && snapshot.import_rules.as_ref().is_none_or(|rules| {
+            !rules
+                .groups
+                .values()
+                .flatten()
+                .any(|path| path != "SKILL.md" && !rules.excluded_paths.contains_key(path))
+        }))
+    .then_some("SKILL.md")
+}
 fn validate_snapshot(snapshot: &Snapshot) -> Result<Vec<github::RemoteSkillCandidate>, String> {
     if snapshot.version != 1 || !github::is_commit_ref(&snapshot.repo.branch) {
         return Err("PREVIEW_EXPIRED".into());
@@ -325,7 +349,85 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<Vec<github::RemoteSkillCandi
             return Err("UNSAFE_SNAPSHOT_PATH".into());
         }
     }
-    let candidates = super::repository_import_rules::update_candidates(&snapshot.repo, &snapshot.contents, snapshot.import_rules.as_ref())?;
+    let candidates = if let Some(source_path) = single_package_source(snapshot) {
+        // A root skill is one installed package. Nested SKILL.md files can be
+        // benchmarks, generated books or alternate bundles; discovering them
+        // does not authorize expanding that package into new installations.
+        if snapshot
+            .originals
+            .iter()
+            .any(|(source, _)| source.source_path.as_deref() != Some(source_path))
+            || snapshot
+                .import_rules
+                .as_ref()
+                .is_some_and(|rules| rules.excluded_paths.contains_key(source_path))
+        {
+            return Err("IMPORT_SOURCE_MISSING".into());
+        }
+        if let Some(bytes) = snapshot.contents.files.get(source_path) {
+            let selected = github::GitHubRepoSnapshot {
+                files: [(source_path.into(), bytes.clone())].into(),
+            };
+            github::build_repo_skill_candidates_from_snapshot(&snapshot.repo, &selected)?
+        } else {
+            // A unique same-name package in a canonical skills directory can be
+            // offered as an explicit add/delete replacement. Do not rewrite its
+            // identity or apply it during checking, and never choose test output.
+            let matching: Vec<_> = github::build_repo_skill_candidates_from_snapshot(
+                &snapshot.repo,
+                &snapshot.contents,
+            )?
+            .into_iter()
+            .filter(|candidate| {
+                (candidate.source_path.starts_with("skills/")
+                    || candidate.source_path.starts_with(".agents/skills/"))
+                    && snapshot.originals.iter().all(|(_, skill)| {
+                        candidate
+                            .skill_name
+                            .trim()
+                            .eq_ignore_ascii_case(skill.name.trim())
+                    })
+                    && snapshot.import_rules.as_ref().is_none_or(|rules| {
+                        !rules.excluded_paths.contains_key(&candidate.source_path)
+                    })
+            })
+            .collect();
+            match matching.len() {
+                1 => matching,
+                0 => return Err("IMPORT_SOURCE_MISSING".into()),
+                _ => return Err("IMPORT_SOURCE_AMBIGUOUS".into()),
+            }
+        }
+    } else {
+        super::repository_import_rules::update_candidates(
+            &snapshot.repo,
+            &snapshot.contents,
+            snapshot.import_rules.as_ref(),
+        )?
+    };
+    if snapshot.originals.iter().any(|(source, _)| {
+        source
+            .source_path
+            .as_deref()
+            .is_some_and(github::is_skill_test_fixture_manifest)
+    }) {
+        // A previously imported test input requires an explicit new source
+        // choice. Never turn a discovery correction into a remote deletion.
+        return Err("IMPORT_SOURCE_MISSING".into());
+    }
+    if snapshot.originals.iter().any(|(source, _)| {
+        source.source_path.as_deref().is_some_and(|path| {
+            snapshot
+                .contents
+                .files
+                .get(path)
+                .is_some_and(|bytes| github::is_noncanonical_skill_document(path, bytes))
+        })
+    }) {
+        // Invalid metadata in an already installed lowercase manifest is a
+        // source error, never an instruction to delete the installed skill.
+        return Err("IMPORT_SOURCE_MISSING".into());
+    }
     let mut targets = HashSet::new();
     for candidate in &candidates {
         if !targets.insert(candidate.skill_directory_name.to_lowercase()) {
@@ -495,14 +597,15 @@ pub async fn check(
 pub async fn check_with_retained(
     pool: &AppStore,
     repositories: Option<Vec<String>>,
-    retained_snapshot_ids: Option<Vec<String>>,
+    _retained_snapshot_ids: Option<Vec<String>>,
 ) -> Result<RepositorySyncPreviewReport, String> {
     let _guard = MIRROR_LOCK.lock().await;
     super::repository_address::recover(pool).await?;
     resume_interrupted(pool).await?;
-    if let Some(ids) = retained_snapshot_ids {
-        reconcile_snapshots(pool, &ids).await?;
-    }
+    // Keep the IPC argument compatible with older frontends, but never prune
+    // using a check's retention hint: another check may have published a
+    // snapshot whose response is still in transit. Only the idle two-phase
+    // inventory/release lifecycle (or explicit offline maintenance) owns GC.
     compact_snapshot_cache_locked(pool).await?;
     linker::normalize_resource_backed_central_records_impl(pool).await?;
     // Scan before freezing the denominator, including independent local skills.
@@ -635,19 +738,64 @@ pub struct MirrorError {
 }
 impl From<String> for MirrorError {
     fn from(error: String) -> Self {
-        let code = [
+        let reason = error.split(':').next().unwrap_or(&error);
+        let known = [
+            "IMPORT_SOURCE_MISSING",
+            "IMPORT_SOURCE_AMBIGUOUS",
             "PREVIEW_EXPIRED",
             "SNAPSHOT_UNAVAILABLE",
             "LOCAL_IDENTITY_CHANGED",
+            "LOCAL_CONTENT_CHANGED",
+            "TARGET_DIRECTORY_CONFLICT",
+            "SNAPSHOT_LINK_UNAVAILABLE",
             "UNSAFE_TARGET",
             "UNSAFE_INSTALL_TARGET",
             "UNSAFE_SNAPSHOT_PATH",
             "SNAPSHOT_CACHE_FULL",
             "SNAPSHOT_TOO_LARGE",
+            "FILE_PERMISSION",
+            "FILE_BUSY",
+            "DISK_FULL",
+            "READ_ONLY",
+            "CONTENT_VERIFY_FAILED",
+            "REPOSITORY_DOC_VERIFY_FAILED",
+            "COMMIT_UNCERTAIN",
         ]
         .into_iter()
-        .find(|code| error.starts_with(code))
-        .unwrap_or("WRITE_FAILED");
+        .find(|code| reason == *code);
+        let lower = error.to_lowercase();
+        let os_error = lower.split("os error ").nth(1).and_then(|value| {
+            value
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse::<u32>()
+                .ok()
+        });
+        let code = known.unwrap_or_else(|| {
+            if lower.contains("repository document verification failed") {
+                "REPOSITORY_DOC_VERIFY_FAILED"
+            } else if lower.contains("content verification failed") {
+                "CONTENT_VERIFY_FAILED"
+            } else if matches!(os_error, Some(28 | 112)) || lower.contains("no space left") {
+                "DISK_FULL"
+            } else if matches!(os_error, Some(32 | 33 | 16))
+                || lower.contains("being used by another process")
+            {
+                "FILE_BUSY"
+            } else if matches!(os_error, Some(30 | 19)) || lower.contains("read-only file system") {
+                "READ_ONLY"
+            } else if matches!(os_error, Some(5 | 13))
+                || lower.contains("permission denied")
+                || lower.contains("access is denied")
+            {
+                "FILE_PERMISSION"
+            } else if lower.contains("commit outcome uncertain") {
+                "COMMIT_UNCERTAIN"
+            } else {
+                "WRITE_FAILED"
+            }
+        });
         Self { code }
     }
 }
@@ -880,6 +1028,24 @@ async fn apply_contents(pool: &AppStore, id: &str, snapshot: &Snapshot) -> Resul
     }
     pool.write(|d| {
         // Publish completion and retire its recovery/cache bytes atomically.
+        if let Some(previous_source) = single_package_source(snapshot) {
+            let source = &candidates.first().ok_or("WRITE_FAILED")?.source_path;
+            let mut rules = snapshot.import_rules.clone().unwrap_or_default();
+            for paths in rules.groups.values_mut() {
+                for path in paths
+                    .iter_mut()
+                    .filter(|path| path.as_str() == previous_source)
+                {
+                    *path = source.clone();
+                }
+            }
+            rules.package_source = Some(source.clone());
+            let row = d
+                .table_mut("repository_mirrors")
+                .entry(repository.to_lowercase())
+                .or_insert_with(|| serde_json::json!({"repository":repository}));
+            row["import_rules"] = serde_json::to_value(rules).map_err(|_| "WRITE_FAILED")?;
+        }
         if let Some(row) = d.table_mut("repository_mirror_snapshots").get_mut(id) {
             row["state"] = "applied".into();
         }
@@ -938,6 +1104,34 @@ pub(crate) async fn resume_interrupted(pool: &AppStore) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn task_errors_preserve_specific_codes_and_hide_private_details() {
+        for (raw, expected) in [
+            ("TARGET_DIRECTORY_CONFLICT", "TARGET_DIRECTORY_CONFLICT"),
+            ("SNAPSHOT_LINK_UNAVAILABLE", "SNAPSHOT_LINK_UNAVAILABLE"),
+            ("LOCAL_CONTENT_CHANGED", "LOCAL_CONTENT_CHANGED"),
+            (
+                "WRITE_FAILED: repository document verification failed",
+                "REPOSITORY_DOC_VERIFY_FAILED",
+            ),
+            (
+                "WRITE_FAILED: content verification failed",
+                "CONTENT_VERIFY_FAILED",
+            ),
+            (
+                "Failed to write private path: Access is denied. (os error 5)",
+                "FILE_PERMISSION",
+            ),
+            ("Failed to rename private path (os error 32)", "FILE_BUSY"),
+            ("No space left on device (os error 28)", "DISK_FULL"),
+            ("Read-only file system (os error 30)", "READ_ONLY"),
+            ("COMMIT_UNCERTAIN: private detail", "COMMIT_UNCERTAIN"),
+        ] {
+            let value = serde_json::to_value(MirrorError::from(raw.to_string())).unwrap();
+            assert_eq!(value["code"], expected);
+            assert!(!value.to_string().contains("private"));
+        }
+    }
     use super::*;
     #[tokio::test]
     async fn successful_apply_releases_payload_and_recovery_but_keeps_replay_receipt() {
@@ -1113,6 +1307,55 @@ mod tests {
             .unwrap();
         assert_eq!(ids, vec!["applying", "recoverable", "retained"]);
     }
+
+    #[tokio::test]
+    async fn parallel_check_with_stale_retention_does_not_expire_published_review() {
+        let (_dir, pool, snapshot) = fixture().await;
+        // Another check has published its result, but its IPC response has not
+        // reached the frontend yet. A concurrently queued request still holds
+        // the earlier (empty) frontend retention set.
+        let published = persist_snapshot(&pool, &snapshot).await.unwrap();
+        check_with_retained(&pool, Some(vec!["example/unrelated".into()]), Some(vec![]))
+            .await
+            .unwrap();
+        assert!(
+            pool.read(|d| Ok(d
+                .table("repository_mirror_snapshots")
+                .contains_key(&published)))
+                .unwrap(),
+            "An unrelated check must not expire a review before its IPC response is observed"
+        );
+        apply(&pool, &published).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn formerly_installed_test_fixture_is_not_silently_deleted() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let mut next = capture(&pool, snapshot).await;
+        next.originals[0].0.source_path = Some("scripts/check/tests/fixture/SKILL.md".into());
+        assert_eq!(
+            validate_snapshot(&next).unwrap_err(),
+            "IMPORT_SOURCE_MISSING"
+        );
+    }
+    #[tokio::test]
+    async fn installed_lowercase_manifest_losing_metadata_is_not_deleted() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let mut next = capture(&pool, snapshot).await;
+        next.originals[0].0.source_path = Some("skills/old/skill.md".into());
+        next.contents.files.insert(
+            "skills/old/skill.md".into(),
+            b"# No skill metadata".to_vec(),
+        );
+        assert_eq!(
+            validate_snapshot(&next).unwrap_err(),
+            "IMPORT_SOURCE_MISSING"
+        );
+    }
     #[tokio::test]
     #[ignore = "explicit public network diagnostic; never reads installed user data"]
     async fn live_public_repository_check_probe() {
@@ -1214,7 +1457,10 @@ mod tests {
         )
     }
     async fn capture(pool: &AppStore, mut snapshot: Snapshot) -> Snapshot {
-        snapshot.import_rules = super::super::repository_import_rules::load(pool, "example/fixtures").await.unwrap();
+        snapshot.import_rules =
+            super::super::repository_import_rules::load(pool, "example/fixtures")
+                .await
+                .unwrap();
         linker::normalize_resource_backed_central_records_impl(pool)
             .await
             .unwrap();
@@ -1230,6 +1476,183 @@ mod tests {
                 .extend(db::get_skill_installations(pool, &skill.id).await.unwrap());
         }
         snapshot
+    }
+    #[tokio::test]
+    async fn relocated_root_source_can_be_reviewed_without_importing_other_packages() {
+        let (_dir, pool, mut snapshot) = fixture().await;
+        let original = b"---\nname: main-tool\ndescription: main\n---\nMain".to_vec();
+        snapshot.contents.files = [("SKILL.md".into(), original.clone())].into();
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let mut next = capture(&pool, snapshot).await;
+        next.contents.files.remove("SKILL.md");
+        next.contents
+            .files
+            .insert("skills/main-tool/SKILL.md".into(), original.clone());
+        next.contents.files.insert(
+            "benchmarks/demo/SKILL.md".into(),
+            b"---\nname: unrelated\ndescription: example\n---\nExample".to_vec(),
+        );
+        let report = preview(&pool, &next).await.unwrap();
+        assert_eq!(report.added.len(), 1);
+        assert_eq!(report.deleted.len(), 1);
+        assert_eq!(
+            report.added[0].source_path.as_deref(),
+            Some("skills/main-tool/SKILL.md")
+        );
+        assert_eq!(report.deleted[0].source_path.as_deref(), Some("SKILL.md"));
+        assert!(repository_test_has_no_write(&pool, &next).await);
+        let mut ambiguous = next.clone();
+        ambiguous
+            .contents
+            .files
+            .insert("skills/other/SKILL.md".into(), original.clone());
+        assert_eq!(
+            validate_snapshot(&ambiguous).unwrap_err(),
+            "IMPORT_SOURCE_AMBIGUOUS"
+        );
+        let mut sample_only = next.clone();
+        sample_only
+            .contents
+            .files
+            .remove("skills/main-tool/SKILL.md");
+        sample_only
+            .contents
+            .files
+            .insert("benchmarks/fake/SKILL.md".into(), original);
+        assert_eq!(
+            validate_snapshot(&sample_only).unwrap_err(),
+            "IMPORT_SOURCE_MISSING"
+        );
+        let next_id = persist_snapshot(&pool, &next).await.unwrap();
+        apply(&pool, &next_id).await.unwrap();
+        let mut after = capture(&pool, next).await;
+        assert_eq!(after.originals.len(), 1);
+        assert_eq!(
+            after
+                .import_rules
+                .as_ref()
+                .unwrap()
+                .package_source
+                .as_deref(),
+            Some("skills/main-tool/SKILL.md")
+        );
+        after.contents.files.insert(
+            "skills/unrelated/SKILL.md".into(),
+            b"---\nname: unrelated\ndescription: new package\n---\nOther".to_vec(),
+        );
+        assert!(
+            preview(&pool, &after).await.unwrap().added.is_empty(),
+            "relocation must preserve the single-package scope on later checks"
+        );
+    }
+    async fn repository_test_has_no_write(pool: &AppStore, snapshot: &Snapshot) -> bool {
+        let current = remote_sources::github_repo_source_groups(pool, false)
+            .await
+            .unwrap();
+        current["example/fixtures"].len() == snapshot.originals.len()
+            && current["example/fixtures"]
+                .iter()
+                .all(|(source, _)| source.source_path.as_deref() == Some("SKILL.md"))
+    }
+    #[tokio::test]
+    async fn root_skill_update_does_not_auto_install_nested_benchmark_outputs() {
+        let (_dir, pool, mut snapshot) = fixture().await;
+        snapshot.contents.files = [(
+            "SKILL.md".into(),
+            b"---\nname: root-tool\ndescription: main skill\n---\nMain".to_vec(),
+        )]
+        .into();
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let mut next = capture(&pool, snapshot).await;
+        let nested = "benchmarks/naval/prototypes/compact-pack/decision-heuristics/SKILL.md";
+        next.contents.files.insert(
+            nested.into(),
+            b"---\nname: decision-heuristics\ndescription: benchmark output\n---\nExample".to_vec(),
+        );
+        for path in ["books/generated/SKILL.md", "dist/generated/SKILL.md"] {
+            next.contents.files.insert(
+                path.into(),
+                b"---\nname: generated\ndescription: output\n---\nExample".to_vec(),
+            );
+        }
+        let report = preview(&pool, &next).await.unwrap();
+        assert!(
+            report.added.is_empty(),
+            "benchmark output must not become a new installed skill: {:?}",
+            report
+                .added
+                .iter()
+                .map(|item| &item.source_path)
+                .collect::<Vec<_>>()
+        );
+        assert!(report.deleted.is_empty());
+        let next_id = persist_snapshot(&pool, &next).await.unwrap();
+        apply(&pool, &next_id).await.unwrap();
+        let after = capture(&pool, next).await;
+        assert_eq!(
+            after.originals.len(),
+            1,
+            "only the installed root skill is updated"
+        );
+        let root_skill = &after.originals[0].1;
+        assert!(Path::new(&root_skill.file_path).is_file());
+        let mut missing_root = after;
+        missing_root.contents.files.remove("SKILL.md");
+        assert_eq!(
+            validate_snapshot(&missing_root).unwrap_err(),
+            "IMPORT_SOURCE_MISSING"
+        );
+    }
+    #[tokio::test]
+    async fn root_scope_does_not_hide_explicit_nested_selections_or_multi_skill_updates() {
+        let (_dir, pool, mut snapshot) = fixture().await;
+        snapshot.contents.files.insert(
+            "SKILL.md".into(),
+            b"---\nname: root-tool\ndescription: main\n---\nRoot".to_vec(),
+        );
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let mut next = capture(&pool, snapshot).await;
+        next.contents.files.insert(
+            "skills/three/SKILL.md".into(),
+            b"---\nname: three\ndescription: new member\n---\nThird".to_vec(),
+        );
+        let report = preview(&pool, &next).await.unwrap();
+        assert_eq!(report.added.len(), 1);
+        assert_eq!(
+            report.added[0].source_path.as_deref(),
+            Some("skills/three/SKILL.md")
+        );
+        assert!(report.deleted.is_empty());
+
+        next.originals
+            .retain(|(source, _)| source.source_path.as_deref() == Some("SKILL.md"));
+        next.import_rules = Some(super::super::repository_import_rules::ImportRules {
+            groups: [
+                ("root-tool".into(), vec!["SKILL.md".into()]),
+                ("three".into(), vec!["skills/three/SKILL.md".into()]),
+            ]
+            .into(),
+            excluded_paths: [
+                ("skills/one/SKILL.md".into(), "excluded".into()),
+                ("skills/two/SKILL.md".into(), "excluded".into()),
+            ]
+            .into(),
+            legacy_passthrough: false,
+            package_source: None,
+        });
+        let report = preview(&pool, &next).await.unwrap();
+        assert_eq!(
+            report.added.len(),
+            1,
+            "explicit nested selection remains authoritative"
+        );
+        assert_eq!(
+            report.added[0].source_path.as_deref(),
+            Some("skills/three/SKILL.md")
+        );
     }
     #[tokio::test]
     async fn duplicate_source_records_keep_both_identities_and_installations() {
@@ -1545,39 +1968,89 @@ mod tests {
         snapshot.contents.files.clear();
         let content = b"---\nname: shared\ndescription: demo\n---\nOriginal".to_vec();
         for root in ["skills/shared", "plugins/demo/skills/shared"] {
-            snapshot.contents.files.insert(format!("{root}/SKILL.md"),content.clone());
-            snapshot.contents.files.insert(format!("{root}/scripts/run.py"),b"same".to_vec());
+            snapshot
+                .contents
+                .files
+                .insert(format!("{root}/SKILL.md"), content.clone());
+            snapshot
+                .contents
+                .files
+                .insert(format!("{root}/scripts/run.py"), b"same".to_vec());
         }
-        let selections = ["skills/shared/SKILL.md","plugins/demo/skills/shared/SKILL.md"].into_iter().map(|path|github::GitHubSkillImportSelection {
-            source_path:path.into(),resolution:github::DuplicateResolution::Overwrite,renamed_skill_id:None,
-        }).collect();
-        let result = github::import_prepared_snapshot(&pool,snapshot.repo.clone(),&snapshot.contents,selections,None,None).await.unwrap();
-        assert_eq!(result.imported_skills.len(),1);
-        assert_eq!(db::get_resource_library_skills(&pool).await.unwrap().len(),1);
-        snapshot = capture(&pool,snapshot).await;
+        let selections = [
+            "skills/shared/SKILL.md",
+            "plugins/demo/skills/shared/SKILL.md",
+        ]
+        .into_iter()
+        .map(|path| github::GitHubSkillImportSelection {
+            source_path: path.into(),
+            resolution: github::DuplicateResolution::Overwrite,
+            renamed_skill_id: None,
+        })
+        .collect();
+        let result = github::import_prepared_snapshot(
+            &pool,
+            snapshot.repo.clone(),
+            &snapshot.contents,
+            selections,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.imported_skills.len(), 1);
+        assert_eq!(
+            db::get_resource_library_skills(&pool).await.unwrap().len(),
+            1
+        );
+        snapshot = capture(&pool, snapshot).await;
         assert!(snapshot.import_rules.is_some());
         // The unselected distribution changes and another platform variant appears.
-        snapshot.contents.files.insert("plugins/demo/skills/shared/scripts/run.py".into(),b"different".to_vec());
-        snapshot.contents.files.insert(".claude/skills/shared/SKILL.md".into(),content.clone());
-        snapshot.contents.files.insert("skills/shared/scripts/run.py".into(),b"updated canonical".to_vec());
-        let report = preview(&pool,&snapshot).await.unwrap();
+        snapshot.contents.files.insert(
+            "plugins/demo/skills/shared/scripts/run.py".into(),
+            b"different".to_vec(),
+        );
+        snapshot
+            .contents
+            .files
+            .insert(".claude/skills/shared/SKILL.md".into(), content.clone());
+        snapshot.contents.files.insert(
+            "skills/shared/scripts/run.py".into(),
+            b"updated canonical".to_vec(),
+        );
+        let report = preview(&pool, &snapshot).await.unwrap();
         assert!(report.added.is_empty());
-        assert_eq!(report.modified.len(),1);
-        let id = persist_snapshot(&pool,&snapshot).await.unwrap();
-        apply(&pool,&id).await.unwrap();
+        assert_eq!(report.modified.len(), 1);
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
         let skills = db::get_resource_library_skills(&pool).await.unwrap();
-        assert_eq!(skills.len(),1);
-        assert_eq!(std::fs::read(Path::new(&skills[0].file_path).parent().unwrap().join("scripts/run.py")).unwrap(),b"updated canonical");
+        assert_eq!(skills.len(), 1);
+        assert_eq!(
+            std::fs::read(
+                Path::new(&skills[0].file_path)
+                    .parent()
+                    .unwrap()
+                    .join("scripts/run.py")
+            )
+            .unwrap(),
+            b"updated canonical"
+        );
         // New logical skills still arrive, but their identical copies only arrive once.
-        snapshot = capture(&pool,snapshot).await;
+        snapshot = capture(&pool, snapshot).await;
         for root in ["skills/new", "plugins/demo/skills/new"] {
-            snapshot.contents.files.insert(format!("{root}/SKILL.md"),b"---\nname: new\ndescription: new\n---\nNew".to_vec());
+            snapshot.contents.files.insert(
+                format!("{root}/SKILL.md"),
+                b"---\nname: new\ndescription: new\n---\nNew".to_vec(),
+            );
         }
-        let report = preview(&pool,&snapshot).await.unwrap();
-        assert_eq!(report.added.len(),1);
-        let id = persist_snapshot(&pool,&snapshot).await.unwrap();
-        apply(&pool,&id).await.unwrap();
-        assert_eq!(db::get_resource_library_skills(&pool).await.unwrap().len(),2);
+        let report = preview(&pool, &snapshot).await.unwrap();
+        assert_eq!(report.added.len(), 1);
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        assert_eq!(
+            db::get_resource_library_skills(&pool).await.unwrap().len(),
+            2
+        );
     }
     #[tokio::test]
     async fn duplicate_skill_names_in_different_plugins_are_both_imported() {

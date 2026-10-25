@@ -20,8 +20,8 @@ export function NotebookNavigation() {
         useAppStatusStore.getState().failTask({ error: i18n.t("g.errors.noteRepositoryMissing") });
         return;
       }
-      localStorage.setItem("skillshub.browser.tab", JSON.stringify("notebook"));
-      window.dispatchEvent(new CustomEvent("skillshub-open-notebook"));
+      localStorage.setItem("arsenal.browser.tab", JSON.stringify("notebook"));
+      window.dispatchEvent(new CustomEvent("arsenal-open-notebook"));
       navigate(`/resources?${new URLSearchParams({ locate: skill.id, view: "folders" })}`);
     };
     void useNotebookStore.getState().notebookNavigation(consume).then(unlisten => { if (disposed) unlisten(); else stop = unlisten; });

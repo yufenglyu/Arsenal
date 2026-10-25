@@ -1,4 +1,4 @@
-use super::{Collection, AppStore};
+use super::{AppStore, Collection};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 

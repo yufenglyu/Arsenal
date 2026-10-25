@@ -168,6 +168,11 @@ for (const command of ["import_github_repo_skills", "reimport_github_repo_skills
       if(repo?.owner&&repo.repo)useRepositorySyncStore.getState().invalidateRepositories([`${repo.owner}/${repo.repo}`]);
       const {refreshResourceViews} = await import("./resourceTrashStore");
       await refreshResourceViews();
+      const {useCentralSkillsStore} = await import("./centralSkillsStore");
+      const error = useCentralSkillsStore.getState().error;
+      if (error) throw new Error(error);
     } else await useResourceLibraryStore.getState().loadResourceLibrary({fresh:true});
+    const error = useResourceLibraryStore.getState().error;
+    if (error) throw new Error(error);
   });
 }

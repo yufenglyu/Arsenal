@@ -1,6 +1,6 @@
 # Arsenal Link
 
-插件版本：0.2.0。本目录由 GitHot Link 迁移，供当前 Arsenal 仓库笔记功能使用。
+插件版本：0.2.0。显示名称为 Arsenal Link；安装目录与插件 ID 保留 `skillshub-link`，笔记属性和协议保留 `skillshub_*` / `skillshub://`，以兼容已有笔记与链接。
 
 按稳定笔记 UUID 打开 Obsidian 笔记，文件改名、移动后保留相同链接。插件不写笔记、不开网络服务、不读取 Arsenal 数据库。
 

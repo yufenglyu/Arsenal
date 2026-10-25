@@ -1,8 +1,8 @@
 pub mod agents;
 pub mod backup;
 pub mod collections;
-pub mod github_import;
 pub mod github_cancellation;
+pub mod github_import;
 pub mod linker;
 pub mod remote_sources;
 pub mod scanner;

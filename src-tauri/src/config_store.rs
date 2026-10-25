@@ -167,7 +167,9 @@ mod tests {
     async fn configuration_survives_reopen_and_is_absent_from_database() {
         let dir = tempfile::tempdir().unwrap();
         let database = dir.path().join("db.sqlite");
-        let pool = db::open_test_store(database.to_str().unwrap()).await.unwrap();
+        let pool = db::open_test_store(database.to_str().unwrap())
+            .await
+            .unwrap();
         db::init_database(&pool).await.unwrap();
         db::set_setting(&pool, "language", "en").await.unwrap();
         let project = db::add_scan_directory(&pool, "/example/project", Some("Example"))
@@ -178,7 +180,9 @@ mod tests {
             .unwrap();
         pool.close().await;
         drop(pool);
-        let pool = db::open_test_store(database.to_str().unwrap()).await.unwrap();
+        let pool = db::open_test_store(database.to_str().unwrap())
+            .await
+            .unwrap();
         db::init_database(&pool).await.unwrap();
         assert_eq!(
             db::get_setting(&pool, "language").await.unwrap().as_deref(),

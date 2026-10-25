@@ -63,14 +63,14 @@ test('the same URI works after rename and move; duplicate and deleted notes are 
   assert.match(f.notices.at(-1), /not found/); assert.equal(f.opened.length, 2);
 });
 
-test('commands copy path-free links and construct only safe SkillsHub navigation URIs', async () => {
+test('commands copy path-free links and construct only safe Arsenal navigation URIs', async () => {
   const files = [file('note.md')]; const f = fixture(files); f.ready();
   f.commands['copy-stable-note-link'](); await settle();
   assert.deepEqual(f.copied, [`obsidian://skillshub-note?id=${noteId}`]);
-  f.commands['return-to-skillshub'](); await settle();
+  f.commands['return-to-arsenal'](); await settle();
   assert.deepEqual(f.external, [`skillshub://repository/${repoId}?tab=notebook`]);
   files[0].text = '---\nskillshub_repository_id: javascript:alert(1)\n---\n';
-  f.commands['return-to-skillshub'](); await settle(); assert.equal(f.external.length, 1);
+  f.commands['return-to-arsenal'](); await settle(); assert.equal(f.external.length, 1);
   f.handlers['skillshub-note']({id: '../unsafe'}); await settle(); assert.equal(f.opened.length, 0);
 });
 

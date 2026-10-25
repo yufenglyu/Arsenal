@@ -15,7 +15,7 @@ export function repositoryLocked(row: RepositoryTaskRow, tasks: BackgroundTask[]
 }
 
 export function repositorySelectable(row: RepositoryTaskRow, tasks: BackgroundTask[], migrating: string | null) {
-  return row.pending && !row.needsCheck && !row.error && !!row.preview?.snapshotId &&
+  return row.pending && !["queued", "running"].includes(row.status) && !row.needsCheck && !row.error && !!row.preview?.snapshotId &&
     !migrating && !repositoryLocked(row, tasks);
 }
 

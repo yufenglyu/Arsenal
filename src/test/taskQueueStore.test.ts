@@ -13,6 +13,8 @@ import {
 } from "@/stores/taskQueueStore";
 it("explains snapshot error codes returned as repository report strings",()=>{
  expect(taskErrorMessage("IMPORT_SOURCE_MISSING")).toBe(i18n.t("workflow.errors.IMPORT_SOURCE_MISSING"));
+ expect(taskErrorMessage("REPOSITORY_NOT_IN_LIBRARY")).toBe(i18n.t("workflow.errors.REPOSITORY_NOT_IN_LIBRARY"));
+ expect(taskErrorMessage("Repository is no longer in the resource library")).toBe(i18n.t("workflow.errors.REPOSITORY_NOT_IN_LIBRARY"));
  expect(taskErrorMessage("SNAPSHOT_CACHE_FULL")).toBe(i18n.t("workflow.errors.SNAPSHOT_CACHE_FULL"));
  expect(taskErrorMessage("UNSAFE_SNAPSHOT_PATH: unsupported managed file type")).toBe(i18n.t("workflow.errors.UNSAFE_SNAPSHOT_PATH"));
  expect(taskErrorMessage("TARGET_DIRECTORY_CONFLICT")).toBe(i18n.t("workflow.errors.TARGET_DIRECTORY_CONFLICT"));
@@ -173,6 +175,26 @@ describe("background queue", () => {
     expect((await waitForTask(id)).status).toBe("success");
     expect(invoke).toHaveBeenCalledTimes(3);
   });
+  it("keeps a committed write successful while exposing a sanitized refresh warning", async () => {
+    registerTaskResult("committed_with_refresh_warning", async () => {throw new Error("File private-value in use (os error 32)");});
+    invoke.mockResolvedValue(null);
+    const id=queue.getState().enqueue({...input("warning"),steps:[{command:"committed_with_refresh_warning",label:"Write",args:{}}]});
+    const task=await waitForTask(id);
+    expect(task.status).toBe("success");
+    expect(task.steps[0].warning).toContain(i18n.t("workflow.errors.fileBusy"));
+    expect(task.steps[0].warning).not.toContain("private-value");
+    queue.getState().retry(id);
+    await waitForTask(id);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+  it("retains check results and their refresh warning in the task record", async () => {
+    invoke.mockResolvedValue({repositories:[],viewRefreshError:i18n.t("workflow.errors.fileBusy")});
+    const id=queue.getState().enqueue({...input("checked-warning"),kind:"check",steps:[{command:"preview_source_backed_resource_repository_updates",label:"Check",args:{repositories:[]}}]});
+    const task=await waitForTask(id);
+    expect(task.status).toBe("success");
+    expect(task.steps[0].result).toMatchObject({repositories:[]});
+    expect(task.steps[0].warning).toContain(i18n.t("workflow.errors.fileBusy"));
+  });
   it("restores unfinished tasks as interrupted without running them", async () => {
     const task = {
       ...input("restore"),
@@ -224,6 +246,7 @@ it("serializes a full check against updates but lets independent repositories ru
 });
 
 it("reports interrupted downloads as network failures even if a fallback mirror denies access", () => {
+  expect(taskErrorMessage("Failed to inspect GitHub repository: github network connection failed; fallback mirror returned HTTP 403")).toBe(i18n.t("workflow.errors.network"));
   expect(taskErrorMessage("Failed to download archive: response body failed: network download interrupted; mirror returned HTTP 403")).toBe(i18n.t("workflow.errors.network"));
   expect(taskErrorMessage("Failed to read GitHub repository archive: error decoding response body", "import")).toBe(i18n.t("workflow.errors.network"));
   expect(taskErrorMessage("network request or download timed out")).toBe(i18n.t("workflow.errors.timeout"));

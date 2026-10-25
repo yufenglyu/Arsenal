@@ -358,10 +358,15 @@ pub async fn get_setting(
 #[tauri::command]
 pub async fn set_setting(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     key: String,
     value: String,
 ) -> Result<(), String> {
-    set_setting_impl(&state.db, &key, &value).await
+    set_setting_impl(&state.db, &key, &value).await?;
+    if key == "language" {
+        crate::desktop::update_language(&app, &value);
+    }
+    Ok(())
 }
 
 #[tauri::command]

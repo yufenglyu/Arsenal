@@ -9,8 +9,10 @@ import { CentralSkillsView } from "@/pages/CentralSkillsView";
 import { ResourceLibraryView } from "@/pages/ResourceLibraryView";
 import { SkillDetailPage } from "@/pages/SkillDetailPage";
 import { SettingsView } from "@/pages/SettingsView";
+import { useTaskCloseGuard } from "@/components/layout/useTaskCloseGuard";
 
 function App() {
+  useTaskCloseGuard();
   useEffect(startSnapshotCacheMaintenance, []);
   const location = useLocation();
   const navigate = useNavigate();

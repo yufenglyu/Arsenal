@@ -46,7 +46,8 @@ mod tests {
             Some("https://example.invalid/repo")
         );
         assert_eq!(
-            serde_json::to_value(get_skill_by_id(&pool, &skill.id).await.unwrap().unwrap()).unwrap(),
+            serde_json::to_value(get_skill_by_id(&pool, &skill.id).await.unwrap().unwrap())
+                .unwrap(),
             skill_value
         );
         assert!(get_skills_for_agent(&pool, "other")
@@ -1340,16 +1341,57 @@ mod scan_batch_tests {
     use crate::db::*;
     #[tokio::test]
     async fn failed_scan_batch_is_atomic_and_keeps_managed_installation() {
-        let pool=AppStore::memory().unwrap();
-        let skill=Skill{id:"scan".into(),name:"Scan".into(),description:None,file_path:"/resource/SKILL.md".into(),canonical_path:Some("/resource".into()),is_central:true,source:None,content:None,scanned_at:"first".into()};
-        let install=SkillInstallation{skill_id:skill.id.clone(),agent_id:"cursor".into(),installed_path:"/managed".into(),link_type:"symlink".into(),symlink_target:Some("/resource".into()),created_at:"first".into()};
-        upsert_skill(&pool,&skill).await.unwrap();upsert_skill_installation(&pool,&install).await.unwrap();
-        let mut scanned=skill.clone();scanned.name="Changed".into();scanned.is_central=false;scanned.scanned_at="next".into();
-        let mut scanned_install=install.clone();scanned_install.installed_path="/other".into();
-        pool.fail_next_commit();assert!(commit_scan_batch(&pool,&[scanned.clone()],&[scanned_install.clone()],&[]).await.is_err());
-        assert_eq!(get_skill_by_id(&pool,"scan").await.unwrap().unwrap().scanned_at,"first");
-        commit_scan_batch(&pool,&[scanned],&[scanned_install],&[]).await.unwrap();
-        let saved=get_skill_by_id(&pool,"scan").await.unwrap().unwrap();assert_eq!(saved.name,"Scan");assert_eq!(saved.scanned_at,"next");
-        assert_eq!(get_skill_installations(&pool,"scan").await.unwrap()[0].installed_path,"/managed");
+        let pool = AppStore::memory().unwrap();
+        let skill = Skill {
+            id: "scan".into(),
+            name: "Scan".into(),
+            description: None,
+            file_path: "/resource/SKILL.md".into(),
+            canonical_path: Some("/resource".into()),
+            is_central: true,
+            source: None,
+            content: None,
+            scanned_at: "first".into(),
+        };
+        let install = SkillInstallation {
+            skill_id: skill.id.clone(),
+            agent_id: "cursor".into(),
+            installed_path: "/managed".into(),
+            link_type: "symlink".into(),
+            symlink_target: Some("/resource".into()),
+            created_at: "first".into(),
+        };
+        upsert_skill(&pool, &skill).await.unwrap();
+        upsert_skill_installation(&pool, &install).await.unwrap();
+        let mut scanned = skill.clone();
+        scanned.name = "Changed".into();
+        scanned.is_central = false;
+        scanned.scanned_at = "next".into();
+        let mut scanned_install = install.clone();
+        scanned_install.installed_path = "/other".into();
+        pool.fail_next_commit();
+        assert!(
+            commit_scan_batch(&pool, &[scanned.clone()], &[scanned_install.clone()], &[])
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            get_skill_by_id(&pool, "scan")
+                .await
+                .unwrap()
+                .unwrap()
+                .scanned_at,
+            "first"
+        );
+        commit_scan_batch(&pool, &[scanned], &[scanned_install], &[])
+            .await
+            .unwrap();
+        let saved = get_skill_by_id(&pool, "scan").await.unwrap().unwrap();
+        assert_eq!(saved.name, "Scan");
+        assert_eq!(saved.scanned_at, "next");
+        assert_eq!(
+            get_skill_installations(&pool, "scan").await.unwrap()[0].installed_path,
+            "/managed"
+        );
     }
 }

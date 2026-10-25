@@ -9,5 +9,5 @@ export function notebookTitle(path: string): string {
 
 // A leading separator denotes the configured vault root, never a system root.
 export function normalizeNotebookFolder(value?: string): string {
-  return (value ?? "").trim().split("\\").join("/").split("/").filter(Boolean).join("/") || "SkillsHub";
+  return (value ?? "").trim().split("\\").join("/").split("/").filter(Boolean).join("/") || "Arsenal";
 }

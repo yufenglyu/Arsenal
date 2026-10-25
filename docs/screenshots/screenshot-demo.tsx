@@ -37,7 +37,7 @@ localStorage.setItem("skills-manage.skillTableColumns.tree.v5.notebook", "1");
 localStorage.setItem("arsenal.browser.tab", JSON.stringify(scene === "document" ? "document" : "overview"));
 localStorage.setItem("skillshub.browser.tab", JSON.stringify(scene === "document" ? "document" : "overview"));
 const noop = async () => {};
-const date = "2026-10-19T08:00:00Z";
+const date = "2026-10-25T08:00:00Z";
 const agents: AgentWithStatus[] = [
   ["claude-code", "Claude Code", "~/.claude/skills"], ["codex", "Codex", "~/.agents/skills"],
   ["cursor", "Cursor", "~/.cursor/skills"], ["gemini-cli", "Gemini CLI", "~/.gemini/skills"],
@@ -91,14 +91,14 @@ documents.setState({readDocuments:async()=>[{name:"README.md",language:en?"en":"
 Object.assign(window,{__TAURI_INTERNALS__:{invoke:async(command:string,args:Record<string,unknown>={})=>{
   if(command==="list_skill_directory") return [{name:"SKILL.md",path:`${args.dirPath}/SKILL.md`,relative_path:"SKILL.md",is_dir:false,children:[]}];
   if(command==="read_file_by_path") return content;
-  if(command==="list_repository_snapshot_cache") return [];
+  if(command==="list_repository_snapshot_cache") return ["demo-review", "demo-ready"];
   if(command==="get_platform_icons") return {};
   throw new Error(`Unsupported documentation action: ${command}`);
 }}});
 const repo: RepositorySyncPreview = {repository:"example/research-kit",snapshotId:"demo-review",remoteRef:"demo-commit",added:[{skillId:"evidence-map",name:"evidence-map",files:[{path:"SKILL.md",status:"added"}]}],modified:[{skillId:"literature-review",name:"literature-review",files:[{path:"SKILL.md",status:"modified"},{path:"references/checklist.md",status:"added"}]}],deleted:[],unchanged:[{skillId:"paper-search",name:"paper-search"},{skillId:"citation-check",name:"citation-check"}],documentChanges:[{path:"README.md",status:"modified"}]};
-sync.setState({preview:{repositories:[repo,{repository:"example/dev-toolkit",added:[],modified:[],deleted:[],unchanged:[],error:"NETWORK_ERROR"},{repository:"example/design-studio",added:[],modified:[],deleted:[],unchanged:[{skillId:"design-tokens",name:"design-tokens"}],remoteRef:"demo-clean"}]},open:["tasks","review","import"].includes(scene),centerView:scene==="review"?"pending":"history",reportCheckedAt:Date.now(),repositories:null,reportGeneration:"demo",applied:false});
-const taskBase = {cancelRequested:false,createdAt:Date.now(),locks:[]};
+sync.setState({preview:{repositories:[repo,{repository:"example/dev-toolkit",added:[],modified:[],deleted:[],unchanged:[],error:"Request timed out"},{repository:"example/writing-desk",snapshotId:"demo-ready",remoteRef:"demo-ready-commit",localModified:false,added:[{skillId:"meeting-notes",name:"meeting-notes",sourcePath:"skills/meeting-notes/SKILL.md",files:[{path:"SKILL.md",status:"added"}]}],modified:[],deleted:[],unchanged:[]},{repository:"example/design-studio",added:[],modified:[],deleted:[],unchanged:[{skillId:"design-tokens",name:"design-tokens"}],remoteRef:"demo-clean"}]},open:["tasks","review","import","errors","log"].includes(scene),centerView:["review","errors"].includes(scene)?"pending":"history",reportCheckedAt:Date.parse(date),repositories:null,reportGeneration:"demo",applied:false});
+const taskBase = {cancelRequested:false,createdAt:Date.parse(date),locks:[]};
 const prepared: BackgroundTask = {...taskBase,id:"import-demo",key:"import-demo",kind:"import",label:tr("导入技能","Import skills"),status:"awaiting_input",steps:[{command:"prepare_github_resource_import",label:"example/writing-desk",args:{repoUrl:"https://github.com/example/writing-desk"},status:"success",result:{repo:{owner:"example",repo:"writing-desk",branch:"main",normalizedUrl:"https://github.com/example/writing-desk"},skills:["technical-writing","copy-editing","meeting-notes"].map((name,index)=>({sourcePath:`${name}/SKILL.md`,skillId:name,skillName:name,rootDirectory:"",skillDirectoryName:name,downloadUrl:"",...(index===0?{conflict:{existingSkillId:name,existingName:name,proposedSkillId:name,proposedName:name}}:{})}))}}]};
 queue.setState({tasks:[prepared,{...taskBase,id:"refresh-demo",key:"refresh-demo",kind:"check",label:tr("刷新仓库","Refresh repository"),status:"running",steps:[{command:"refresh_repository",label:"example/design-studio",args:{repository:"example/design-studio"},status:"running"}]}]});
-if (scene === "review") queue.setState({tasks:[]});
+if (["review","errors"].includes(scene)) queue.setState({tasks:[]});
 createRoot(document.getElementById("root")!).render(<MemoryRouter initialEntries={["/resources"]}><App/>{scene==="install"&&<InstallDialog open onOpenChange={()=>{}} skill={skills[4]} agents={agents} onInstall={noop}/>}</MemoryRouter>);

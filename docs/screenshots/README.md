@@ -1,6 +1,6 @@
 # Product screenshots
 
-The bilingual README uses six scenarios rendered with current production React components: library overview, document reading, installation, batch tasks, import review and repository update review. All content is fictional; these images demonstrate the UI, not completed remote operations.
+The 1.5.0 bilingual README uses eight scenarios rendered with current production React components: library overview, document reading, installation, batch tasks, import review, repository update review, failed checks and the unified operation log. All content is fictional; these images demonstrate the UI, not completed remote operations.
 
 ## Reproduce
 
@@ -11,9 +11,9 @@ The bilingual README uses six scenarios rendered with current production React c
    ```
 
 2. Provide Playwright through your development environment and install its Chromium browser (`playwright install chromium`), or set `CHROME_PATH` to an existing Chromium executable. Playwright is optional documentation tooling, not a runtime dependency.
-3. Run `node docs/screenshots/capture.cjs`. Set `SCREENSHOT_URL` if using another local port. The script writes twelve PNGs into `docs/images/product/`.
+3. Run `node docs/screenshots/capture.cjs`. Set `SCREENSHOT_URL` if using another local port. The script writes sixteen PNGs into `docs/images/product/`.
 
-Inspect a scene interactively at `/docs/screenshots/index.html?lang=zh&scene=review`. Scenes: `library`, `document`, `install`, `tasks`, `import`, `review`; languages: `zh`, `en`.
+Inspect a scene interactively at `/docs/screenshots/index.html?lang=zh&scene=review`. Scenes: `library`, `document`, `install`, `tasks`, `import`, `review`, `errors`, `log`; languages: `zh`, `en`. Only documented fixture actions are available; no backend writes are performed.
 
 The fixture uses its own browser context, resets only that origin's localStorage, substitutes read-only IPC responses and reads no desktop configuration or library data. Use a dedicated local development origin. The capture script blocks outbound requests. Do not use personal data in the fixture. The production Vite build rejects screenshot-demo modules if they enter the application dependency graph.
 

@@ -9,6 +9,7 @@ import {
   registerTaskFailure,
   registerTaskCompletion,
   isTaskActive,
+  taskErrorMessage,
   useTaskQueueStore,
   waitForTask,
 } from "./taskQueueStore";
@@ -145,8 +146,8 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
             steps: [{ command: "refresh_repository", args: { repository }, label: repository }],
           }));
           await Promise.all(ids.map(waitForTask));
-        } catch {
-          toast.error(i18n.t("workflow.operationFailed"));
+        } catch (error) {
+          toast.error(taskErrorMessage(error, "check", "refresh_repository"));
         } finally { set({ isRefreshingRepositories: false }); }
       },
       checkedAt: {},
@@ -188,7 +189,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
         try {
           const reports: RepositorySyncPreviewReport[] = await Promise.all(requested.map(async repo => {
             try { return await checkInBackground([repo], generation); }
-            catch (error) { return {repositories: [{repository: repo, snapshotId: null, added: [], modified: [], deleted: [], unchanged: [], error: String(error)}]} satisfies RepositorySyncPreviewReport; }
+            catch (error) { return {repositories: [{repository: repo, snapshotId: null, added: [], modified: [], deleted: [], unchanged: [], error: taskErrorMessage(error, "check", "preview_source_backed_resource_repository_updates")}]} satisfies RepositorySyncPreviewReport; }
           }));
           if(generation!==get().reportGeneration)return;
           const report = {repositories: reports.flatMap(r => r.repositories).filter(row=>!get().dismissedRepositories.includes(row.repository.toLowerCase())), coverage: reports.flatMap(r => r.coverage ?? [])};
@@ -199,7 +200,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
               repositories: state.preview.repositories.map(item => {
                 if (!requested.includes(item.repository.toLowerCase())) return item;
                 const replacement = report.repositories.find(repo => repo.repository.toLowerCase() === item.repository.toLowerCase());
-                return replacement ? { ...replacement, repository: item.repository } : { ...item, error: i18n.t("workflow.operationFailed") };
+                return replacement ? { ...replacement, repository: item.repository } : { ...item, error: taskErrorMessage({code: "TASK_RESULT_MISSING"}) };
               }),
             } : report,
             applied: false,
@@ -209,7 +210,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
           set((state) => ({
             preview: state.preview ? {
               ...state.preview,
-              repositories: state.preview.repositories.map(item => requested.includes(item.repository.toLowerCase()) ? { ...item, error: String(error) } : item),
+              repositories: state.preview.repositories.map(item => requested.includes(item.repository.toLowerCase()) ? { ...item, error: taskErrorMessage(error, "check", "preview_source_backed_resource_repository_updates") } : item),
             } : null,
           }));
         } finally {
@@ -277,8 +278,9 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
             });
           } catch (error) {
             if (error instanceof CheckPaused || generation!==get().reportGeneration) return;
-            set({ error: String(error) });
-            toast.error(i18n.t("workflow.checkFailedNotification"), {action:{label:i18n.t("workflow.viewResults"),onClick:() => get().setOpen(true)}});
+            const message = taskErrorMessage(error, "check", "preview_source_backed_resource_repository_updates");
+            set({ error: message });
+            toast.error(message, {action:{label:i18n.t("workflow.viewResults"),onClick:() => get().setOpen(true)}});
           } finally {
             set({ isChecking: false });
           }
@@ -431,7 +433,7 @@ async function checkInBackground(
   const task = {status: completed.some(task => ["cancelled", "interrupted"].includes(task.status)) ? "cancelled" : completed.every(task => task.status === "success") ? "success" : completed.some(task => task.status === "success" || task.status === "partial") ? "partial" : "failed", steps: completed.flatMap(task => task.steps)};
   if (task.status === "cancelled" || task.status === "interrupted") throw new CheckPaused();
   if (task.status !== "success" && task.status !== "partial")
-    throw new Error(task.steps.find(step => step.error)?.error ?? i18n.t("workflow.operationFailed"));
+    throw new Error(task.steps.find(step => step.error)?.error ?? taskErrorMessage({code: "TASK_REASON_MISSING"}));
   return task.steps.reduce<RepositorySyncPreviewReport>((report, step) => {
     const result = step.result as RepositorySyncPreviewReport | undefined;
     return result ? {repositories: [...report.repositories, ...result.repositories],
@@ -462,13 +464,19 @@ registerTaskResult("apply_repository_update_item", async (step) => {
   });
 });
 
-registerTaskCompletion("apply_repository_update_item", async finished => {
-  if (finished.batchId && useTaskQueueStore.getState().tasks.some(task =>
-    task.batchId === finished.batchId && isTaskActive(task))) return;
+async function refreshTaskResourceViews() {
   await Promise.all([
     useResourceLibraryStore.getState().loadResourceLibrary({fresh:true}),
     useCentralSkillsStore.getState().loadCentralSkills(),
   ]);
+  const error = useResourceLibraryStore.getState().error ?? useCentralSkillsStore.getState().error;
+  if (error) throw new Error(error);
+}
+
+registerTaskCompletion("apply_repository_update_item", async finished => {
+  if (finished.batchId && useTaskQueueStore.getState().tasks.some(task =>
+    task.batchId === finished.batchId && isTaskActive(task))) return;
+  await refreshTaskResourceViews();
 });
 
 function updateStepKey(args: Record<string, unknown>): string {
@@ -479,7 +487,7 @@ function updateStepKey(args: Record<string, unknown>): string {
 registerTaskFailure("apply_repository_update_item", step => {
   // Store only the sanitized task error, separately from disposable task history.
   const key = updateStepKey(step.args);
-  useRepositorySyncStore.setState(state => ({updateErrors: {...state.updateErrors, [key]: step.error ?? i18n.t("workflow.operationFailed")}}));
+  useRepositorySyncStore.setState(state => ({updateErrors: {...state.updateErrors, [key]: step.error ?? taskErrorMessage({code: "TASK_REASON_MISSING"}, "update")}}));
 });
 
 registerTaskExecutor(
@@ -506,6 +514,8 @@ export function retainedSnapshotIds(): string[] {
 
 registerTaskResult("update_source_backed_resource_skill", async () => {
   await useResourceLibraryStore.getState().loadResourceLibrary({fresh:true});
+  const error = useResourceLibraryStore.getState().error;
+  if (error) throw new Error(error);
 });
 
 for (const command of ["refresh_repository_stars", "refresh_repository"]) registerTaskResult(command, (step, result) => {
@@ -582,10 +592,10 @@ registerTaskResult("apply_repository_snapshot", async step => {
   useRepositoryDocumentStore.getState().invalidate();
 });
 registerTaskFailure("apply_repository_snapshot", step => {
-  useRepositorySyncStore.setState(state => ({updateErrors:{...state.updateErrors,[`mirror:${step.args.snapshotId}`]:step.error ?? i18n.t("workflow.operationFailed")}}));
+  useRepositorySyncStore.setState(state => ({updateErrors:{...state.updateErrors,[`mirror:${step.args.snapshotId}`]:step.error ?? taskErrorMessage({code: "TASK_REASON_MISSING"}, "update")}}));
 });
 registerTaskCompletion("apply_repository_snapshot", async () => {
-  await Promise.all([useResourceLibraryStore.getState().loadResourceLibrary({fresh:true}),useCentralSkillsStore.getState().loadCentralSkills()]);
+  await refreshTaskResourceViews();
 });
 
 function releaseSnapshots(repositories: RepositorySyncPreview[]) {

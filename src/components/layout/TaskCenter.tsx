@@ -1,5 +1,5 @@
 import { ActionIcon } from "@/components/ui/action-icon";
-import {repositoryRisk, selectedRepositories, useTaskReviewStore} from "@/stores/taskReviewStore";
+import {repositoryLocked, selectedRepositories, useTaskReviewStore} from "@/stores/taskReviewStore";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -18,7 +18,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { HintIcon } from "@/components/ui/hint-icon";
 import { useTaskQueueStore, isTaskActive } from "@/stores/taskQueueStore";
 import { useRepositorySyncStore } from "@/stores/repositorySyncStore";
 import { useAppStatusStore } from "@/stores/appStatusStore";
@@ -37,12 +36,13 @@ import { cn } from "@/lib/utils";
 import { TaskImportReview } from "./TaskImportReview";
 import { TaskRepositoryReview } from "./TaskRepositoryReview";
 import { TaskBatchDetails } from "./TaskBatchDetails";
-import { useTaskCloseGuard } from "./useTaskCloseGuard";
+import { TaskOperationLog } from "./TaskOperationLog";
 
 const activeStatus = (status: string) =>
   ["running", "queued", "stopping"].includes(status);
 const failedStatus = (status: string) =>
   ["failed", "partial", "interrupted"].includes(status);
+const taskTabs = ["current", "history", "log"] as const;
 
 export function TaskCenter() {
   const { t } = useTranslation();
@@ -50,19 +50,16 @@ export function TaskCenter() {
   const tasks = useTaskQueueStore((s) => s.tasks);
   const legacy = useAppStatusStore((s) => s.task);
   const batches = buildTaskBatches(tasks, state, legacy);
-  const [tab, setTab] = useState<"current" | "history">("current");
+  const [tab, setTab] = useState<typeof taskTabs[number]>("current");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [archived, setArchived] = useState<Set<string>>(() => new Set(batches.filter(batch => batch.status === "success").map(batch => batch.id)));
   const selection = useTaskReviewStore();
   const [submitError, setSubmitError] = useState(false);
   const reportRows = batches.find(batch => batch.report !== undefined)?.report ?? [];
   const choices = selectedRepositories(reportRows, tasks, state.migratingRepository, selection);
-  const riskCount = reportRows.filter(row => row.pending && !row.needsCheck && repositoryRisk(row) && !selection.approved.includes(row.preview?.snapshotId ?? "")).length;
-  const recheckCount = reportRows.filter(row => row.needsCheck).length;
   const collapse = (id: string) => setExpanded(previous => { const next = new Set(previous); next.delete(id); return next; });
   const [visited, setVisited] = useState<Set<string>>(new Set());
   const wasOpen = useRef(false);
-  useTaskCloseGuard();
   const expand = (id: string | null) => {
     setExpanded(previous => id ? new Set(previous).add(id) : new Set());
     if (id) setVisited((previous) => new Set(previous).add(id));
@@ -198,6 +195,7 @@ export function TaskCenter() {
       return total > 1 ? `${label} · ${done} / ${total}` : label;
     }
     if (batch.status === "cancelled") return t("workflow.batch.stopped");
+    if (batch.status === "success" && batch.tasks.some(task => task.steps.some(step => step.warning))) return t("workflow.taskErrors.completedWarning");
     if (batch.report) {
       const failed = batch.report.filter(
         (row) => row.error || failedStatus(row.status),
@@ -356,7 +354,7 @@ export function TaskCenter() {
               aria-label={t("workflow.activityTitle")}
               className="flex items-center gap-4"
             >
-              {(["current", "history"] as const).map((value) => (
+              {taskTabs.map((value) => (
                 <button
                   key={value}
                   type="button"
@@ -377,10 +375,8 @@ export function TaskCenter() {
                         event.key === "Home"
                           ? "current"
                           : event.key === "End"
-                            ? "history"
-                            : value === "current"
-                              ? "history"
-                              : "current";
+                            ? "log"
+                            : taskTabs[(taskTabs.indexOf(value) + (event.key === "ArrowRight" ? 1 : taskTabs.length - 1)) % taskTabs.length];
                       changeTab(next);
                       document.getElementById(`batch-tab-${next}`)?.focus();
                     }
@@ -393,9 +389,9 @@ export function TaskCenter() {
                   )}
                 >
                   {t(`workflow.batch.${value}`)}
-                  <span className="text-xs font-normal">
+                  {value !== "log" && <span className="text-xs font-normal">
                     {value === "current" ? currentCount : historyCount}
-                  </span>
+                  </span>}
                 </button>
               ))}
             </div>
@@ -407,10 +403,11 @@ export function TaskCenter() {
             aria-labelledby={`batch-tab-${tab}`}
             className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]"
           >
+            {tab === "log" && <TaskOperationLog batches={batches} />}
             {batches.map((batch) => {
               const open = expanded.has(batch.id);
               const hidden =
-                tab === "history" ? !isHistory(batch) : isHistory(batch);
+                tab === "log" || (tab === "history" ? !isHistory(batch) : isHistory(batch));
               const prepared = batch.tasks.find(
                 (task) =>
                   task.status === "awaiting_input" &&
@@ -427,6 +424,8 @@ export function TaskCenter() {
                     ? FolderSync
                     : RefreshCw;
               const batchTitle = title(batch);
+              const rechecks = batch.report?.filter(row => row.needsCheck) ?? [];
+              const recheckable = rechecks.filter(row => !repositoryLocked(row, tasks));
               return (
                 <article
                   key={batch.id}
@@ -464,8 +463,8 @@ export function TaskCenter() {
                           failedStatus(batch.status) && "text-destructive",
                         )}
                       />
-                      <span className="min-w-0">
-                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className={cn("min-w-0", batch.report !== undefined && "flex items-center gap-4 overflow-hidden")}>
+                        <span className={cn("flex items-center gap-x-2 gap-y-1", batch.report !== undefined ? "min-w-0 shrink-0 whitespace-nowrap" : "flex-wrap")}>
                           <span
                             className="font-semibold"
                             title={
@@ -491,8 +490,9 @@ export function TaskCenter() {
                           )}
                         </span>
                         <span
+                          title={batch.report !== undefined ? summary(batch) : undefined}
                           className={cn(
-                            "mt-1 block text-xs",
+                            batch.report !== undefined ? "truncate text-xs" : "mt-1 block text-xs",
                             failedStatus(batch.status)
                               ? "text-destructive"
                               : "text-muted-foreground",
@@ -503,6 +503,7 @@ export function TaskCenter() {
                       </span>
                     </button>
                     <div className="flex shrink-0 items-center gap-2">{action(batch)}
+                      {!!rechecks.length && <Button variant="ghost" size="icon" title={t("workflow.flow.recheck", {count: rechecks.length})} aria-label={t("workflow.flow.recheck", {count: rechecks.length})} disabled={!recheckable.length || !!state.migratingRepository} onClick={() => void state.recheckRepositories(recheckable.map(row => row.repository))}><RefreshCw /></Button>}
                       <Button variant="ghost" size="icon" title={t("workflow.deleteTaskRecord",{name:batchTitle})} aria-label={t("workflow.deleteTaskRecord",{name:batchTitle})} onClick={()=>{
                         if(batch.report!==undefined)state.dismissReport();
                         else {batch.tasks.forEach(task=>useTaskQueueStore.getState().remove(task.id));if(batch.legacy)useAppStatusStore.getState().resetStatus();}
@@ -534,8 +535,9 @@ export function TaskCenter() {
                   <div
                     id={`batch-details-${batch.id}`}
                     hidden={!open}
-                    className="border-t border-border px-4 pb-3 sm:pl-14"
+                    className={cn("border-t border-border px-4 pb-3", batch.report === undefined ? "sm:pl-14" : open && "pl-3.5")}
                   >
+                    {open && batch.tasks.flatMap(task => task.steps.flatMap((step, index) => step.warning ? [<p role="alert" key={`${task.id}:${index}:warning`} className="py-3 text-xs text-destructive">{step.warning}</p>] : []))}
                     {(open || visited.has(batch.id)) &&
                       (batch.report !== undefined ? (
                         <TaskRepositoryReview
@@ -555,7 +557,7 @@ export function TaskCenter() {
                 </article>
               );
             })}
-            {!visibleCount && (
+            {tab !== "log" && !visibleCount && (
               <p className="p-4 py-12 text-center text-sm text-muted-foreground">
                 {t(
                   tab === "current"
@@ -565,11 +567,8 @@ export function TaskCenter() {
               </p>
             )}
           </div>
-          <footer className="flex shrink-0 flex-wrap items-center gap-4 border-t border-border p-4">
-            <HintIcon text={t("workflow.taskPanel.backgroundHint")} />
+          {tab !== "log" && <footer className="flex shrink-0 flex-wrap items-center gap-4 border-t border-border p-4">
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold">{tab === "history" ? t("workflow.batch.history") : t("workflow.flow.selected", {count: choices.length})}</p>
-              <p className="text-xs text-muted-foreground">{tab === "history" ? t("workflow.taskPanel.backgroundHint") : t("workflow.flow.remaining", {risk: riskCount, check: recheckCount})}</p>
               {submitError && <p role="alert" className="text-xs text-destructive">{t("workflow.batch.previewUnavailable")}</p>}
             </div>
             {tab === "history" && <Button variant="outline" disabled={!historyCount} onClick={clearHistory}><ActionIcon action="clear" />{t("workflow.clearFinished")}</Button>}
@@ -578,7 +577,7 @@ export function TaskCenter() {
               const count = state.applySnapshots(choices.map(row => ({repository: row.repository, snapshotId: row.preview!.snapshotId!, allowDeletions: !!selection.approved.includes(row.preview!.snapshotId!)})), state.reportGeneration);
               setSubmitError(count === 0);
             }}><ActionIcon action="update" />{t("workflow.flow.sync", {count: choices.length})}</Button></>}
-          </footer>
+          </footer>}
         </DialogContent>
       </Dialog>
     </>

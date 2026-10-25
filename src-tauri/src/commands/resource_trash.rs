@@ -52,6 +52,8 @@ pub struct Entry {
     pub kind: String,
     pub repositories: Vec<String>,
     pub skill_count: usize,
+    #[serde(default)]
+    pub skills: Vec<String>,
     pub deleted_at: String,
     pub reason: String,
     pub phase: String,
@@ -205,6 +207,7 @@ pub(crate) async fn capture(
         kind: kind.into(),
         repositories,
         skill_count: selected.len(),
+        skills: Vec::new(),
         deleted_at: chrono::Utc::now().to_rfc3339(),
         reason: reason.into(),
         phase: "deleting".into(),
@@ -716,21 +719,20 @@ pub(crate) async fn reimport_prepared(
         Ok(result)
     }.await;
     if outcome.is_err() {
-        if removed {
-            if skills::preview_delete_resource_skill_bundle_impl(pool, &relative)
+        if removed
+            && skills::preview_delete_resource_skill_bundle_impl(pool, &relative)
                 .await
                 .is_ok()
-            {
-                skills::delete_resource_skill_bundle_impl(
-                    pool,
-                    &relative,
-                    skills::DeleteCentralSkillBundleOptions {
-                        cascade_uninstall: true,
-                    },
-                )
-                .await
-                .map_err(|_| "TRASH_RECOVERY_REQUIRED")?;
-            }
+        {
+            skills::delete_resource_skill_bundle_impl(
+                pool,
+                &relative,
+                skills::DeleteCentralSkillBundleOptions {
+                    cascade_uninstall: true,
+                },
+            )
+            .await
+            .map_err(|_| "TRASH_RECOVERY_REQUIRED")?;
         }
         restore_locked(pool, &entry.id, true)
             .await
@@ -741,7 +743,19 @@ pub(crate) async fn reimport_prepared(
 
 #[tauri::command]
 pub async fn list_resource_trash(state: State<'_, AppState>) -> Result<Vec<Entry>, String> {
-    list(&state.db)
+    let mut entries = list(&state.db)?;
+    for entry in &mut entries {
+        let (_, payload) = read_metadata(&state.db, &entry.id)?;
+        entry.skills = payload
+            .tables
+            .get("skills")
+            .into_iter()
+            .flat_map(|rows| rows.values())
+            .filter_map(|row| row["name"].as_str().map(str::to_owned))
+            .collect();
+        entry.skills.sort();
+    }
+    Ok(entries)
 }
 #[tauri::command]
 pub async fn restore_resource_trash(state: State<'_, AppState>, id: String) -> Result<(), String> {

@@ -893,11 +893,20 @@ async fn preview_github_repo_group_scoped(
 }
 
 #[tauri::command]
-pub async fn plan_repository_update_check(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    let mut repositories = github_repo_source_groups(&state.db, false).await?
-        .into_keys().collect::<Vec<_>>();
-    repositories.extend(state.db.read(|data| Ok(data.table("repository_mirrors").values()
-        .filter_map(|row| row["repository"].as_str().map(str::to_owned)).collect::<Vec<_>>()))?);
+pub async fn plan_repository_update_check(
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let mut repositories = github_repo_source_groups(&state.db, false)
+        .await?
+        .into_keys()
+        .collect::<Vec<_>>();
+    repositories.extend(state.db.read(|data| {
+        Ok(data
+            .table("repository_mirrors")
+            .values()
+            .filter_map(|row| row["repository"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>())
+    })?);
     repositories.sort();
     repositories.dedup();
     Ok(repositories)
@@ -909,7 +918,8 @@ pub async fn preview_source_backed_resource_repository_updates(
     repositories: Option<Vec<String>>,
     retained_snapshot_ids: Option<Vec<String>>,
 ) -> Result<RepositorySyncPreviewReport, String> {
-    super::repository_mirror::check_with_retained(&state.db, repositories, retained_snapshot_ids).await
+    super::repository_mirror::check_with_retained(&state.db, repositories, retained_snapshot_ids)
+        .await
 }
 
 async fn update_source_backed_skills_impl(
@@ -1268,7 +1278,8 @@ async fn update_github_repo_source_group(
     repo_ref.branch = remote_ref.clone();
     let snapshot = github_import::fetch_mirror_snapshot(&repo_ref, auth).await?;
     let rules = super::repository_import_rules::load(pool, repo).await?;
-    let candidates = super::repository_import_rules::update_candidates(&repo_ref, &snapshot, rules.as_ref())?;
+    let candidates =
+        super::repository_import_rules::update_candidates(&repo_ref, &snapshot, rules.as_ref())?;
     let existing_keys = group
         .iter()
         .map(|(source, skill)| skill_source_match_keys(source, skill))
@@ -1297,10 +1308,20 @@ async fn update_github_repo_source_group(
     } else {
         let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
         super::repository_address::recover(pool).await?;
-        if super::repository_import_rules::load(pool, repo).await? != rules { return Err("PREVIEW_EXPIRED".into()); }
+        if super::repository_import_rules::load(pool, repo).await? != rules {
+            return Err("PREVIEW_EXPIRED".into());
+        }
         github_import::import_prepared_snapshot_with_directories(
-            pool, repo_ref, &snapshot, selections, app, None, &HashMap::new(), None,
-        ).await?
+            pool,
+            repo_ref,
+            &snapshot,
+            selections,
+            app,
+            None,
+            &HashMap::new(),
+            None,
+        )
+        .await?
     };
     let imported_ids = result
         .imported_skills

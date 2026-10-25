@@ -67,7 +67,7 @@ var ArsenalLink = class extends import_obsidian.Plugin {
       }
     });
     this.addCommand({
-      id: "return-to-skillshub",
+      id: "return-to-arsenal",
       name: "Open repository in Arsenal / \u8FD4\u56DE Arsenal \u4ED3\u5E93",
       callback: () => {
         void this.returnToArsenal().catch(() => new import_obsidian.Notice("Arsenal: Unable to read properties / \u65E0\u6CD5\u8BFB\u53D6\u5C5E\u6027\u3002"));

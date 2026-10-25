@@ -14,9 +14,9 @@ const output = path.resolve(__dirname, '../images/product');
       page.on('pageerror', error=>errors.push(error.message));
       // Screenshots need no network data. Block accidental outbound requests.
       await page.route('**/*', route=>new URL(route.request().url()).origin === new URL(base).origin ? route.continue() : route.abort());
-      for (const scene of ['library','document','install','tasks','import','review']) {
+      for (const scene of ['library','document','install','tasks','import','review','errors','log']) {
         await page.goto(`${base}/docs/screenshots/index.html?lang=${lang}&scene=${scene}`);
-        if (['install','tasks','import','review'].includes(scene)) await page.getByRole('dialog').waitFor();
+        if (['install','tasks','import','review','errors','log'].includes(scene)) await page.getByRole('dialog').waitFor();
         else await page.getByRole('button',{name:'example/research-kit',exact:true}).waitFor();
         if (scene==='library' || scene==='document') {
           for (const repo of ['research-kit','dev-toolkit']) await page.getByRole('button',{name:lang==='zh'?`展开 example/${repo}`:`Expand example/${repo}`,exact:true}).click();
@@ -35,9 +35,11 @@ const output = path.resolve(__dirname, '../images/product');
         }
         if (scene==='tasks') await page.getByRole('article').filter({hasText:lang==='zh'?'更新技能仓库':'Update skill library'}).getByRole('button').first().click();
         if (scene==='review') {
-          await page.locator('summary').filter({hasText:'example/research-kit'}).click();
+          await page.getByRole('region',{name:'example/research-kit',exact:true}).getByRole('button',{name:lang==='zh'?'查看详情':'View details',exact:true}).click();
           await page.locator('summary').filter({hasText:'literature-review'}).click();
         }
+        if (scene==='errors') await page.getByRole('button',{name:lang==='zh'?'需重查 1':'Needs recheck 1',exact:true}).click();
+        if (scene==='log') await page.getByRole('tab',{name:lang==='zh'?'日志':'Log',exact:true}).click();
         await page.evaluate(()=>document.fonts.ready);
         await page.screenshot({path:path.join(output,`${scene}-${lang}.png`),animations:'disabled'});
         console.log(`${scene}-${lang}.png`);

@@ -9,6 +9,7 @@ import {taskErrorMessage} from "./taskQueueStore";
 
 export interface ResourceTrashEntry {
   id:string; name:string; kind:"skill"|"repository"; repositories:string[];
+  skills?:string[];
   skillCount:number; deletedAt:string; reason:"delete"|"reimport"; phase:string;
 }
 interface State {

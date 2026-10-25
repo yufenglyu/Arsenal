@@ -315,7 +315,7 @@ pub async fn set_agent_enabled(
 mod tests {
     use super::*;
     use crate::db;
-    use crate::db::AppStore as AppStore;
+    use crate::db::AppStore;
     use std::fs;
     use tempfile::TempDir;
 

@@ -27,7 +27,7 @@ export function TaskImportReview({
       onLater={onLater}
     />
   ) : (
-    <p role="alert" className="py-3 text-sm text-destructive">
+    <p role="alert" className="py-3 text-xs text-destructive">
       {t("workflow.batch.previewUnavailable")}
     </p>
   );

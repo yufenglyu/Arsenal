@@ -14,6 +14,9 @@ pub(crate) struct ImportRules {
     pub excluded_paths: BTreeMap<String, String>,
     #[serde(default)]
     pub legacy_passthrough: bool,
+    // Preserve a single installed package's scope across upstream path moves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_source: Option<String>,
 }
 
 fn name(candidate: &RemoteSkillCandidate) -> String {
@@ -107,8 +110,24 @@ pub(crate) fn update_candidates(
     let Some(rules) = rules else {
         return Ok(all);
     }; // Existing repositories retain their current behavior.
-    let all:Vec<_>=all.into_iter().filter(|candidate|!rules.excluded_paths.contains_key(&candidate.source_path)).collect();
-    if rules.legacy_passthrough {return Ok(all);}
+    let all: Vec<_> = all
+        .into_iter()
+        .filter(|candidate| !rules.excluded_paths.contains_key(&candidate.source_path))
+        .collect();
+    if let Some(source) = &rules.package_source {
+        let selected: Vec<_> = all
+            .into_iter()
+            .filter(|candidate| &candidate.source_path == source)
+            .collect();
+        return if selected.is_empty() {
+            Err("IMPORT_SOURCE_MISSING".into())
+        } else {
+            Ok(selected)
+        };
+    }
+    if rules.legacy_passthrough {
+        return Ok(all);
+    }
     let mut retained = Vec::new();
     let mut new_names = Vec::new();
     for candidate in all {
@@ -121,9 +140,10 @@ pub(crate) fn update_candidates(
     // A removed chosen source requires a new import choice, never a silent switch to a variant.
     for paths in rules.groups.values().filter(|paths| !paths.is_empty()) {
         if paths.iter().any(|path| {
-            !rules.excluded_paths.contains_key(path) && !retained
-                .iter()
-                .any(|candidate| &candidate.source_path == path)
+            !rules.excluded_paths.contains_key(path)
+                && !retained
+                    .iter()
+                    .any(|candidate| &candidate.source_path == path)
         }) {
             return Err("IMPORT_SOURCE_MISSING".into());
         }

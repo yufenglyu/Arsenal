@@ -4,6 +4,8 @@ import { invoke } from "@/lib/tauri";
 import {listen} from "@tauri-apps/api/event";
 import type {GitHubImportProgressPayload} from "@/types";
 import i18n from "@/i18n";
+import {describeTaskError, normalizeTaskResult, taskErrorMessage} from "@/lib/taskErrors";
+export {taskErrorMessage} from "@/lib/taskErrors";
 
 export type TaskKind = "import" | "check" | "update" | "ai";
 export type TaskStatus =
@@ -21,6 +23,8 @@ export interface TaskStep {
   label: string;
   status?: TaskStatus;
   error?: string;
+  errorCode?: string;
+  warning?: string;
   result?: unknown;
 }
 export interface BackgroundTask {
@@ -94,53 +98,7 @@ function trimHistory(tasks: BackgroundTask[]) {
   );
   return tasks.filter((t) => t.status !== "success" || retained.has(t.id));
 }
-export function taskErrorMessage(
-  error: unknown,
-  kind: TaskKind = "check",
-): string {
-  const text = error instanceof Error ? error.message : String(error);
-  const code = error && typeof error === "object" && "code" in error ? String(error.code) : /^([A-Z_]+)(?::|$)/.exec(text)?.[1];
-  if (code && ["TRASH_TOO_LARGE","TRASH_UNAVAILABLE","TRASH_NOT_FOUND","TRASH_INSTALLED","TRASH_ROOT_CHANGED","TRASH_RESTORE_CONFLICT","TRASH_RECOVERY_REQUIRED","IMPORT_SOURCE_MISSING","PREVIEW_EXPIRED","SNAPSHOT_UNAVAILABLE","LOCAL_IDENTITY_CHANGED","TARGET_DIRECTORY_CONFLICT","SNAPSHOT_LINK_UNAVAILABLE","UNSAFE_TARGET","UNSAFE_INSTALL_TARGET","UNSAFE_SNAPSHOT_PATH","SNAPSHOT_CACHE_FULL","SNAPSHOT_TOO_LARGE","WRITE_FAILED"].includes(code)) return i18n.t(`workflow.errors.${code}`);
-  if (/^address[A-Za-z]+$/.test(text) && i18n.exists(`workflow.address.errors.${text}`)) return i18n.t(`workflow.address.errors.${text}`);
-  // Background tasks already store safe, translated errors. Preserve them when
-  // a dialog or a check wrapper handles that same error a second time.
-  const translatedErrors = i18n.t("workflow.errors", { returnObjects: true });
-  if (typeof translatedErrors === "object" && translatedErrors !== null && Object.values(translatedErrors).includes(text)) {
-    return text;
-  }
-  const message = text.toLowerCase();
-  if (/preview_expired|local_identity_changed/.test(message)) return i18n.t("workflow.errors.stale");
-  if (/snapshot_unavailable/.test(message)) return i18n.t("workflow.errors.remoteVersionChanged");
-  if (/invalid github repository url|only https:\/\/ github|only github\.com|repository url (must|is missing)|enter a github repository/.test(message)) return i18n.t("workflow.errors.invalidRepository");
-  if (/no importable skills/.test(message)) return i18n.t("workflow.noImportableSkills");
-  if (message.includes("preview changed: item category changed")) return i18n.t("workflow.errors.categoryChanged");
-  if (message.includes("preview changed: remote content version changed")) return i18n.t("workflow.errors.remoteVersionChanged");
-  if (/response body failed|download interrupted|response body incomplete|error decoding response body/.test(message)) {
-    return i18n.t(/timeout|timed out/.test(message) ? "workflow.errors.timeout" : "workflow.errors.network");
-  }
-  const key = /rate.?limit|too many requests|\b429\b|secondary.*limit/.test(
-    message,
-  )
-    ? kind === "ai"
-      ? "aiRateLimit"
-      : "rateLimit"
-    : /preview changed/.test(message)
-      ? "stale"
-      : /timeout|timed out/.test(message)
-        ? "timeout"
-        : /401|403|unauthorized|forbidden|api.key/.test(message)
-          ? kind === "ai"
-            ? "aiAuthorization"
-            : "githubAuthorization"
-          : /network|connect|dns|fetch/.test(message)
-            ? "network"
-            : /not found|does not exist|no such file/.test(message)
-              ? "missing"
-              : /already exists|conflict/.test(message)
-                ? "conflict"
-                : "other";
-  return i18n.t(`workflow.errors.${key}`);
-}
+
 interface State {
   tasks: BackgroundTask[];
   enqueue: (task: Input) => string;
@@ -234,6 +192,8 @@ export const useTaskQueueStore = create<State>()(
                 : step.command === "prepare_github_resource_import" ? {...step.args, operationId: undefined} : step.args,
               status: "queued",
               error: undefined,
+              errorCode: undefined,
+              warning: undefined,
               result: undefined,
             };
           }),
@@ -361,10 +321,15 @@ async function execute(id: string) {
         } catch { /* Import still works when event registration is unavailable. */ }
       }
       const args = cancellable ? {...step.args, operationId: importOperations.get(id)} : step.args;
-      const result = await (executors.get(step.command)?.(args) ?? invoke(step.command, args));
+      const result = normalizeTaskResult(await (executors.get(step.command)?.(args) ?? invoke(step.command, args)), task.kind, step.command, args);
       step.result = result;
       step.status = inputRequirements.get(step.command)?.(result) ? "awaiting_input" : "success";
       step.error = undefined;
+      step.errorCode = undefined;
+      step.warning = undefined;
+      if (result && typeof result === "object" && "viewRefreshError" in result && result.viewRefreshError) {
+        step.warning = i18n.t("workflow.taskErrors.postRefreshFailed", {reason: taskErrorMessage(result.viewRefreshError, task.kind, step.command)});
+      }
       if (
         step.command === "preview_source_backed_resource_repository_updates"
       ) {
@@ -381,8 +346,9 @@ async function execute(id: string) {
         // Committed writes still run their refresh handlers even when their record is hidden.
         if(state().tasks.find(task=>task.id===id)?.clearRequested && inputRequirements.has(step.command))step.status="cancelled";
         else await handlers.get(step.command)?.(step, result);
-      } catch {
-        /* The operation succeeded; a refresh failure must not rerun a committed write. */
+      } catch (error) {
+        // Keep committed writes successful, but make the failed view refresh visible.
+        step.warning = i18n.t("workflow.taskErrors.postRefreshFailed", {reason: taskErrorMessage(error, task.kind, step.command)});
       }
     } catch (error) {
       if (cancellable && state().tasks.find(task => task.id === id)?.cancelRequested) {
@@ -393,7 +359,9 @@ async function execute(id: string) {
       }
       step.status = "failed";
       // Provider responses and credentials must never be surfaced in the task UI.
-      step.error = taskErrorMessage(error, task.kind);
+      const diagnostic = describeTaskError(error, task.kind, step.command);
+      step.error = diagnostic.message;
+      step.errorCode = diagnostic.code;
       try {
         await failureHandlers.get(step.command)?.(step);
       } catch {
@@ -432,8 +400,10 @@ async function execute(id: string) {
       if (!complete) continue;
       try {
         await complete(finished);
-      } catch {
-        /* A refresh failure must not retry a completed write. */
+      } catch (error) {
+        const warning = i18n.t("workflow.taskErrors.postRefreshFailed", {reason: taskErrorMessage(error, finished.kind, command)});
+        const current = state().tasks.find(task => task.id === id);
+        if (current) state().patch(id, {steps: current.steps.map(step => step.command === command ? {...step, warning} : step)});
       }
     }
   }

@@ -1537,7 +1537,7 @@ pub async fn batch_install_resource_skill_to_agents(
 mod tests {
     use super::*;
     use crate::db;
-    use crate::db::AppStore as AppStore;
+    use crate::db::AppStore;
     use std::fs;
     use tempfile::TempDir;
 
@@ -1597,7 +1597,11 @@ mod tests {
         skill_dir
     }
 
-    async fn create_resource_skill(pool: &AppStore, resource_dir: &Path, skill_id: &str) -> PathBuf {
+    async fn create_resource_skill(
+        pool: &AppStore,
+        resource_dir: &Path,
+        skill_id: &str,
+    ) -> PathBuf {
         let skill_dir = create_central_skill(resource_dir, skill_id);
         let skill = db::Skill {
             id: skill_id.to_string(),
@@ -1614,7 +1618,11 @@ mod tests {
         skill_dir
     }
 
-    async fn create_noncentral_skill(pool: &AppStore, source_root: &Path, skill_id: &str) -> PathBuf {
+    async fn create_noncentral_skill(
+        pool: &AppStore,
+        source_root: &Path,
+        skill_id: &str,
+    ) -> PathBuf {
         let skill_dir = create_central_skill(source_root, skill_id);
         db::upsert_skill(
             pool,

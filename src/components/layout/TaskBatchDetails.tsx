@@ -1,12 +1,9 @@
 import { ActionIcon } from "@/components/ui/action-icon";
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { importDetailRows } from "@/lib/taskPresentation";
 import {
-  CHECK_REPOSITORIES,
   retryableTask,
   type TaskBatch,
 } from "@/lib/taskBatches";
@@ -14,8 +11,7 @@ import { isTaskActive, taskErrorMessage, useTaskQueueStore } from "@/stores/task
 import { TaskDisclosure } from "./TaskDisclosure";
 
 export function TaskBatchDetails({ batch }: { batch: TaskBatch }) {
-  const { t, i18n } = useTranslation();
-  const [search, setSearch] = useState("");
+  const { t } = useTranslation();
   const rows =
     batch.kind === "import"
       ? importDetailRows(batch.tasks)
@@ -27,13 +23,10 @@ export function TaskBatchDetails({ batch }: { batch: TaskBatch }) {
             error: step.error,
           })),
         );
-  const matches = (name: string) =>
-    name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
   const settled = (status: string) =>
     ["success", "imported", "skipped"].includes(status);
-  const visible = rows.filter((row) => matches(row.name));
-  const unfinished = visible.filter((row) => !settled(row.status));
-  const completed = visible.filter((row) => settled(row.status));
+  const unfinished = rows.filter((row) => !settled(row.status));
+  const completed = rows.filter((row) => settled(row.status));
   const renderRows = (items: typeof rows) =>
     items.map((row) => {
       const owner = batch.tasks.find((task) => row.key === `${task.id}:0`);
@@ -44,7 +37,7 @@ export function TaskBatchDetails({ batch }: { batch: TaskBatch }) {
         >
           <span className="min-w-0 flex-1 break-all">{row.name}</span>
           <span
-            className={row.error ? "text-destructive" : "text-muted-foreground"}
+            className={`text-xs ${row.error ? "text-destructive" : "text-muted-foreground"}`}
           >
             {row.error
               ? taskErrorMessage(
@@ -61,16 +54,18 @@ export function TaskBatchDetails({ batch }: { batch: TaskBatch }) {
                         : `workflow.taskStatus.${row.status}`,
                 )}
           </span>
-          {owner && isTaskActive(owner) && <Button variant="ghost" disabled={owner.cancelRequested} onClick={() => useTaskQueueStore.getState().cancel(owner.id)}><ActionIcon action="stop" />{t(owner.cancelRequested ? "workflow.stopping" : "workflow.stopTask")}</Button>}
+          {owner && isTaskActive(owner) && <Button variant="ghost" size="icon" title={t(owner.cancelRequested ? "workflow.stopping" : "workflow.stopTask")} aria-label={t(owner.cancelRequested ? "workflow.stopping" : "workflow.stopTask")} disabled={owner.cancelRequested} onClick={() => useTaskQueueStore.getState().cancel(owner.id)}><ActionIcon action="stop" /></Button>}
           {owner && batch.tasks.length > 1 && retryableTask(owner) && (
             <Button
               variant="ghost"
+              size="icon"
+              title={t("workflow.retryTask")}
               aria-label={t("workflow.taskPanel.retryTaskNamed", {
                 name: owner.label,
               })}
               onClick={() => useTaskQueueStore.getState().retry(owner.id)}
             >
-              <ActionIcon action="retry" />{t("workflow.retryTask")}
+              <ActionIcon action="retry" />
             </Button>
           )}
         </div>
@@ -79,16 +74,6 @@ export function TaskBatchDetails({ batch }: { batch: TaskBatch }) {
   const skipped = completed.filter((row) => row.status === "skipped").length;
   return (
     <div>
-      {rows.length > 8 && (
-        <Input
-          type="search"
-          className="my-3"
-          aria-label={t("workflow.batch.searchItems")}
-          placeholder={t("workflow.batch.searchItems")}
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-      )}
       {renderRows(unfinished)}
       {!!completed.length && (
         <TaskDisclosure
@@ -122,7 +107,7 @@ export function TaskBatchDetails({ batch }: { batch: TaskBatch }) {
               {item.repository}
             </span>
           )}
-          <span className="ml-auto text-muted-foreground">
+          <span className="ml-auto text-xs text-muted-foreground">
             {t(
               item.status === "failed"
                 ? "workflow.taskStatus.failed"
@@ -133,67 +118,18 @@ export function TaskBatchDetails({ batch }: { batch: TaskBatch }) {
           </span>
           {item.status === "failed" && batch.legacy?.onRetryFailedItem && (
             <Button
-              variant="outline"
+              variant="ghost"
+              size="icon"
+              title={t("workflow.retryTask")}
+              aria-label={t("workflow.retryTask")}
               onClick={() => batch.legacy?.onRetryFailedItem?.(item)}
             >
-              <ActionIcon action="retry" />{t("workflow.retryTask")}
+              <ActionIcon action="retry" />
             </Button>
           )}
         </div>
       ))}
-      <TaskDisclosure small title={t("workflow.batch.log")}>
-        <p>
-          {batch.createdAt
-            ? new Date(batch.createdAt).toLocaleString(i18n.language)
-            : t("workflow.checkTimeUnknown")}
-        </p>
-        {batch.tasks.flatMap((task) =>
-          task.importProgress
-            ? [
-                <div key={task.id} className="mt-3 space-y-2">
-                  {task.importProgress.currentSkill && (
-                    <p className="break-all">
-                      {t("workflow.taskPanel.currentSkill", {
-                        name: task.importProgress.currentSkill,
-                      })}
-                    </p>
-                  )}
-                  {task.importProgress.currentPath && (
-                    <p className="break-all">
-                      {t("workflow.taskPanel.currentFile", {
-                        path: task.importProgress.currentPath,
-                      })}
-                    </p>
-                  )}
-                </div>,
-              ]
-            : [],
-        )}
-        {batch.tasks.flatMap((task) =>
-          task.steps
-            .filter((step) => step.command === CHECK_REPOSITORIES)
-            .flatMap((step, index) => {
-              const result = step.result as
-                | { repositories?: { repository?: string; error?: string }[] }
-                | undefined;
-              return Array.isArray(result?.repositories)
-                ? result.repositories
-                    .filter((repo) => typeof repo.repository === "string")
-                    .map((repo) => (
-                      <p
-                        className="mt-2 break-all"
-                        key={`${task.id}:${index}:${repo.repository}`}
-                      >
-                        {repo.repository} ·{" "}
-                        {repo.error
-                          ? taskErrorMessage(repo.error)
-                          : t("workflow.taskStatus.success")}
-                      </p>
-                    ))
-                : [];
-            }),
-        )}
-      </TaskDisclosure>
+
     </div>
   );
 }

@@ -4,6 +4,8 @@ import { NotebookEditor } from "@/components/notebook/NotebookEditor";
 import { NotebookMarkdown } from "@/components/notebook/NotebookMarkdown";
 import { useNotebookStore } from "@/stores/notebookStore";
 import type { NotebookFile, Repository } from "@/types/notebook";
+import { normalizeNotebookFolder } from "@/lib/notebookNames";
+import defaultTemplate from "@/data/obsidianTemplate.json";
 
 const initial = useNotebookStore.getState();
 function repo(id: number, notebook = "saved"): Repository {
@@ -13,6 +15,14 @@ beforeEach(() => { useNotebookStore.setState(initial, true); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe("repository notebooks", () => {
+  it("uses Arsenal folders while preserving existing notebook property identifiers", () => {
+    expect(normalizeNotebookFolder()).toBe("Arsenal");
+    expect(normalizeNotebookFolder(" ")).toBe("Arsenal");
+    expect(normalizeNotebookFolder("Attachments/Research")).toBe("Attachments/Research");
+    expect(defaultTemplate.template).toContain("skillshub_note_id: {{noteId}}");
+    expect(defaultTemplate.template).toContain("skillshub_uri: {{skillshubUri}}");
+    expect(defaultTemplate.template).not.toMatch(/arsenal_(?:note|repository|uri)/);
+  });
   it("previews GFM tables and math locally without rendering raw HTML", () => {
     const { container } = render(<NotebookMarkdown content={'| Key | Value |\n|---|---|\n| x | y |\n\n$E=mc^2$\n\n<script>alert(1)</script>\n\n```\n$literal$\n```'} />);
     expect(screen.getByRole("table")).toBeInTheDocument();

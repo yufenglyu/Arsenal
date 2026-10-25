@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, time::SystemTime};
 use tauri::State;
 
-use crate::db::{self, Collection, AppStore, Skill};
+use crate::db::{self, AppStore, Collection, Skill};
 use crate::AppState;
 
 use super::linker::{
@@ -284,7 +284,10 @@ pub async fn batch_install_collection_impl(
 }
 
 /// Export a collection to a JSON string matching the spec in docs/desktop-design.md.
-pub async fn export_collection_impl(pool: &AppStore, collection_id: &str) -> Result<String, String> {
+pub async fn export_collection_impl(
+    pool: &AppStore,
+    collection_id: &str,
+) -> Result<String, String> {
     let collection = db::get_collection_by_id(pool, collection_id)
         .await?
         .ok_or_else(|| format!("Collection '{}' not found", collection_id))?;
@@ -951,28 +954,26 @@ mod tests {
         let pool = setup_test_db().await;
 
         // Override central and claude-code agent dirs.
-        pool
-            .write(|data| {
-                for (id, row) in data.table_mut("agents") {
-                    if id.as_str() == "central" {
-                        row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
-                    }
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if id.as_str() == "central" {
+                    row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
-        pool
-            .write(|data| {
-                for (id, row) in data.table_mut("agents") {
-                    if id.as_str() == "claude-code" {
-                        row["global_skills_dir"] = serde_json::json!(agent_dir.to_str().unwrap());
-                    }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if id.as_str() == "claude-code" {
+                    row["global_skills_dir"] = serde_json::json!(agent_dir.to_str().unwrap());
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         // Create two central skills on disk.
         for skill_id in &["batch-col-skill-1", "batch-col-skill-2"] {
@@ -1037,28 +1038,26 @@ mod tests {
 
         let pool = setup_test_db().await;
 
-        pool
-            .write(|data| {
-                for (id, row) in data.table_mut("agents") {
-                    if id.as_str() == "central" {
-                        row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
-                    }
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if id.as_str() == "central" {
+                    row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
-        pool
-            .write(|data| {
-                for (id, row) in data.table_mut("agents") {
-                    if id.as_str() == "claude-code" {
-                        row["global_skills_dir"] = serde_json::json!(agent_dir.to_str().unwrap());
-                    }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if id.as_str() == "claude-code" {
+                    row["global_skills_dir"] = serde_json::json!(agent_dir.to_str().unwrap());
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         // Create one valid skill, but leave the other missing from disk.
         let good_dir = central_dir.join("good-skill");
@@ -1142,39 +1141,36 @@ mod tests {
         fs::create_dir_all(&resource_dir).unwrap();
 
         let pool = setup_test_db().await;
-        pool
-            .write(|data| {
-                for (id, row) in data.table_mut("agents") {
-                    if id.as_str() == "central" {
-                        row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
-                    }
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if id.as_str() == "central" {
+                    row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
-        pool
-            .write(|data| {
-                for (id, row) in data.table_mut("agents") {
-                    if id.as_str() != "central" {
-                        row["is_enabled"] = serde_json::json!(false);
-                    }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if id.as_str() != "central" {
+                    row["is_enabled"] = serde_json::json!(false);
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
-        pool
-            .write(|data| {
-                for (id, row) in data.table_mut("agents") {
-                    if id.as_str() == "cursor" {
-                        row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
-                    }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if id.as_str() == "cursor" {
+                    row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
             .await
             .unwrap();
@@ -1259,28 +1255,26 @@ mod tests {
         fs::create_dir_all(&resource_dir).unwrap();
 
         let pool = setup_test_db().await;
-        pool
-            .write(|data| {
-                for (id, row) in data.table_mut("agents") {
-                    if id.as_str() == "central" {
-                        row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
-                    }
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if id.as_str() == "central" {
+                    row["global_skills_dir"] = serde_json::json!(central_dir.to_str().unwrap());
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
-        pool
-            .write(|data| {
-                for (id, row) in data.table_mut("agents") {
-                    if id.as_str() != "central" {
-                        row["is_enabled"] = serde_json::json!(false);
-                    }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if id.as_str() != "central" {
+                    row["is_enabled"] = serde_json::json!(false);
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
             .await
             .unwrap();
@@ -1340,6 +1334,9 @@ mod tests {
 }
 
 #[tauri::command]
-pub async fn change_collection_group(state: State<'_, AppState>, request: db::collection_tree::CollectionChange) -> Result<Vec<Collection>, String> {
+pub async fn change_collection_group(
+    state: State<'_, AppState>,
+    request: db::collection_tree::CollectionChange,
+) -> Result<Vec<Collection>, String> {
     db::collection_tree::change(&state.db, request).await
 }

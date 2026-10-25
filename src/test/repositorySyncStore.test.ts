@@ -106,7 +106,7 @@ describe("background repository preview", () => {
     expect(check).toHaveBeenCalledTimes(1);
     expect(apply).not.toHaveBeenCalled();
     expect(useRepositorySyncStore.getState()).toMatchObject({
-      isChecking: false, open: false, preview: { repositories: [] }, repositories: ["example/skills"],
+      isChecking: false, open: false, preview: { repositories: [expect.objectContaining({repository: "example/skills", errorCode: "TASK_RESULT_MISSING"})] }, repositories: ["example/skills"],
     });
   });
 

@@ -76,6 +76,10 @@ if (!global.PointerEvent) {
 }
 
 // Mock Tauri APIs for testing
+Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
+  value: {unregisterListener: vi.fn()},
+  configurable: true,
+});
 Object.defineProperty(window, "__TAURI__", {
   value: {
     core: {

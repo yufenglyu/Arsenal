@@ -15,10 +15,11 @@ export function ResourceTrashView(){
   const [query,setQuery]=useState("");
   const [request,setRequest]=useState<{action:BatchAction;entries:BatchEntry[]}|null>(null);
   useEffect(()=>{void load();},[load]);
-  const rows=useMemo(()=>entries.filter(entry=>entry.name.toLowerCase().includes(query.trim().toLowerCase())),[entries,query]);
+  const rows=useMemo(()=>entries.filter(entry=>[entry.name,...(entry.skills??[])].some(name=>name.toLowerCase().includes(query.trim().toLowerCase()))),[entries,query]);
   const actions=(ids:string[])=>entries.filter(entry=>ids.includes(entry.id)).map(entry=>({key:entry.id,name:entry.name,operations:{restore:()=>restore(entry.id),purge:()=>purge([entry.id])}}));
   const folders=rows.map((entry):FolderTableItem=>({
-    key:entry.id,name:entry.name,path:"",skillCount:entry.skillCount,updatedAt:entry.deletedAt,onOpen:()=>{},expandable:false,overviewOnly:true,
+    key:entry.id,name:entry.name,path:"",skillCount:entry.skillCount,updatedAt:entry.deletedAt,onOpen:()=>{},expandable:Boolean(entry.skills?.length),overviewOnly:true,
+    children:entry.skills?.map((name,index)=>({rowKey:`${entry.id}:${index}`,name,updatedAt:entry.deletedAt})),
     batchOperations:actions([entry.id])[0]?.operations,restore:()=>restore(entry.id),purge:()=>purge([entry.id]),
     metadata:<>
       <MetadataRow label={t("detail.sourceRepo")} value={entry.repositories.join(", ")||"—"}/>

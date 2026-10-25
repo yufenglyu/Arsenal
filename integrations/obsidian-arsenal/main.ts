@@ -38,7 +38,7 @@ export default class ArsenalLink extends Plugin {
       callback: () => { void this.copyLink().catch(() => new Notice("Arsenal: Unable to copy link / 无法复制链接。")); },
     });
     this.addCommand({
-      id: "return-to-skillshub", name: "Open repository in Arsenal / 返回 Arsenal 仓库",
+      id: "return-to-arsenal", name: "Open repository in Arsenal / 返回 Arsenal 仓库",
       callback: () => { void this.returnToArsenal().catch(() => new Notice("Arsenal: Unable to read properties / 无法读取属性。")); },
     });
     this.addCommand({ id: "rebuild-note-index", name: "Rebuild note index / 重建笔记索引", callback: () => {

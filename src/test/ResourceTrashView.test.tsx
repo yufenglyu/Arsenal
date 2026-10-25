@@ -56,3 +56,17 @@ it("uses the shared inspector for archive summaries and keeps the clear icon bor
   expect(screen.getByText("来源仓库")).toBeInTheDocument();
   expect(screen.queryByRole("tab",{name:"文档"})).not.toBeInTheDocument();
 });
+it("expands archived skills and finds their repository by skill name",()=>{
+  const entries=store.getState().entries;
+  store.setState({entries:[{...entries[0],skills:["Deleted alpha","Deleted beta"]}]});
+  render(<ResourceTrashView/>);
+  const row=screen.getByRole("button",{name:"example/one"}).closest("tr")!;
+  const toggle=row.querySelector('button[aria-expanded]')!;
+  fireEvent.click(toggle);
+  expect(screen.getByText("Deleted alpha")).toBeInTheDocument();
+  expect(screen.getByText("Deleted beta")).toBeInTheDocument();
+  fireEvent.change(screen.getByRole("textbox"),{target:{value:"Deleted alpha"}});
+  expect(screen.getByRole("button",{name:"example/one"})).toBeInTheDocument();
+  fireEvent.click(toggle);
+  expect(screen.queryByText("Deleted beta")).not.toBeInTheDocument();
+});

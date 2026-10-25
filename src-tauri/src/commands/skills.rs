@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 use tauri::State;
 
-use crate::db::{self, Collection, AppStore, SkillForAgent};
+use crate::db::{self, AppStore, Collection, SkillForAgent};
 use crate::path_utils::{remove_symlink_path, resolve_path_for_file_manager};
 use crate::AppState;
 
@@ -1870,7 +1870,9 @@ pub async fn get_central_skills(state: State<'_, AppState>) -> Result<Vec<SkillW
     get_central_skills_impl(&state.db).await
 }
 
-pub(crate) async fn get_central_skills_impl(pool: &AppStore) -> Result<Vec<SkillWithLinks>, String> {
+pub(crate) async fn get_central_skills_impl(
+    pool: &AppStore,
+) -> Result<Vec<SkillWithLinks>, String> {
     let _ = super::linker::reconcile_orphaned_central_skills(pool).await;
     let mut skills = db::get_central_skills(pool).await?;
     // A relocated resource remains the primary DB record; expose its managed
@@ -1994,7 +1996,12 @@ pub async fn export_resource_skill_directory_list(
     let mut rows: BTreeMap<String, Vec<SkillWithLinks>> = BTreeMap::new();
 
     for skill in skills {
-        if skill_ids.as_ref().is_some_and(|ids| !ids.contains(&skill.id)) { continue; }
+        if skill_ids
+            .as_ref()
+            .is_some_and(|ids| !ids.contains(&skill.id))
+        {
+            continue;
+        }
         let Some(canonical_path) = skill.canonical_path.as_deref() else {
             continue;
         };
@@ -5350,17 +5357,16 @@ mod tests {
         let pool = setup_test_db().await;
         set_agent_dir(&pool, "central", &central_dir).await;
         set_agent_dir(&pool, "claude-code", &claude_dir).await;
-        pool
-            .write(|data| {
-                for (id, row) in data.table_mut("agents") {
-                    if id.as_str() != "central" && id.as_str() != "claude-code" {
-                        row["is_enabled"] = serde_json::json!(false);
-                    }
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if id.as_str() != "central" && id.as_str() != "claude-code" {
+                    row["is_enabled"] = serde_json::json!(false);
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
         db::set_skill_resource_library_dir(&pool, &resource_dir.to_string_lossy())
             .await
             .unwrap();
@@ -5607,11 +5613,18 @@ mod tests {
         // A delete preview must not traverse/reconcile unrelated repositories.
         let unrelated = resource_dir.join("unrelated/extra");
         fs::create_dir_all(&unrelated).unwrap();
-        fs::write(unrelated.join("SKILL.md"), "---\nname: unrelated\ndescription: other\n---\nOther").unwrap();
+        fs::write(
+            unrelated.join("SKILL.md"),
+            "---\nname: unrelated\ndescription: other\n---\nOther",
+        )
+        .unwrap();
         let preview = preview_delete_resource_skill_bundle_impl(&pool, "owner/repo")
             .await
             .unwrap();
-        assert_eq!(db::get_resource_library_skills(&pool).await.unwrap().len(), 2);
+        assert_eq!(
+            db::get_resource_library_skills(&pool).await.unwrap().len(),
+            2
+        );
 
         assert_eq!(preview.bundle.relative_path, "owner/repo");
         assert_eq!(preview.bundle.skill_count, 2);
@@ -6164,10 +6177,7 @@ mod tests {
         Ok(result)
     }
 
-    async fn get_skill_detail_impl(
-        pool: &AppStore,
-        skill_id: &str,
-    ) -> Result<SkillDetail, String> {
+    async fn get_skill_detail_impl(pool: &AppStore, skill_id: &str) -> Result<SkillDetail, String> {
         super::get_skill_detail_with_row_impl(pool, skill_id, None, None).await
     }
 
@@ -6253,18 +6263,17 @@ mod tests {
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(skill_dir.join("SKILL.md"), "# Shared Skill\n").unwrap();
 
-        pool
-            .write(|data| {
-                for (id, row) in data.table_mut("agents") {
-                    if ["central", "antigravity"].contains(&id.as_str()) {
-                        row["global_skills_dir"] =
-                            serde_json::json!(central_root.to_string_lossy().to_string());
-                    }
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if ["central", "antigravity"].contains(&id.as_str()) {
+                    row["global_skills_dir"] =
+                        serde_json::json!(central_root.to_string_lossy().to_string());
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let skill = make_skill_with_path(
             "shared-skill",
@@ -6321,18 +6330,17 @@ mod tests {
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(skill_dir.join("SKILL.md"), "# Canvas Design\n").unwrap();
 
-        pool
-            .write(|data| {
-                for (id, row) in data.table_mut("agents") {
-                    if ["central", "antigravity"].contains(&id.as_str()) {
-                        row["global_skills_dir"] =
-                            serde_json::json!(central_root.to_string_lossy().to_string());
-                    }
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if ["central", "antigravity"].contains(&id.as_str()) {
+                    row["global_skills_dir"] =
+                        serde_json::json!(central_root.to_string_lossy().to_string());
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let skill = make_skill_with_path(
             "canvas-design",
@@ -6371,18 +6379,17 @@ mod tests {
         fs::write(resource_dir.join("SKILL.md"), "# Canvas Design\n").unwrap();
         create_symlink(&resource_dir, &central_link).unwrap();
 
-        pool
-            .write(|data| {
-                for (id, row) in data.table_mut("agents") {
-                    if id.as_str() == "central" {
-                        row["global_skills_dir"] =
-                            serde_json::json!(central_root.to_string_lossy().to_string());
-                    }
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if id.as_str() == "central" {
+                    row["global_skills_dir"] =
+                        serde_json::json!(central_root.to_string_lossy().to_string());
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let skill = make_skill_with_path(
             "canvas-design",
@@ -6484,18 +6491,17 @@ mod tests {
         fs::write(resource_dir.join("SKILL.md"), "# Shared Skill\n").unwrap();
         create_symlink(&resource_dir, &skill_dir).unwrap();
 
-        pool
-            .write(|data| {
-                for (id, row) in data.table_mut("agents") {
-                    if ["central", "antigravity"].contains(&id.as_str()) {
-                        row["global_skills_dir"] =
-                            serde_json::json!(central_root.to_string_lossy().to_string());
-                    }
+        pool.write(|data| {
+            for (id, row) in data.table_mut("agents") {
+                if ["central", "antigravity"].contains(&id.as_str()) {
+                    row["global_skills_dir"] =
+                        serde_json::json!(central_root.to_string_lossy().to_string());
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         let skill = make_skill_with_path(
             "shared-skill",

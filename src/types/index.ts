@@ -453,6 +453,7 @@ export interface RepositoryCoverage {
   reason?: string | null;
 }
 export interface RepositorySyncPreviewReport {
+  viewRefreshError?: string;
   coverage?: RepositoryCoverage[];
   repositories: RepositorySyncPreview[];
 }

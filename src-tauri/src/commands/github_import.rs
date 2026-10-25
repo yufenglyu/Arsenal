@@ -298,16 +298,24 @@ pub async fn import_github_repo_skills(
 }
 
 #[tauri::command]
-pub async fn reimport_github_repo_skills(app:AppHandle,state:State<'_,AppState>,repo_url:String,selections:Vec<GitHubSkillImportSelection>)->Result<GitHubRepoImportResult,String>{
-    let auth=github_direct_auth_from_settings(&state.db).await?;
-    let mut repo=resolve_repo_ref(&repo_url,auth.as_deref()).await?;
-    if !is_commit_ref(&repo.branch){repo.branch=fetch_repo_head_ref(&repo,auth.as_deref()).await?;}
-    let client=github_client()?;
-    let snapshot=download_repo_snapshot(&client,&repo,auth.as_deref()).await?;
-    let _guard=super::repository_mirror::MIRROR_LOCK.lock().await;
+pub async fn reimport_github_repo_skills(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_url: String,
+    selections: Vec<GitHubSkillImportSelection>,
+) -> Result<GitHubRepoImportResult, String> {
+    let auth = github_direct_auth_from_settings(&state.db).await?;
+    let mut repo = resolve_repo_ref(&repo_url, auth.as_deref()).await?;
+    if !is_commit_ref(&repo.branch) {
+        repo.branch = fetch_repo_head_ref(&repo, auth.as_deref()).await?;
+    }
+    let client = github_client()?;
+    let snapshot = download_repo_snapshot(&client, &repo, auth.as_deref()).await?;
+    let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
     super::repository_address::recover(&state.db).await?;
     recover_import_transactions(&state.db).await?;
-    super::resource_trash::reimport_prepared(&state.db,repo,&snapshot,selections,Some(&app)).await
+    super::resource_trash::reimport_prepared(&state.db, repo, &snapshot, selections, Some(&app))
+        .await
 }
 
 #[tauri::command]
@@ -374,7 +382,10 @@ pub(crate) async fn import_github_repo_snapshot_impl(
         if let Some(filter) = filter {
             let matches_filter = skill.skill_id.eq_ignore_ascii_case(filter)
                 || skill.skill_directory_name.eq_ignore_ascii_case(filter)
-                || skill.duplicate_paths.iter().any(|path|path.eq_ignore_ascii_case(filter))
+                || skill
+                    .duplicate_paths
+                    .iter()
+                    .any(|path| path.eq_ignore_ascii_case(filter))
                 || skill.source_path.eq_ignore_ascii_case(filter)
                 || skill
                     .source_path
@@ -383,7 +394,9 @@ pub(crate) async fn import_github_repo_snapshot_impl(
                 continue;
             }
         }
-        if !selected_names.insert(skill.skill_name.trim().to_lowercase()) { continue; }
+        if !selected_names.insert(skill.skill_name.trim().to_lowercase()) {
+            continue;
+        }
         selections.push(GitHubSkillImportSelection {
             source_path: skill.source_path,
             resolution: if skill.conflict.is_some() && !input.overwrite {
@@ -471,15 +484,31 @@ pub(crate) async fn import_prepared_snapshot(
     let mut normalized = Vec::new();
     // Prefer a retained selection over a skipped alias, independent of request order.
     let mut selections = selections;
-    selections.sort_by_key(|item|item.resolution == DuplicateResolution::Skip);
+    selections.sort_by_key(|item| item.resolution == DuplicateResolution::Skip);
     for mut selection in selections {
-        let candidate = candidates.iter().find(|candidate| candidate.source_path == selection.source_path || candidate.duplicate_paths.contains(&selection.source_path))
-            .ok_or_else(||format!("Selected skill '{}' is no longer available in the preview.",selection.source_path))?;
+        let candidate = candidates
+            .iter()
+            .find(|candidate| {
+                candidate.source_path == selection.source_path
+                    || candidate.duplicate_paths.contains(&selection.source_path)
+            })
+            .ok_or_else(|| {
+                format!(
+                    "Selected skill '{}' is no longer available in the preview.",
+                    selection.source_path
+                )
+            })?;
         selection.source_path = candidate.source_path.clone();
-        if seen.insert(selection.source_path.clone()) { normalized.push(selection); }
+        if seen.insert(selection.source_path.clone()) {
+            normalized.push(selection);
+        }
     }
     let selections = normalized;
-    let selected = selections.iter().filter(|item|item.resolution != DuplicateResolution::Skip).map(|item|item.source_path.clone()).collect();
+    let selected = selections
+        .iter()
+        .filter(|item| item.resolution != DuplicateResolution::Skip)
+        .map(|item| item.source_path.clone())
+        .collect();
     let rules = super::repository_import_rules::selected_rules(&candidates, &selected);
     import_prepared_snapshot_with_directories(
         pool,
@@ -788,10 +817,15 @@ pub(crate) async fn import_prepared_snapshot_with_directories(
 
     if !imported_skills.is_empty() {
         if let Some(rules) = import_rules {
-            let repository = format!("{}/{}",repo.owner,repo.repo).to_lowercase();
-            let row = database_transaction.data_mut().table_mut("repository_mirrors").entry(repository.clone())
-                .or_insert_with(||serde_json::json!({"repository":repository,"last_snapshot_id":null}));
-            row["import_rules"] = serde_json::to_value(rules).map_err(|e|e.to_string())?;
+            let repository = format!("{}/{}", repo.owner, repo.repo).to_lowercase();
+            let row = database_transaction
+                .data_mut()
+                .table_mut("repository_mirrors")
+                .entry(repository.clone())
+                .or_insert_with(
+                    || serde_json::json!({"repository":repository,"last_snapshot_id":null}),
+                );
+            row["import_rules"] = serde_json::to_value(rules).map_err(|e| e.to_string())?;
         }
     }
 
@@ -1124,7 +1158,14 @@ async fn build_preview_skills(
             download_url: candidate.download_url.clone(),
             conflict,
             duplicate_paths: candidate.duplicate_paths.clone(),
-            variant_count: candidates.iter().filter(|item|item.skill_name.trim().eq_ignore_ascii_case(candidate.skill_name.trim())).count(),
+            variant_count: candidates
+                .iter()
+                .filter(|item| {
+                    item.skill_name
+                        .trim()
+                        .eq_ignore_ascii_case(candidate.skill_name.trim())
+                })
+                .count(),
             recommended: recommended_names.insert(candidate.skill_name.trim().to_lowercase()),
         });
     }
@@ -1245,19 +1286,22 @@ async fn apply_repository_metadata(
         .collect::<HashSet<_>>();
     let root = skill_resource_library_root(pool).await?;
     let root = root.canonicalize().unwrap_or(root);
-    let directories = db::get_resource_library_skills(pool)
-        .await?
+    // The central scanner can own the DB row for a link into the resource
+    // library. Resolve its physical location instead of excluding central rows.
+    // Standalone central skills and links outside this root remain excluded.
+    let directories = pool
+        .read(|data| db::rows::<Skill>(data, "skills"))?
         .into_iter()
         .filter(|skill| ids.contains(&skill.id))
         .filter_map(|skill| skill.canonical_path)
         .filter_map(|path| {
             let path = PathBuf::from(path);
-            let path = path.canonicalize().unwrap_or(path);
+            let path = path.canonicalize().ok()?;
             repository_docs::group_directory(&root, &path)
         })
         .collect::<HashSet<_>>();
     if directories.is_empty() {
-        return Err("Repository is no longer in the resource library".into());
+        return Err("REPOSITORY_NOT_IN_LIBRARY".into());
     }
     let mut transaction = ImportDirectoryTransaction::new(&root)?;
     for directory in directories {
@@ -1595,6 +1639,9 @@ pub(crate) fn build_repo_skill_candidates_from_snapshot(
             .files
             .get(&manifest.skill_md_path)
             .ok_or_else(|| format!("Missing snapshot file '{}'.", manifest.skill_md_path))?;
+        if is_noncanonical_skill_document(&manifest.skill_md_path, raw) {
+            continue;
+        }
         let content = String::from_utf8(raw.clone())
             .map_err(|_| format!("Skill '{}' is not valid UTF-8.", manifest.source_path))?;
         let frontmatter = parse_frontmatter(&content).ok_or_else(|| {
@@ -1693,8 +1740,11 @@ fn classify_skill_manifest_path(path: &str) -> Option<SnapshotSkillManifest> {
     // SKILL.md defines the skill boundary; category/plugin directory names do not.
     // Apply the same discovery rule to preview, sparse downloads and update mirrors.
     if !is_safe_repo_relative_path(normalized)
-        || source_parts.iter().any(|part| matches!(*part, ".git" | "node_modules"))
+        || source_parts
+            .iter()
+            .any(|part| matches!(*part, ".git" | "node_modules"))
         || source_parts == [".github"]
+        || is_skill_test_fixture_manifest(normalized)
     {
         return None;
     }
@@ -1709,6 +1759,20 @@ fn classify_skill_manifest_path(path: &str) -> Option<SnapshotSkillManifest> {
         skill_directory_name: source_parts.last()?.to_string(),
         skill_md_path: normalized.to_string(),
     })
+}
+
+pub(crate) fn is_skill_test_fixture_manifest(path: &str) -> bool {
+    let parts = path.split('/').collect::<Vec<_>>();
+    parts.first() == Some(&"scripts") && parts.iter().any(|part| matches!(*part, "test" | "tests"))
+}
+
+pub(crate) fn is_noncanonical_skill_document(path: &str, bytes: &[u8]) -> bool {
+    let filename = path.rsplit('/').next().unwrap_or(path);
+    // A normal guide can be called skill.md. Keep valid legacy lowercase
+    // manifests, but require skill metadata before treating such a file as one.
+    filename != "SKILL.md"
+        && filename.eq_ignore_ascii_case("SKILL.md")
+        && std::str::from_utf8(bytes).is_ok_and(|content| parse_frontmatter(content).is_none())
 }
 
 async fn download_repo_snapshot(
@@ -2799,6 +2863,69 @@ fn sanitize_skill_id(raw: &str) -> Result<String, String> {
 mod tests {
 
     #[tokio::test]
+    #[ignore = "Requires live access to public GitHub repositories"]
+    async fn live_refresh_reported_repositories() {
+        for repository in ["mattpocock/skills", "op7418/humanizer-zh"] {
+            let pool = setup_test_db().await;
+            let tmp = tempdir().unwrap();
+            let root = tmp.path().join("library");
+            let skill_dir = root.join(repository).join("fixture");
+            std::fs::create_dir_all(&skill_dir).unwrap();
+            std::fs::write(skill_dir.join("SKILL.md"), "fixture").unwrap();
+            let central = tmp.path().join("central");
+            std::fs::create_dir_all(&central).unwrap();
+            let linked = central.join("fixture");
+            super::super::linker::create_symlink(&skill_dir, &linked).unwrap();
+            db::set_skill_resource_library_dir(&pool, &root.to_string_lossy())
+                .await
+                .unwrap();
+            db::upsert_skill(
+                &pool,
+                &Skill {
+                    id: "refresh-fixture".into(),
+                    name: "Refresh fixture".into(),
+                    description: None,
+                    file_path: linked.join("SKILL.md").to_string_lossy().into_owned(),
+                    canonical_path: Some(linked.to_string_lossy().into_owned()),
+                    is_central: true,
+                    source: Some(format!("github:{repository}")),
+                    content: None,
+                    scanned_at: "fixture".into(),
+                },
+            )
+            .await
+            .unwrap();
+            db::upsert_skill_source(
+                &pool,
+                &db::SkillSource {
+                    skill_id: "refresh-fixture".into(),
+                    source_type: "github".into(),
+                    source_repo: Some(repository.into()),
+                    source_author: repository.split('/').next().map(str::to_owned),
+                    source_url: None,
+                    source_path: Some("SKILL.md".into()),
+                    updated_at: String::new(),
+                },
+            )
+            .await
+            .unwrap();
+            let result = refresh_repository_impl(&pool, repository).await;
+            // These isolated public requests use no user config or credentials.
+            assert!(
+                result.is_ok(),
+                "Public refresh {repository} failed: {}",
+                result.unwrap_err()
+            );
+            assert_eq!(std::fs::read(linked.join("SKILL.md")).unwrap(), b"fixture");
+            assert!(std::fs::symlink_metadata(&linked)
+                .unwrap()
+                .file_type()
+                .is_symlink());
+            assert!(root.join(repository).join("README.md").is_file());
+        }
+    }
+
+    #[tokio::test]
     #[ignore = "Requires live access to a public GitHub repository"]
     async fn live_repository_documents_refresh() {
         let pool = setup_test_db().await;
@@ -2868,6 +2995,121 @@ mod tests {
             "test fixture must stay unchanged"
         );
         println!("Public repository refresh passed: {} README documents; star count saved; skill file unchanged", documents.len());
+    }
+
+    #[tokio::test]
+    async fn repository_metadata_refresh_accepts_resource_backed_central_links() {
+        let pool = setup_test_db().await;
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().join("library");
+        let directory = root.join("Example/Skills");
+        let resource = directory.join("demo");
+        let central_root = tmp.path().join("central");
+        let link = central_root.join("demo");
+        std::fs::create_dir_all(&resource).unwrap();
+        std::fs::create_dir_all(&central_root).unwrap();
+        std::fs::write(resource.join("SKILL.md"), "original skill").unwrap();
+        std::fs::write(directory.join("README.md"), "old README").unwrap();
+        super::super::linker::create_symlink(&resource, &link).unwrap();
+        db::set_skill_resource_library_dir(&pool, &root.to_string_lossy())
+            .await
+            .unwrap();
+        db::upsert_skill(
+            &pool,
+            &Skill {
+                id: "linked-demo".into(),
+                name: "Demo".into(),
+                description: None,
+                file_path: link.join("SKILL.md").to_string_lossy().into_owned(),
+                canonical_path: Some(link.to_string_lossy().into_owned()),
+                is_central: true,
+                source: Some("github:Example/Skills".into()),
+                content: None,
+                scanned_at: "original-time".into(),
+            },
+        )
+        .await
+        .unwrap();
+        db::upsert_skill_source(
+            &pool,
+            &db::SkillSource {
+                skill_id: "linked-demo".into(),
+                source_type: "github".into(),
+                source_repo: Some("Example/Skills".into()),
+                source_author: Some("Example".into()),
+                source_url: None,
+                source_path: Some("demo/SKILL.md".into()),
+                updated_at: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+        let repo = GitHubRepoRef {
+            owner: "Example".into(),
+            repo: "Skills".into(),
+            branch: "main".into(),
+            normalized_url: "https://github.com/Example/Skills".into(),
+            stars: Some(42),
+        };
+        let snapshot = GitHubRepoSnapshot {
+            files: [("README.md".into(), b"new README".to_vec())].into(),
+        };
+        apply_repository_metadata(&pool, "example/skills", &repo, &snapshot)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read(directory.join("README.md")).unwrap(),
+            b"new README"
+        );
+        assert_eq!(
+            std::fs::read(link.join("SKILL.md")).unwrap(),
+            b"original skill"
+        );
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!central_root.join("README.md").exists());
+        let saved = db::get_skill_by_id(&pool, "linked-demo")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(saved.is_central);
+        assert_eq!(
+            saved.canonical_path.as_deref(),
+            Some(link.to_string_lossy().as_ref())
+        );
+        assert_eq!(saved.scanned_at, "original-time");
+        assert_eq!(
+            db::get_github_stars(&pool, "example/skills").await.unwrap(),
+            Some(42)
+        );
+        // A standalone central copy must not authorize writing its README or
+        // publishing a successful metadata refresh for a removed resource.
+        let outside = tmp.path().join("standalone-central");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("SKILL.md"), "central copy").unwrap();
+        std::fs::write(outside.join("README.md"), "central README").unwrap();
+        let mut saved = saved;
+        saved.canonical_path = Some(outside.to_string_lossy().into_owned());
+        saved.file_path = outside.join("SKILL.md").to_string_lossy().into_owned();
+        db::upsert_skill(&pool, &saved).await.unwrap();
+        let mut repo = repo;
+        repo.stars = Some(100);
+        assert_eq!(
+            apply_repository_metadata(&pool, "example/skills", &repo, &snapshot)
+                .await
+                .unwrap_err(),
+            "REPOSITORY_NOT_IN_LIBRARY"
+        );
+        assert_eq!(
+            std::fs::read(outside.join("README.md")).unwrap(),
+            b"central README"
+        );
+        assert_eq!(
+            db::get_github_stars(&pool, "example/skills").await.unwrap(),
+            Some(42)
+        );
     }
 
     #[tokio::test]
@@ -3634,7 +3876,8 @@ mod tests {
             stars: None,
         };
         let snapshot = categorized_research_snapshot();
-        let candidates = super::super::repository_import_rules::candidates(&repo, &snapshot).unwrap();
+        let candidates =
+            super::super::repository_import_rules::candidates(&repo, &snapshot).unwrap();
         assert_eq!(
             candidates.len(),
             98,
@@ -3652,9 +3895,10 @@ mod tests {
                 renamed_skill_id: None,
             })
             .collect();
-        let imported = import_prepared_snapshot(&pool, repo.clone(), &snapshot, selections, None, None)
-            .await
-            .unwrap();
+        let imported =
+            import_prepared_snapshot(&pool, repo.clone(), &snapshot, selections, None, None)
+                .await
+                .unwrap();
         assert_eq!(imported.imported_skills.len(), 98);
         assert!(imported.skipped_skills.is_empty());
         for skill in &imported.imported_skills {
@@ -3667,14 +3911,19 @@ mod tests {
                 "do not copy sibling skill directories"
             );
         }
-        let rules =
-            super::super::repository_import_rules::load(&pool, "Orchestra-Research/AI-Research-SKILLs")
-                .await
-                .unwrap()
-                .unwrap();
-        let updated =
-            super::super::repository_import_rules::update_candidates(&repo, &snapshot, Some(&rules))
-                .unwrap();
+        let rules = super::super::repository_import_rules::load(
+            &pool,
+            "Orchestra-Research/AI-Research-SKILLs",
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let updated = super::super::repository_import_rules::update_candidates(
+            &repo,
+            &snapshot,
+            Some(&rules),
+        )
+        .unwrap();
         assert_eq!(updated.len(), 98);
         assert!(updated.iter().all(|candidate| imported
             .imported_skills
@@ -3707,6 +3956,87 @@ mod tests {
         ] {
             assert!(classify_skill_manifest_path(path).is_none(), "{path}");
         }
+    }
+
+    #[test]
+    fn lowercase_guide_is_not_a_manifest_but_lowercase_skills_remain_supported() {
+        let repo = GitHubRepoRef {
+            owner: "example".into(),
+            repo: "video".into(),
+            branch: "a".repeat(40),
+            normalized_url: String::new(),
+            stars: None,
+        };
+        let mut snapshot = GitHubRepoSnapshot {
+            files: [
+                (
+                    "docs/guide/skill.md".into(),
+                    b"---\ntitle: Using the skill\n---\nGuide".to_vec(),
+                ),
+                (
+                    "skills/video/skill.md".into(),
+                    sample_frontmatter("video", "real skill").into_bytes(),
+                ),
+            ]
+            .into(),
+        };
+        let found = build_repo_skill_candidates_from_snapshot(&repo, &snapshot).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].source_path, "skills/video/skill.md");
+        snapshot.files.insert(
+            "skills/broken/SKILL.md".into(),
+            b"# Broken manifest".to_vec(),
+        );
+        assert!(build_repo_skill_candidates_from_snapshot(&repo, &snapshot)
+            .unwrap_err()
+            .contains("skills/broken/SKILL.md"));
+    }
+
+    #[test]
+    fn script_validation_fixtures_are_resources_not_installable_skills() {
+        let repo = GitHubRepoRef {
+            owner: "example".into(),
+            repo: "cli".into(),
+            branch: "a".repeat(40),
+            normalized_url: String::new(),
+            stars: None,
+        };
+        let snapshot = GitHubRepoSnapshot {
+            files: [
+                (
+                    "skills/real/SKILL.md".into(),
+                    sample_frontmatter("real", "real skill").into_bytes(),
+                ),
+                (
+                    "scripts/skill-format-check/tests/bad/SKILL.md".into(),
+                    b"# Deliberately invalid fixture".to_vec(),
+                ),
+                (
+                    "scripts/skill-format-check/tests/good/SKILL.md".into(),
+                    sample_frontmatter("fixture", "test input").into_bytes(),
+                ),
+            ]
+            .into(),
+        };
+        let found = build_repo_skill_candidates_from_snapshot(&repo, &snapshot).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].source_path, "skills/real/SKILL.md");
+        let root_snapshot = GitHubRepoSnapshot {
+            files: [
+                (
+                    "SKILL.md".into(),
+                    sample_frontmatter("root", "root skill").into_bytes(),
+                ),
+                (
+                    "scripts/skill-format-check/tests/bad/SKILL.md".into(),
+                    b"# Test input".to_vec(),
+                ),
+            ]
+            .into(),
+        };
+        assert!(mirror_skill_files(&root_snapshot, "SKILL.md")
+            .unwrap()
+            .contains_key("scripts/skill-format-check/tests/bad/SKILL.md"));
     }
 
     #[tokio::test]
@@ -3759,7 +4089,8 @@ mod tests {
             stars: None,
         };
         let snapshot = fetch_mirror_snapshot(&repo, None).await.unwrap();
-        let candidates = super::super::repository_import_rules::candidates(&repo, &snapshot).unwrap();
+        let candidates =
+            super::super::repository_import_rules::candidates(&repo, &snapshot).unwrap();
         assert_eq!(candidates.len(), 98);
         let pool = setup_test_db().await;
         let library = tempdir().unwrap();
@@ -3781,24 +4112,31 @@ mod tests {
                 renamed_skill_id: None,
             })
             .collect();
-        let result = import_prepared_snapshot(&pool, repo.clone(), &snapshot, selections, None, None)
-            .await
-            .unwrap();
+        let result =
+            import_prepared_snapshot(&pool, repo.clone(), &snapshot, selections, None, None)
+                .await
+                .unwrap();
         assert_eq!(result.imported_skills.len(), 98);
         for skill in &result.imported_skills {
             assert!(Path::new(&skill.target_directory)
                 .join("SKILL.md")
                 .is_file());
         }
-        let rules =
-            super::super::repository_import_rules::load(&pool, "Orchestra-Research/AI-Research-SKILLs")
-                .await
-                .unwrap()
-                .unwrap();
+        let rules = super::super::repository_import_rules::load(
+            &pool,
+            "Orchestra-Research/AI-Research-SKILLs",
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(
-            super::super::repository_import_rules::update_candidates(&repo, &snapshot, Some(&rules))
-                .unwrap()
-                .len(),
+            super::super::repository_import_rules::update_candidates(
+                &repo,
+                &snapshot,
+                Some(&rules)
+            )
+            .unwrap()
+            .len(),
             98
         );
         println!("public repository: 98 previewed, 98 imported to an isolated library, 98 retained on update");
@@ -4065,7 +4403,10 @@ mod tests {
             std::fs::read_to_string(existing.join("asset.txt")).unwrap(),
             "asset"
         );
-        assert!(!staging_root.exists(), "committed import must remove its staging directory");
+        assert!(
+            !staging_root.exists(),
+            "committed import must remove its staging directory"
+        );
     }
 
     #[test]
@@ -5249,24 +5590,7 @@ pub(crate) async fn fetch_mirror_snapshot(
     if !is_commit_ref(&repo.branch) {
         return Err("SNAPSHOT_UNAVAILABLE: immutable commit required".into());
     }
-    let client = github_client()?;
-    let tree = fetch_repository_tree(&client, repo, auth).await?;
-    if tree["truncated"].as_bool() != Some(false) {
-        return Err("SNAPSHOT_UNAVAILABLE: incomplete repository tree".into());
-    }
-    let snapshot = (*download_repo_snapshot(&client, repo, auth).await?).clone();
-    let client = &client;
-    let snapshot = complete_mirror_snapshot(&tree, snapshot, |path| async move {
-        send_github_bytes_with_fallback(
-            client,
-            GitHubFetchSurface::Raw,
-            |endpoint| raw_file_url(endpoint, repo, &path),
-            "Failed to download missing skill resource",
-            auth,
-        )
-        .await
-    })
-    .await?;
+    let snapshot = fetch_complete_mirror(repo, auth, 0, false).await?;
     let candidates = build_repo_skill_candidates_from_snapshot(repo, &snapshot)?;
     let mut files = snapshot
         .files
@@ -5285,11 +5609,234 @@ pub(crate) async fn fetch_mirror_snapshot(
     Ok(GitHubRepoSnapshot { files })
 }
 
+fn fetch_complete_mirror<'a>(
+    repo: &'a GitHubRepoRef,
+    auth: Option<&'a str>,
+    depth: usize,
+    include_all: bool,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<GitHubRepoSnapshot, String>> + Send + 'a>,
+> {
+    Box::pin(async move {
+        if depth > 8 || !is_commit_ref(&repo.branch) {
+            return Err("UNSAFE_SNAPSHOT_PATH: submodule depth or revision".into());
+        }
+        let client = github_client()?;
+        let mut tree = fetch_repository_tree(&client, repo, auth).await?;
+        if tree["truncated"].as_bool() != Some(false) {
+            return Err("SNAPSHOT_UNAVAILABLE: incomplete repository tree".into());
+        }
+        let mut snapshot = if include_all {
+            snapshot_from_repository_archive(
+                &download_repository_archive(&client, repo, auth).await?,
+            )?
+        } else {
+            (*download_repo_snapshot(&client, repo, auth).await?).clone()
+        };
+        materialize_managed_submodules(&mut tree, &mut snapshot, include_all, |path, sha| {
+            let client = &client;
+            async move {
+                let encoded = path
+                    .bytes()
+                    .map(|byte| {
+                        if byte.is_ascii_alphanumeric() || b"-._~/".contains(&byte) {
+                            (byte as char).to_string()
+                        } else {
+                            format!("%{byte:02X}")
+                        }
+                    })
+                    .collect::<String>();
+                let response = send_github_request_with_fallback(
+                    client,
+                    GitHubFetchSurface::Api,
+                    |endpoint| {
+                        github_endpoint_url(
+                            endpoint,
+                            GitHubFetchSurface::Api,
+                            &format!(
+                                "/repos/{}/{}/contents/{encoded}?ref={}",
+                                repo.owner, repo.repo, repo.branch
+                            ),
+                        )
+                    },
+                    "Failed to inspect GitHub submodule",
+                    auth,
+                )
+                .await?;
+                if !response.status().is_success() {
+                    return Err(format!(
+                        "Submodule metadata unavailable: HTTP {}",
+                        response.status()
+                    ));
+                }
+                let metadata: serde_json::Value = response
+                    .json()
+                    .await
+                    .map_err(|_| "SNAPSHOT_UNAVAILABLE: submodule metadata")?;
+                let Some(child) = pinned_submodule_repo(&metadata, &sha)? else {
+                    // An undeclared gitlink has no fetchable repository. A
+                    // normal Git checkout leaves it uninitialized and the
+                    // parent's archive owns no files beneath it. Keep that
+                    // empty-directory meaning rather than inventing a URL.
+                    return Ok(GitHubRepoSnapshot::default());
+                };
+                // Do not forward a parent repository's private credential to a
+                // different repository just because an upstream file requests it.
+                let child_auth = if child.owner.eq_ignore_ascii_case(&repo.owner)
+                    && child.repo.eq_ignore_ascii_case(&repo.repo)
+                {
+                    auth
+                } else {
+                    None
+                };
+                fetch_complete_mirror(&child, child_auth, depth + 1, true).await
+            }
+        })
+        .await?;
+        let client = &client;
+        complete_mirror_snapshot_scoped(&tree, snapshot, include_all, |path| async move {
+            send_github_bytes_with_fallback(
+                client,
+                GitHubFetchSurface::Raw,
+                |endpoint| raw_file_url(endpoint, repo, &path),
+                "Failed to download missing skill resource",
+                auth,
+            )
+            .await
+        })
+        .await
+    })
+}
+
+fn pinned_submodule_repo(
+    metadata: &serde_json::Value,
+    sha: &str,
+) -> Result<Option<GitHubRepoRef>, String> {
+    if !is_commit_ref(sha) || metadata["sha"].as_str() != Some(sha) {
+        return Err("SNAPSHOT_UNAVAILABLE: submodule revision changed".into());
+    }
+    if metadata["type"] == "submodule"
+        && metadata.get("submodule_git_url") == Some(&serde_json::Value::Null)
+    {
+        return Ok(None);
+    }
+    let address = metadata["submodule_git_url"]
+        .as_str()
+        .ok_or("SNAPSHOT_UNAVAILABLE: missing submodule repository")?;
+    let address = address
+        .strip_prefix("git@github.com:")
+        .map(|path| format!("https://github.com/{path}"))
+        .unwrap_or_else(|| address.to_string());
+    let url =
+        reqwest::Url::parse(&address).map_err(|_| "UNSAFE_SNAPSHOT_PATH: submodule repository")?;
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("UNSAFE_SNAPSHOT_PATH: submodule repository".into());
+    }
+    let (owner, repo) = parse_github_url(&address)
+        .map_err(|_| "UNSAFE_SNAPSHOT_PATH: unsupported submodule host")?;
+    Ok(Some(GitHubRepoRef {
+        normalized_url: format!("https://github.com/{owner}/{repo}"),
+        owner,
+        repo,
+        branch: sha.into(),
+        stars: None,
+    }))
+}
+
+async fn materialize_managed_submodules<F, Fut>(
+    tree: &mut serde_json::Value,
+    snapshot: &mut GitHubRepoSnapshot,
+    include_all: bool,
+    mut fetch: F,
+) -> Result<(), String>
+where
+    F: FnMut(String, String) -> Fut,
+    Fut: std::future::Future<Output = Result<GitHubRepoSnapshot, String>>,
+{
+    let entries = tree["tree"]
+        .as_array()
+        .ok_or("SNAPSHOT_UNAVAILABLE: missing tree")?;
+    let roots = entries
+        .iter()
+        .filter_map(|entry| {
+            entry["path"]
+                .as_str()
+                .and_then(classify_skill_manifest_path)
+        })
+        .map(|m| snapshot_source_directory(&m.source_path))
+        .collect::<Vec<_>>();
+    let modules = entries
+        .iter()
+        .filter(|entry| entry["type"] == "commit")
+        .filter_map(|entry| {
+            entry["path"].as_str().map(|path| {
+                (
+                    path.to_owned(),
+                    entry["sha"].as_str().unwrap_or("").to_owned(),
+                )
+            })
+        })
+        .filter(|(path, _)| {
+            include_all
+                || roots
+                    .iter()
+                    .any(|root| root.is_empty() || path.starts_with(&format!("{root}/")))
+        })
+        .collect::<Vec<_>>();
+    for (path, sha) in modules {
+        if !is_safe_repo_relative_path(&path) || !is_commit_ref(&sha) {
+            return Err("UNSAFE_SNAPSHOT_PATH".into());
+        }
+        let child = fetch(path.clone(), sha).await?;
+        let entries = tree["tree"]
+            .as_array_mut()
+            .ok_or("SNAPSHOT_UNAVAILABLE: missing tree")?;
+        let module = entries
+            .iter_mut()
+            .find(|entry| entry["path"] == path)
+            .ok_or("SNAPSHOT_UNAVAILABLE")?;
+        module["type"] = "tree".into();
+        module["mode"] = "040000".into();
+        for (relative, bytes) in child.files {
+            let target = format!("{path}/{relative}");
+            if !is_safe_repo_relative_path(&target) || snapshot.files.contains_key(&target) {
+                return Err("UNSAFE_SNAPSHOT_PATH: overlapping submodule".into());
+            }
+            entries.push(
+                serde_json::json!({"path":target,"type":"blob","mode":"100644","size":bytes.len()}),
+            );
+            snapshot.files.insert(target, bytes);
+        }
+        if snapshot.files.values().map(Vec::len).sum::<usize>() > 128 * 1024 * 1024 {
+            return Err("SNAPSHOT_TOO_LARGE".into());
+        }
+    }
+    Ok(())
+}
+
 // Complete only the managed tree, including archive export omissions and in-repo
 // links. Links are materialized as regular files; no filesystem symlink is created.
+#[cfg(test)]
 async fn complete_mirror_snapshot<F, Fut>(
     tree: &serde_json::Value,
+    snapshot: GitHubRepoSnapshot,
+    fetch: F,
+) -> Result<GitHubRepoSnapshot, String>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<u8>, String>>,
+{
+    complete_mirror_snapshot_scoped(tree, snapshot, false, fetch).await
+}
+
+async fn complete_mirror_snapshot_scoped<F, Fut>(
+    tree: &serde_json::Value,
     mut snapshot: GitHubRepoSnapshot,
+    include_all: bool,
     fetch: F,
 ) -> Result<GitHubRepoSnapshot, String>
 where
@@ -5320,7 +5867,8 @@ where
         .iter()
         .filter(|(path, entry)| {
             entry["type"] != "tree"
-                && (repository_docs::language(path).is_some()
+                && (include_all
+                    || repository_docs::language(path).is_some()
                     || roots
                         .iter()
                         .any(|root| root.is_empty() || path.starts_with(&format!("{root}/"))))
@@ -5476,6 +6024,109 @@ mod mirror_completion_tests {
     }
 
     #[tokio::test]
+    async fn managed_submodule_is_materialized_at_its_pinned_revision() {
+        let sha = "b".repeat(40);
+        let mut tree = serde_json::json!({"truncated":false,"tree":[entry("SKILL.md","100644",1),{"path":"work/engine","type":"commit","mode":"160000","sha":sha},{"path":"unmanaged","type":"tree","mode":"040000"}]});
+        let mut snapshot = GitHubRepoSnapshot {
+            files: [("SKILL.md".into(), vec![1])].into(),
+        };
+        materialize_managed_submodules(
+            &mut tree,
+            &mut snapshot,
+            false,
+            |path, pinned| async move {
+                assert_eq!(path, "work/engine");
+                assert_eq!(pinned, "b".repeat(40));
+                Ok(GitHubRepoSnapshot {
+                    files: [("src/run.ts".into(), b"engine".to_vec())].into(),
+                })
+            },
+        )
+        .await
+        .unwrap();
+        let result = complete_mirror_snapshot(&tree, snapshot, |_| async {
+            panic!("submodule bytes are already frozen")
+        })
+        .await
+        .unwrap();
+        assert_eq!(result.files["work/engine/src/run.ts"], b"engine");
+        assert_eq!(result.files.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn submodule_resources_without_manifests_are_completed_in_full() {
+        let tree = serde_json::json!({"truncated":false,"tree":[entry("src/run.ts","100644",3)]});
+        let result = complete_mirror_snapshot_scoped(
+            &tree,
+            GitHubRepoSnapshot::default(),
+            true,
+            |path| async move {
+                assert_eq!(path, "src/run.ts");
+                Ok(b"run".to_vec())
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.files["src/run.ts"], b"run");
+    }
+
+    #[test]
+    fn submodule_repository_requires_matching_commit_and_trusted_host() {
+        let sha = "a".repeat(40);
+        let good = serde_json::json!({"sha":sha,"submodule_git_url":"https://github.com/example/engine.git"});
+        let repo = pinned_submodule_repo(&good, &sha).unwrap().unwrap();
+        assert_eq!(repo.branch, sha);
+        assert_eq!(repo.repo, "engine");
+        assert!(pinned_submodule_repo(&good, &"b".repeat(40)).is_err());
+        for url in [
+            "https://example.invalid/repo.git",
+            "http://github.com/example/engine.git",
+            "https://user:password@github.com/example/engine.git",
+            "https://github.com/example/engine.git?credential=hidden",
+        ] {
+            assert!(pinned_submodule_repo(
+                &serde_json::json!({"sha":sha,"submodule_git_url":url}),
+                &sha
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn undeclared_gitlink_is_uninitialized_not_an_arbitrary_download() {
+        let sha = "a".repeat(40);
+        assert!(pinned_submodule_repo(
+            &serde_json::json!({"sha":sha,"type":"submodule","submodule_git_url":null}),
+            &sha
+        )
+        .unwrap()
+        .is_none());
+        assert!(pinned_submodule_repo(&serde_json::json!({"sha":sha}), &sha).is_err());
+        assert!(pinned_submodule_repo(
+            &serde_json::json!({"sha":"b".repeat(40),"type":"submodule","submodule_git_url":null}),
+            &sha
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn unselected_submodules_are_not_downloaded() {
+        let mut tree = serde_json::json!({"truncated":false,"tree":[entry("skills/demo/SKILL.md","100644",1),{"path":"other/engine","type":"commit","mode":"160000","sha":"a".repeat(40)}]});
+        let mut snapshot = GitHubRepoSnapshot {
+            files: [("skills/demo/SKILL.md".into(), vec![1])].into(),
+        };
+        materialize_managed_submodules(&mut tree, &mut snapshot, false, |_, _| async {
+            panic!("unmanaged dependencies must not be fetched")
+        })
+        .await
+        .unwrap();
+        let result = complete_mirror_snapshot(&tree, snapshot, |_| async { panic!("no fetch") })
+            .await
+            .unwrap();
+        assert_eq!(result.files.len(), 1);
+    }
+
+    #[tokio::test]
     async fn mirror_completion_fetches_archive_omissions_at_pinned_revision() {
         let tree = serde_json::json!({"truncated":false,"tree":[
             entry("SKILL.md", "100644", 1), entry("assets/image.png", "100644", 3)
@@ -5584,9 +6235,10 @@ pub(crate) async fn recover_import_transactions(pool: &AppStore) -> Result<(), S
         let entry = entry.map_err(|e| e.to_string())?;
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        let transaction_id = name.strip_prefix(".arsenal-import-")
+        let transaction_id = name
+            .strip_prefix(".arsenal-import-")
             .or_else(|| name.strip_prefix(".skillshub-import-"));
-        if !transaction_id.is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
+        if transaction_id.is_none_or(|id| uuid::Uuid::parse_str(id).is_err())
             || !entry.file_type().map_err(|e| e.to_string())?.is_dir()
         {
             continue;
@@ -5676,14 +6328,26 @@ mod import_cleanup_tests {
         db::init_database(&pool).await.unwrap();
         let library = temp.path().join("library");
         std::fs::create_dir(&library).unwrap();
-        db::set_skill_resource_library_dir(&pool, &library.to_string_lossy()).await.unwrap();
+        db::set_skill_resource_library_dir(&pool, &library.to_string_lossy())
+            .await
+            .unwrap();
         for prefix in [".arsenal-import-", ".skillshub-import-"] {
             for marker in ["committed", "recovered", "receipt"] {
-                let root = temp.path().join(format!("{prefix}{}", uuid::Uuid::new_v4()));
+                let root = temp
+                    .path()
+                    .join(format!("{prefix}{}", uuid::Uuid::new_v4()));
                 std::fs::create_dir(&root).unwrap();
                 std::fs::write(root.join("old-copy"), b"previous payload").unwrap();
                 if marker == "receipt" {
-                    pool.write(|data| {data.table_mut("import_transaction_receipts").insert(root.to_string_lossy().into_owned(), serde_json::json!({"id":root.to_string_lossy()})); Ok(())}).await.unwrap();
+                    pool.write(|data| {
+                        data.table_mut("import_transaction_receipts").insert(
+                            root.to_string_lossy().into_owned(),
+                            serde_json::json!({"id":root.to_string_lossy()}),
+                        );
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
                 } else {
                     std::fs::write(root.join(marker), b"").unwrap();
                 }
@@ -5707,19 +6371,29 @@ mod import_cleanup_tests {
         let target = library.join("demo");
         std::fs::create_dir_all(&target).unwrap();
         std::fs::write(target.join("SKILL.md"), b"old").unwrap();
-        db::set_skill_resource_library_dir(&pool, &library.to_string_lossy()).await.unwrap();
+        db::set_skill_resource_library_dir(&pool, &library.to_string_lossy())
+            .await
+            .unwrap();
         let mut transaction = ImportDirectoryTransaction::new(&library).unwrap();
-        assert!(transaction.root.file_name().unwrap().to_string_lossy().starts_with(".arsenal-import-"));
+        assert!(transaction
+            .root
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with(".arsenal-import-"));
         let staged = transaction.root.join("new");
         std::fs::create_dir(&staged).unwrap();
         std::fs::write(staged.join("SKILL.md"), b"new").unwrap();
         transaction.install(&staged, &target, true).unwrap();
         let old_root = transaction.root.clone();
-        let legacy_root = temp.path().join(format!(".skillshub-import-{}",uuid::Uuid::new_v4()));
-        let journal = serde_json::to_vec(&(target.clone(),Some(legacy_root.join("old-0")))).unwrap();
+        let legacy_root = temp
+            .path()
+            .join(format!(".skillshub-import-{}", uuid::Uuid::new_v4()));
+        let journal =
+            serde_json::to_vec(&(target.clone(), Some(legacy_root.join("old-0")))).unwrap();
         std::mem::forget(transaction);
-        std::fs::rename(&old_root,&legacy_root).unwrap();
-        std::fs::write(legacy_root.join("swap-0.json"),journal).unwrap();
+        std::fs::rename(&old_root, &legacy_root).unwrap();
+        std::fs::write(legacy_root.join("swap-0.json"), journal).unwrap();
         recover_import_transactions(&pool).await.unwrap();
         assert_eq!(std::fs::read(target.join("SKILL.md")).unwrap(), b"old");
         assert!(!legacy_root.exists());

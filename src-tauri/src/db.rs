@@ -407,7 +407,10 @@ pub async fn get_all_skill_sources(pool: &AppStore) -> Result<Vec<SkillSource>, 
     pool.read(|d| rows(d, "skill_sources"))
 }
 
-pub async fn upsert_skill_source_sync(pool: &AppStore, sync: &SkillSourceSync) -> Result<(), String> {
+pub async fn upsert_skill_source_sync(
+    pool: &AppStore,
+    sync: &SkillSourceSync,
+) -> Result<(), String> {
     pool.write(|d| put(d, "skill_source_syncs", sync.skill_id.clone(), sync))
         .await
 }
@@ -897,7 +900,11 @@ pub async fn create_collection(
 pub async fn get_all_collections(pool: &AppStore) -> Result<Vec<Collection>, String> {
     pool.read(|d| {
         let mut v = rows::<Collection>(d, "collections")?;
-        v.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then(a.created_at.cmp(&b.created_at)));
+        v.sort_by(|a, b| {
+            a.sort_order
+                .cmp(&b.sort_order)
+                .then(a.created_at.cmp(&b.created_at))
+        });
         Ok(v)
     })
 }
@@ -927,7 +934,22 @@ pub async fn update_collection(
 }
 
 pub async fn delete_collection(pool: &AppStore, collection_id: &str) -> Result<(), String> {
-    collection_tree::change(pool, collection_tree::CollectionChange {action:"delete".into(),id:Some(collection_id.into()),name:None,parent_id:None,before_id:None,skill_ids:None,repositories:None,source_collection_id:None,include_descendants:None}).await.map(|_|())
+    collection_tree::change(
+        pool,
+        collection_tree::CollectionChange {
+            action: "delete".into(),
+            id: Some(collection_id.into()),
+            name: None,
+            parent_id: None,
+            before_id: None,
+            skill_ids: None,
+            repositories: None,
+            source_collection_id: None,
+            include_descendants: None,
+        },
+    )
+    .await
+    .map(|_| ())
 }
 
 pub async fn add_skill_to_collection(
@@ -1147,7 +1169,11 @@ pub async fn set_setting(pool: &AppStore, key: &str, value: &str) -> Result<(), 
     })
 }
 
-pub async fn save_github_stars(pool: &AppStore, repository: &str, stars: i64) -> Result<(), String> {
+pub async fn save_github_stars(
+    pool: &AppStore,
+    repository: &str,
+    stars: i64,
+) -> Result<(), String> {
     pool.write(|d| save_github_stars_in(d, repository, stars))
         .await
 }
