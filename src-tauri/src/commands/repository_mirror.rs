@@ -323,10 +323,23 @@ fn single_package_source(snapshot: &Snapshot) -> Option<&str> {
         }))
     .then_some("SKILL.md")
 }
+fn validate_source_metadata(originals: &[(db::SkillSource, db::Skill)]) -> Result<(), String> {
+    if originals.iter().any(|(source, _)| {
+        source
+            .source_path
+            .as_deref()
+            .is_none_or(|path| path.trim().is_empty())
+    }) {
+        // An unknown local identity must never become an add/delete proposal.
+        return Err("SOURCE_METADATA_MISSING".into());
+    }
+    Ok(())
+}
 fn validate_snapshot(snapshot: &Snapshot) -> Result<Vec<github::RemoteSkillCandidate>, String> {
     if snapshot.version != 1 || !github::is_commit_ref(&snapshot.repo.branch) {
         return Err("PREVIEW_EXPIRED".into());
     }
+    validate_source_metadata(&snapshot.originals)?;
     let mut bytes = 0usize;
     let mut paths = HashSet::new();
     for (path, content) in &snapshot.contents.files {
@@ -674,6 +687,7 @@ pub async fn check_with_retained(
             continue;
         }
         let result = async {
+            validate_source_metadata(&originals)?;
             let display = originals
                 .first()
                 .and_then(|(source, _)| source.source_repo.as_deref())
@@ -1456,6 +1470,139 @@ mod tests {
             },
         )
     }
+    #[tokio::test]
+    async fn missing_source_metadata_blocks_check_and_apply_without_touching_files() {
+        let (_dir, pool, snapshot) = fixture().await;
+        let id = persist_snapshot(&pool, &snapshot).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        let mut next = capture(&pool, snapshot).await;
+        let skill = next.originals[0].1.clone();
+        let bytes = std::fs::read(&skill.file_path).unwrap();
+        for path in [None, Some("".into()), Some("  ".into())] {
+            next.originals[0].0.source_path = path;
+            db::upsert_skill_source(&pool, &next.originals[0].0)
+                .await
+                .unwrap();
+            assert_eq!(
+                preview(&pool, &next).await.unwrap_err(),
+                "SOURCE_METADATA_MISSING"
+            );
+            let id = persist_snapshot(&pool, &next).await.unwrap();
+            assert_eq!(
+                apply(&pool, &id).await.unwrap_err(),
+                "SOURCE_METADATA_MISSING"
+            );
+            // This must return the local metadata error before any GitHub request.
+            let report = check(&pool, Some(vec!["example/fixtures".into()]))
+                .await
+                .unwrap();
+            assert_eq!(
+                report.repositories[0].error.as_deref(),
+                Some("SOURCE_METADATA_MISSING")
+            );
+            assert_eq!(std::fs::read(&skill.file_path).unwrap(), bytes);
+        }
+    }
+
+    #[tokio::test]
+    async fn hashed_and_renamed_imports_keep_remote_paths_across_scan_and_update() {
+        let (_dir, pool, mut snapshot) = fixture().await;
+        // These sibling skills have the same basename and require hashed local folders.
+        snapshot.contents.files = [
+            (
+                "skills/demo/SKILL.md".into(),
+                b"---\nname: demo\ndescription: first\n---\nfirst".to_vec(),
+            ),
+            (
+                "packages/demo/SKILL.md".into(),
+                b"---\nname: demo\ndescription: second\n---\nsecond".to_vec(),
+            ),
+        ]
+        .into();
+        let candidates =
+            github::build_repo_skill_candidates_from_snapshot(&snapshot.repo, &snapshot.contents)
+                .unwrap();
+        let selections = candidates
+            .iter()
+            .map(|candidate| github::GitHubSkillImportSelection {
+                source_path: candidate.source_path.clone(),
+                resolution: github::DuplicateResolution::Overwrite,
+                renamed_skill_id: None,
+            })
+            .collect();
+        let directories = [("skills/demo/SKILL.md".into(), "renamed-local-demo".into())].into();
+        let imported = github::import_prepared_snapshot_with_directories(
+            &pool,
+            snapshot.repo.clone(),
+            &snapshot.contents,
+            selections,
+            None,
+            None,
+            &directories,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(imported.imported_skills.len(), 2);
+        assert!(imported
+            .imported_skills
+            .iter()
+            .any(|s| s.target_directory.ends_with("renamed-local-demo")));
+        assert!(imported
+            .imported_skills
+            .iter()
+            .any(|s| Path::new(&s.target_directory)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("demo-")));
+        for _ in 0..2 {
+            skills::get_resource_library_skills_impl(&pool)
+                .await
+                .unwrap();
+        }
+        let next = capture(&pool, snapshot.clone()).await;
+        let report = preview(&pool, &next).await.unwrap();
+        assert!(report.added.is_empty() && report.deleted.is_empty() && report.modified.is_empty());
+        assert_eq!(report.unchanged.len(), 2);
+        for item in &imported.imported_skills {
+            let source = db::get_skill_source(&pool, &item.imported_skill_id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                source.source_path.as_deref(),
+                Some(item.source_path.as_str())
+            );
+        }
+        snapshot
+            .contents
+            .files
+            .get_mut("skills/demo/SKILL.md")
+            .unwrap()
+            .extend_from_slice(b"\nupdated");
+        let next = capture(&pool, snapshot).await;
+        let report = preview(&pool, &next).await.unwrap();
+        assert_eq!(report.modified.len(), 1);
+        assert!(report.added.is_empty() && report.deleted.is_empty());
+        let id = persist_snapshot(&pool, &next).await.unwrap();
+        apply(&pool, &id).await.unwrap();
+        skills::get_resource_library_skills_impl(&pool)
+            .await
+            .unwrap();
+        for item in imported.imported_skills {
+            let source = db::get_skill_source(&pool, &item.imported_skill_id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                source.source_path.as_deref(),
+                Some(item.source_path.as_str())
+            );
+            assert!(Path::new(&item.target_directory).join("SKILL.md").is_file());
+        }
+    }
+
     async fn capture(pool: &AppStore, mut snapshot: Snapshot) -> Snapshot {
         snapshot.import_rules =
             super::super::repository_import_rules::load(pool, "example/fixtures")

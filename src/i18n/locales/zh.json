@@ -1277,6 +1277,7 @@
       "TRASH_RESTORE_CONFLICT": "原位置已有仓库、技能或文件，未进行覆盖。请先处理现有内容后再恢复。",
       "TRASH_RECOVERY_REQUIRED": "操作未完成，原始内容已保存在回收站。请在回收站恢复后重试。",
       "IMPORT_SOURCE_MISSING": "已选导入来源已移除，请重新导入并选择版本。",
+      "SOURCE_METADATA_MISSING": "本地未记录远端技能路径，已停止同步以保护现有内容；请重新导入该仓库并选择对应技能，重试检查无法补全来源。",
       "IMPORT_SOURCE_AMBIGUOUS": "远端存在多个同名来源，未自动选择；请重新导入指定来源。",
       "REPOSITORY_NOT_IN_LIBRARY": "资源库中已找不到该仓库的技能目录，请刷新技能列表；需要恢复时请重新导入。",
       "PREVIEW_EXPIRED": "检查快照已过期，请重新检查仓库。",

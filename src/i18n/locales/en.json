@@ -1279,6 +1279,7 @@
       "TRASH_RESTORE_CONFLICT": "A repository, skill or file already exists at the original location. Nothing was overwritten. Resolve the conflict before restoring.",
       "TRASH_RECOVERY_REQUIRED": "The operation did not finish. The original content is saved in the recycle bin. Restore it there before retrying.",
       "IMPORT_SOURCE_MISSING": "The selected source was removed. Import the repository again to choose a version.",
+      "SOURCE_METADATA_MISSING": "The remote skill path is not recorded locally. Sync stopped to protect existing content. Import this repository again and select the matching skill; checking again cannot restore missing source metadata.",
       "IMPORT_SOURCE_AMBIGUOUS": "Several matching remote sources exist. Reimport and choose the source explicitly.",
       "REPOSITORY_NOT_IN_LIBRARY": "No skill directory for this repository remains in the resource library. Refresh the skill list, or reimport to restore it.",
       "PREVIEW_EXPIRED": "The check snapshot expired. Check the repository again.",

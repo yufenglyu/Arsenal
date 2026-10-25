@@ -447,21 +447,16 @@ fn infer_resource_github_source(
         return None;
     }
 
-    let relative_skill_path = parts[2..].join("/");
-    let root_skill_dir = repo.strip_suffix("-skill").unwrap_or(repo);
-    let source_path = if parts.len() == 3 && (parts[2] == repo || parts[2] == root_skill_dir) {
-        "SKILL.md".to_string()
-    } else {
-        format!("{relative_skill_path}/SKILL.md")
-    };
-
+    // Imports flatten remote folders and may rename or hash local destinations.
+    // The directory layout identifies a repository, never its remote manifest.
+    // Only explicit import/source metadata may supply that path.
     Some(db::SkillSource {
         skill_id: skill_id.to_string(),
         source_type: "github".to_string(),
         source_url: None,
         source_author: Some(owner.to_string()),
         source_repo: Some(format!("{owner}/{repo}")),
-        source_path: Some(source_path),
+        source_path: None,
         updated_at: Utc::now().to_rfc3339(),
     })
 }
@@ -3792,7 +3787,7 @@ mod tests {
         assert_eq!(skill.source.as_deref(), Some("github:author/repo"));
         assert_eq!(skill.source_author.as_deref(), Some("author"));
         assert_eq!(skill.source_repo.as_deref(), Some("author/repo"));
-        assert_eq!(skill.source_path.as_deref(), Some("manual-skill/SKILL.md"));
+        assert_eq!(skill.source_path.as_deref(), None);
         assert_eq!(skill.source_url.as_deref(), None);
         assert_eq!(
             skill.canonical_path.as_deref(),
@@ -3801,7 +3796,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_resource_library_skills_impl_infers_root_repo_source_path() {
+    async fn test_get_resource_library_skills_impl_does_not_guess_root_repo_source_path() {
         let pool = setup_test_db().await;
         let tmp = TempDir::new().unwrap();
         let resource_root = tmp.path().join("resource-library");
@@ -3829,7 +3824,7 @@ mod tests {
             skill.source.as_deref(),
             Some("github:op7418/guizang-ppt-skill")
         );
-        assert_eq!(skill.source_path.as_deref(), Some("SKILL.md"));
+        assert_eq!(skill.source_path.as_deref(), None);
         let source = db::get_skill_source(&pool, "guizang-ppt-skill")
             .await
             .unwrap()
@@ -3838,7 +3833,35 @@ mod tests {
             source.source_repo.as_deref(),
             Some("op7418/guizang-ppt-skill")
         );
-        assert_eq!(source.source_path.as_deref(), Some("SKILL.md"));
+        assert_eq!(source.source_path.as_deref(), None);
+    }
+
+    #[tokio::test]
+    async fn scan_does_not_invent_remote_paths_for_hashed_or_flattened_directories() {
+        let pool = setup_test_db().await;
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("library");
+        db::set_skill_resource_library_dir(&pool, &root.to_string_lossy())
+            .await
+            .unwrap();
+        for name in ["demo-176b654d5182", "demo-renamed", "nested/flat-demo"] {
+            let dir = root.join("owner/repo").join(name);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(
+                dir.join("SKILL.md"),
+                "---\nname: demo\ndescription: local\n---\nbody",
+            )
+            .unwrap();
+        }
+        for _ in 0..2 {
+            let skills = get_resource_library_skills_impl(&pool).await.unwrap();
+            assert_eq!(skills.len(), 3);
+            for skill in skills {
+                assert_eq!(skill.source_repo.as_deref(), Some("owner/repo"));
+                assert_eq!(skill.source_path, None);
+                assert_eq!(skill.source_url, None);
+            }
+        }
     }
 
     #[tokio::test]

@@ -13,6 +13,7 @@ import {
 } from "@/stores/taskQueueStore";
 it("explains snapshot error codes returned as repository report strings",()=>{
  expect(taskErrorMessage("IMPORT_SOURCE_MISSING")).toBe(i18n.t("workflow.errors.IMPORT_SOURCE_MISSING"));
+ expect(taskErrorMessage("SOURCE_METADATA_MISSING")).toBe(i18n.t("workflow.errors.SOURCE_METADATA_MISSING"));
  expect(taskErrorMessage("REPOSITORY_NOT_IN_LIBRARY")).toBe(i18n.t("workflow.errors.REPOSITORY_NOT_IN_LIBRARY"));
  expect(taskErrorMessage("Repository is no longer in the resource library")).toBe(i18n.t("workflow.errors.REPOSITORY_NOT_IN_LIBRARY"));
  expect(taskErrorMessage("SNAPSHOT_CACHE_FULL")).toBe(i18n.t("workflow.errors.SNAPSHOT_CACHE_FULL"));
