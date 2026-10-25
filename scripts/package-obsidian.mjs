@@ -31,7 +31,7 @@ if (tests) run(["test"]);
 const manifest = JSON.parse(readFileSync(join(plugin, "manifest.json"), "utf8"));
 const pluginPackage = JSON.parse(readFileSync(join(plugin, "package.json"), "utf8"));
 const app = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-if (manifest.id !== "skillshub-link" || manifest.version !== pluginPackage.version) {
+if (manifest.id !== "arsenal-link" || manifest.version !== pluginPackage.version) {
   throw new Error("Plugin manifest identity/version does not match package.json");
 }
 if (!/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(app.version)) throw new Error("Invalid application version");

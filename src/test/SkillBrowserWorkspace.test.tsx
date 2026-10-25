@@ -448,7 +448,7 @@ it("updates the tag union when selecting and deselecting skills in the repositor
 });
 
 it("restores an obsolete install tab preference to overview and shows repository installation statistics", () => {
- localStorage.setItem("skillshub.browser.tab",JSON.stringify("install"));
+ localStorage.setItem("arsenal.browser.tab",JSON.stringify("install"));
  render(<SkillBrowserWorkspace {...props}/>);
  fireEvent.click(screen.getByRole("button",{name:"Example/Tools"}));
  expect(screen.getByRole("tab",{name:"概览"})).toHaveAttribute("aria-selected","true");

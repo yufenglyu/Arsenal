@@ -8,7 +8,7 @@ import {openRowActions} from "./rowActions";
 const render=(ui:React.ReactNode)=>rtlRender(<MemoryRouter initialEntries={["/trash"]}>{ui}</MemoryRouter>);
 const restore=vi.fn().mockResolvedValue(undefined),purge=vi.fn().mockResolvedValue(undefined);
 beforeEach(()=>{
-  vi.clearAllMocks();localStorage.removeItem("skillshub.browser.collapsed");
+  vi.clearAllMocks();localStorage.removeItem("arsenal.browser.collapsed");
   store.setState({entries:[{id:"one",name:"example/one",kind:"repository",repositories:["example/one"],skillCount:3,deletedAt:"2026-10-21T01:00:00Z",reason:"delete",phase:"active"},{id:"two",name:"Second skill",kind:"skill",repositories:["example/two"],skillCount:1,deletedAt:"2026-10-21T02:00:00Z",reason:"delete",phase:"active"}],loading:false,error:null,load:vi.fn().mockResolvedValue(undefined),restore,purge});
 });
 it("restores a row only after confirmation using the shared table",async()=>{

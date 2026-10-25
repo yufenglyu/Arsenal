@@ -31,11 +31,10 @@ await i18n.changeLanguage(en ? "en" : "zh");
 localStorage.clear();
 document.documentElement.dataset.theme = params.get("theme") ?? "light";
 document.documentElement.dataset.accent = "blue";
-localStorage.setItem("skillshub.browser.width", "42");
+localStorage.setItem("arsenal.browser.width", "42");
 localStorage.setItem("skills-manage.skillTableColumns.tree.v5", JSON.stringify(["index","name","skillCount","updatedAt"]));
 localStorage.setItem("skills-manage.skillTableColumns.tree.v5.notebook", "1");
 localStorage.setItem("arsenal.browser.tab", JSON.stringify(scene === "document" ? "document" : "overview"));
-localStorage.setItem("skillshub.browser.tab", JSON.stringify(scene === "document" ? "document" : "overview"));
 const noop = async () => {};
 const date = "2026-10-25T08:00:00Z";
 const agents: AgentWithStatus[] = [

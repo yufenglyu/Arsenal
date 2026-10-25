@@ -82,7 +82,7 @@ const DEFAULT_WEBDAV_CONFIG: WebDavConfig = {
   baseUrl: "",
   username: "",
   password: "",
-  remoteDir: "skillshub",
+  remoteDir: "arsenal",
 };
 
 function normalizeWebDavConfig(config: WebDavConfig): WebDavConfig {

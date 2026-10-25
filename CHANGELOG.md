@@ -2,6 +2,11 @@
 
 [English](CHANGELOG.md) | [简体中文](CHANGELOG.zh.md)
 
+## Unreleased
+
+- Unify note properties, navigation protocols, Obsidian plugin identity, browser storage, backup names and packaging paths under Arsenal. Remove old-brand aliases and startup seeding guards; existing old-brand data is neither migrated nor used as a fallback.
+- Use a new `arsenal_property_template` setting with Arsenal defaults. Existing saved templates are not reused. The companion Obsidian plugin is now 0.3.0 and installs as `arsenal-link`.
+
 ## 1.5.0 - 2026-10-25
 
 - Remember the main window's size, position and maximized state. Closing hides the app to the system tray; left-click restores it, and the right-click menu offers Show main window and Quit. Confirm quitting while tasks are active.
@@ -12,7 +17,7 @@
 - Retry transient Windows file-sharing failures during atomic metadata publication, retaining the committed file and reporting persistent failures after a bounded wait.
 - Retain selected source variants during updates, deduplicate identical skill packages, support categorized directories and moved sources, and exclude script test fixtures and ordinary lowercase guides from skill discovery. Keep a previously installed root package scoped when its source moves.
 - Add recoverable deletion and repository reimport through the recycle bin, including binary payload archives, skill-name filtering and safer conflict handling.
-- Refine library toolbar geometry, group selection, sidebar counts and notebook controls. Display Arsenal branding while retaining existing note property keys, plugin ID and navigation protocols.
+- Refine library toolbar geometry, group selection, sidebar counts and notebook controls. Use Arsenal branding in notebook controls.
 - Update bilingual usage documentation and screenshots with fictional data, including update review, actionable failures and the unified log.
 
 ## 1.4.1 - 2026-10-19
@@ -74,6 +79,6 @@
 
 ## 1.0.0 - 2026-09-18
 
-- Release SkillsHub 1.0.0 with a skill resource library, collections, a central skills directory, and installation management for platforms and projects.
+- Release Arsenal 1.0.0 with a skill resource library, collections, a central skills directory, and installation management for platforms and projects.
 - Support skill imports, updates from source repositories, AI explanations, and backups.
 - Improve Git ignore rules to exclude build caches, local application data, and key files.

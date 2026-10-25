@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Launch a packaged app against disposable legacy-link fixtures on macOS."""
+"""Launch a packaged app against isolated current-config fixtures on macOS."""
 import argparse
+import json
 import os
 from pathlib import Path
 import platform
@@ -12,28 +13,26 @@ import time
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("app", type=Path)
-    parser.add_argument("--expect-legacy-failure", action="store_true")
     args = parser.parse_args()
     if platform.system() != "Darwin":
         parser.error("This check requires macOS")
     app = args.app.resolve(strict=True)
-    for scenario in ("dangling-installation", "dangling-config-root", "separate-legacy-data"):
+    for scenario in ("fresh", "existing-config", "dangling-installation"):
         with tempfile.TemporaryDirectory(prefix="arsenal-startup-") as directory:
             root = Path(directory)
             bundle = root / "Arsenal.app"
             subprocess.run(["ditto", str(app), str(bundle)], check=True)
             current = root / ".arsenal"
             current.mkdir()
-            legacy = root / ".skillshub"
-            link = current / "old-installed-skill"
-            target = legacy / "library" / "removed-skill"
+            link = current / "unavailable-skill"
+            target = root / "missing-library" / "removed-skill"
             if scenario == "dangling-installation":
                 link.symlink_to(target, target_is_directory=True)
-            elif scenario == "dangling-config-root":
-                legacy.symlink_to(root / "removed-config", target_is_directory=True)
-            else:
-                legacy.mkdir()
-                (legacy / "config.json").write_text("legacy fixture")
+            elif scenario == "existing-config":
+                (current / "config.json").write_text(json.dumps({
+                    "platforms": [], "settings": {"language": "en"},
+                    "scan_directories": [],
+                }))
             logfile = root / "startup.log"
             with logfile.open("w+") as log:
                 proc = subprocess.Popen([str(bundle / "Contents/MacOS/arsenal")],
@@ -46,26 +45,13 @@ def main():
                     log.flush()
                     log.seek(0)
                     output = log.read()
-                    if args.expect_legacy_failure:
-                        expected = {
-                            "dangling-installation": "An installed link points to missing data",
-                            "dangling-config-root": "Both .arsenal and .skillshub exist",
-                            "separate-legacy-data": "Both .arsenal and .skillshub exist",
-                        }[scenario]
-                        assert proc.poll() is not None and expected in output, (
-                            "Published baseline did not reproduce the expected migration failure")
-                        print(f"REPRODUCED {scenario}: {expected}", flush=True)
-                        continue
                     assert proc.poll() is None, f"{scenario}: app exited during startup ({proc.returncode})"
                     assert (current / "store/manifest.json").is_file(), "Current store not initialized"
-                    assert not (current / "migrations/arsenal-paths-v2").exists(), "Unexpected legacy migration"
                     if scenario == "dangling-installation":
                         assert link.readlink() == target and not target.exists()
-                    elif scenario == "dangling-config-root":
-                        assert legacy.is_symlink() and not legacy.exists()
-                    else:
-                        assert (legacy / "config.json").read_text() == "legacy fixture"
-                    print(f"PASS {scenario}: app stays running and legacy fixture is unchanged", flush=True)
+                    elif scenario == "existing-config":
+                        assert json.loads((current / "config.json").read_text())["settings"]["language"] == "en"
+                    print(f"PASS {scenario}: app stays running with current configuration", flush=True)
                 finally:
                     if proc.poll() is None:
                         proc.terminate()

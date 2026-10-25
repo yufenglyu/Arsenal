@@ -47,7 +47,7 @@ it("switches repository labels and sorts by the displayed name without changing 
   expect(props.onSortChange).toHaveBeenCalledWith("name", "desc");
   rerender(<SkillBrowserTable {...props} sortDirection="desc" />);
   expect(names()).toEqual(["z@a", "local/folder", "a@b"]);
-  expect(JSON.parse(localStorage.getItem("skillshub-repository-name-format")!).state.repositoryFirst).toBe(true);
+  expect(JSON.parse(localStorage.getItem("arsenal-repository-name-format")!).state.repositoryFirst).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "切换为 作者/仓库" }));
   expect(names()).toEqual(["local/folder", "b/a", "a/z"]);
 });

@@ -2,10 +2,10 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Fragment>
     <DirectoryRef Id="TARGETDIR">
-      <Component Id="SkillshubUserConfigInit" Guid="c8a91e47-3b6d-4f21-9e04-7a1c2d8b4f66">
+      <Component Id="ArsenalUserConfigInit" Guid="c8a91e47-3b6d-4f21-9e04-7a1c2d8b4f66">
         <RegistryValue
           Root="HKCU"
-          Key="Software\iamzhihuix\SkillsHub"
+          Key="Software\iamzhihuix\Arsenal"
           Name="UserConfigSeed"
           Type="integer"
           Value="1"
@@ -15,7 +15,7 @@
     </DirectoryRef>
 
     <CustomAction
-      Id="CreateSkillshubUserConfig"
+      Id="CreateArsenalUserConfig"
       Directory="INSTALLDIR"
       ExeCommand="cmd.exe /c &quot;[INSTALLDIR]windows\seed-user-config.cmd&quot;"
       Execute="immediate"
@@ -24,7 +24,7 @@
     />
 
     <InstallExecuteSequence>
-      <Custom Action="CreateSkillshubUserConfig" After="InstallFiles">NOT REMOVE</Custom>
+      <Custom Action="CreateArsenalUserConfig" After="InstallFiles">NOT REMOVE</Custom>
     </InstallExecuteSequence>
   </Fragment>
 </Wix>

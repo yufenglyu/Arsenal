@@ -136,10 +136,10 @@ function NavItem({
 export function Sidebar({ settingsOpen = false }: {settingsOpen?: boolean} = {}) {
   const repositoryRegion = useRef<HTMLDivElement>(null);
   const [repositoryExpanded,setRepositoryExpanded]=useState(true);
-  const [installationCollapsed,setInstallationCollapsed]=usePersistentBoolean("skillshub.sidebar.installationCollapsed",false);
+  const [installationCollapsed,setInstallationCollapsed]=usePersistentBoolean("arsenal.sidebar.installationCollapsed",false);
   const installationExpansionKeys=useExpansionShortcuts(()=>setInstallationCollapsed(false),()=>setInstallationCollapsed(true),true);
-  const [repositoryHeight, setRepositoryHeight] = useState<number | undefined>(()=>{try{const value=Number(localStorage.getItem("skillshub.sidebar.repositoryHeight"));return value>=80?value:undefined;}catch{return undefined;}});
-  function resizeRepository(height:number){const next=Math.max(80,Math.min(Math.max(80,window.innerHeight-240),height));setRepositoryHeight(next);try{localStorage.setItem("skillshub.sidebar.repositoryHeight",String(next));}catch{/* Keep session state. */}}
+  const [repositoryHeight, setRepositoryHeight] = useState<number | undefined>(()=>{try{const value=Number(localStorage.getItem("arsenal.sidebar.repositoryHeight"));return value>=80?value:undefined;}catch{return undefined;}});
+  function resizeRepository(height:number){const next=Math.max(80,Math.min(Math.max(80,window.innerHeight-240),height));setRepositoryHeight(next);try{localStorage.setItem("arsenal.sidebar.repositoryHeight",String(next));}catch{/* Keep session state. */}}
   const SOFTWARE_COLLAPSED_KEY = "skills-manage:sidebar-software-platforms-collapsed";
   const PROJECTS_COLLAPSED_KEY = "skills-manage:sidebar-project-directories-collapsed";
   const navigate = useNavigate();

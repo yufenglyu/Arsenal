@@ -1508,7 +1508,7 @@ mod tests {
         let skill_dir = create_skill_dir(
             tmp.path(),
             "external-codex-skill",
-            &valid_skill_md("External Codex Skill", "Installed outside SkillsHub"),
+            &valid_skill_md("External Codex Skill", "Installed outside Arsenal"),
         );
 
         let result = scan_all_skills_impl(&pool).await.unwrap();

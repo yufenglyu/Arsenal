@@ -137,7 +137,7 @@ function setupMocks({
     baseUrl: "",
     username: "",
     password: "",
-    remoteDir: "skillshub",
+    remoteDir: "arsenal",
   },
   isLoadingWebDavConfig = false,
   isSavingWebDavConfig = false,
@@ -277,7 +277,7 @@ describe("SettingsView", () => {
     vi.clearAllMocks();
     mockOpenDialog.mockReset();
     mockSaveDialog.mockReset();
-    mockSaveDialog.mockResolvedValue("D:\\backups\\skillshub-backup.zip");
+    mockSaveDialog.mockResolvedValue("D:\\backups\\arsenal-backup.zip");
     vi.mocked(invoke).mockResolvedValue(null);
   });
 
@@ -417,7 +417,7 @@ describe("SettingsView", () => {
 
     await waitFor(() => {
       expect(mockSaveDialog).toHaveBeenCalled();
-      expect(exportAppBackup).toHaveBeenCalledWith("D:\\backups\\skillshub-backup.zip", {
+      expect(exportAppBackup).toHaveBeenCalledWith("D:\\backups\\arsenal-backup.zip", {
         includeResourceLibrary: true,
         includeCentralLibrary: false,
         includeAppConfig: true,
@@ -443,8 +443,8 @@ describe("SettingsView", () => {
   it("refreshes and renders WebDAV backup files", async () => {
     const listWebDavBackups = vi.fn().mockResolvedValue([
       {
-        name: "skillshub-backup-2026-07-15-120000.zip",
-        remotePath: "skillshub-backup-2026-07-15-120000.zip",
+        name: "arsenal-backup-2026-07-15-120000.zip",
+        remotePath: "arsenal-backup-2026-07-15-120000.zip",
         size: 42,
         modifiedAt: "2026-07-15T12:00:00Z",
       },
@@ -456,18 +456,18 @@ describe("SettingsView", () => {
       target: { value: "https://example.com/dav" },
     });
     fireEvent.change(screen.getByLabelText("远端目录"), {
-      target: { value: "skillshub" },
+      target: { value: "arsenal" },
     });
     fireEvent.click(screen.getByRole("button", { name: "查看远端" }));
 
-    expect(await screen.findByText("skillshub-backup-2026-07-15-120000.zip")).toBeTruthy();
+    expect(await screen.findByText("arsenal-backup-2026-07-15-120000.zip")).toBeTruthy();
   });
 
   it("shows WebDAV backup times in the local timezone", async () => {
     const listWebDavBackups = vi.fn().mockResolvedValue([
       {
-        name: "skillshub-backup-2026-08-19-135638.zip",
-        remotePath: "skillshub-backup-2026-08-19-135638.zip",
+        name: "arsenal-backup-2026-08-19-135638.zip",
+        remotePath: "arsenal-backup-2026-08-19-135638.zip",
         size: 42,
         modifiedAt: "Wed, 19 Aug 2026 13:56:38 GMT",
       },
@@ -479,12 +479,12 @@ describe("SettingsView", () => {
       target: { value: "https://example.com/dav" },
     });
     fireEvent.change(screen.getByLabelText("远端目录"), {
-      target: { value: "skillshub" },
+      target: { value: "arsenal" },
     });
     fireEvent.click(screen.getByRole("button", { name: "查看远端" }));
 
     const gmt = "Wed, 19 Aug 2026 13:56:38 GMT";
-    expect(await screen.findByText("skillshub-backup-2026-08-19-135638.zip")).toBeTruthy();
+    expect(await screen.findByText("arsenal-backup-2026-08-19-135638.zip")).toBeTruthy();
     expect(screen.getByText(new Date(gmt).toLocaleString(undefined, {
       year: "numeric",
       month: "2-digit",
@@ -500,8 +500,8 @@ describe("SettingsView", () => {
   it("clears stale WebDAV selections when the connection config changes", async () => {
     const listWebDavBackups = vi.fn().mockResolvedValue([
       {
-        name: "skillshub-backup-2026-07-15-120000.zip",
-        remotePath: "skillshub-backup-2026-07-15-120000.zip",
+        name: "arsenal-backup-2026-07-15-120000.zip",
+        remotePath: "arsenal-backup-2026-07-15-120000.zip",
       },
     ]);
     setupMocks({ listWebDavBackups });
@@ -511,11 +511,11 @@ describe("SettingsView", () => {
       target: { value: "https://example.com/dav" },
     });
     fireEvent.change(screen.getByLabelText("远端目录"), {
-      target: { value: "skillshub" },
+      target: { value: "arsenal" },
     });
     fireEvent.click(screen.getByRole("button", { name: "查看远端" }));
 
-    expect(await screen.findByText("skillshub-backup-2026-07-15-120000.zip")).toBeTruthy();
+    expect(await screen.findByText("arsenal-backup-2026-07-15-120000.zip")).toBeTruthy();
     expect(screen.getByRole("button", { name: "导入选中" })).toBeEnabled();
 
     fireEvent.change(screen.getByLabelText("WebDAV URL"), {
@@ -523,7 +523,7 @@ describe("SettingsView", () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByText("skillshub-backup-2026-07-15-120000.zip")).toBeNull();
+      expect(screen.queryByText("arsenal-backup-2026-07-15-120000.zip")).toBeNull();
       expect(screen.getByRole("button", { name: "导入选中" })).toBeDisabled();
     });
   });
@@ -567,7 +567,7 @@ describe("SettingsView", () => {
       target: { value: "https://example.com/dav" },
     });
     fireEvent.change(screen.getByLabelText("远端目录"), {
-      target: { value: "skillshub" },
+      target: { value: "arsenal" },
     });
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
 
@@ -575,7 +575,7 @@ describe("SettingsView", () => {
       expect(testWebDavConnection).toHaveBeenCalledWith(
         expect.objectContaining({
           baseUrl: "https://example.com/dav",
-          remoteDir: "skillshub",
+          remoteDir: "arsenal",
         })
       );
       expect(toast.success).toHaveBeenCalledWith("WebDAV 连接测试成功");
@@ -585,8 +585,8 @@ describe("SettingsView", () => {
   it("uploads a WebDAV backup then refreshes the remote list", async () => {
     const listWebDavBackups = vi.fn().mockResolvedValue([]);
     const uploadWebDavBackup = vi.fn().mockResolvedValue({
-      name: "skillshub-backup.zip",
-      remotePath: "skillshub-backup.zip",
+      name: "arsenal-backup.zip",
+      remotePath: "arsenal-backup.zip",
     });
     setupMocks({ listWebDavBackups, uploadWebDavBackup });
     renderSettingsView();
@@ -595,7 +595,7 @@ describe("SettingsView", () => {
       target: { value: "https://example.com/dav" },
     });
     fireEvent.change(screen.getByLabelText("远端目录"), {
-      target: { value: "skillshub" },
+      target: { value: "arsenal" },
     });
     fireEvent.click(screen.getByRole("button", { name: "上传备份" }));
 
@@ -603,7 +603,7 @@ describe("SettingsView", () => {
       expect(uploadWebDavBackup).toHaveBeenCalledWith(
         expect.objectContaining({
           baseUrl: "https://example.com/dav",
-          remoteDir: "skillshub",
+          remoteDir: "arsenal",
         }),
         {
           includeResourceLibrary: true,
@@ -619,8 +619,8 @@ describe("SettingsView", () => {
   it("shows a distinct localized error when refresh fails after upload", async () => {
     const listWebDavBackups = vi.fn().mockRejectedValue("WebDAV list failed: connection failed");
     const uploadWebDavBackup = vi.fn().mockResolvedValue({
-      name: "skillshub-backup.zip",
-      remotePath: "skillshub-backup.zip",
+      name: "arsenal-backup.zip",
+      remotePath: "arsenal-backup.zip",
     });
     setupMocks({ listWebDavBackups, uploadWebDavBackup });
     renderSettingsView();
@@ -629,7 +629,7 @@ describe("SettingsView", () => {
       target: { value: "https://example.com/dav" },
     });
     fireEvent.change(screen.getByLabelText("远端目录"), {
-      target: { value: "skillshub" },
+      target: { value: "arsenal" },
     });
     fireEvent.click(screen.getByRole("button", { name: "上传备份" }));
 
@@ -650,7 +650,7 @@ describe("SettingsView", () => {
       target: { value: "https://example.com/dav" },
     });
     fireEvent.change(screen.getByLabelText("远端目录"), {
-      target: { value: "skillshub" },
+      target: { value: "arsenal" },
     });
     fireEvent.click(screen.getByRole("button", { name: "查看远端" }));
 
@@ -667,8 +667,8 @@ describe("SettingsView", () => {
       .fn()
       .mockResolvedValueOnce([
         {
-          name: "skillshub-backup.zip",
-          remotePath: "skillshub-backup.zip",
+          name: "arsenal-backup.zip",
+          remotePath: "arsenal-backup.zip",
         },
       ])
       .mockResolvedValueOnce([]);
@@ -679,17 +679,17 @@ describe("SettingsView", () => {
       target: { value: "https://example.com/dav" },
     });
     fireEvent.change(screen.getByLabelText("远端目录"), {
-      target: { value: "skillshub" },
+      target: { value: "arsenal" },
     });
     fireEvent.click(screen.getByRole("button", { name: "查看远端" }));
-    await screen.findByText("skillshub-backup.zip");
-    fireEvent.click(screen.getByRole("radio", { name: /skillshub-backup\.zip/ }));
+    await screen.findByText("arsenal-backup.zip");
+    fireEvent.click(screen.getByRole("radio", { name: /arsenal-backup\.zip/ }));
     fireEvent.click(screen.getByRole("button", { name: "删除选中" }));
 
     await waitFor(() => {
       expect(deleteWebDavBackup).toHaveBeenCalledWith(
-        expect.objectContaining({ baseUrl: "https://example.com/dav", remoteDir: "skillshub" }),
-        "skillshub-backup.zip"
+        expect.objectContaining({ baseUrl: "https://example.com/dav", remoteDir: "arsenal" }),
+        "arsenal-backup.zip"
       );
       expect(toast.success).toHaveBeenCalledWith("远端备份已删除");
     });
@@ -705,8 +705,8 @@ describe("SettingsView", () => {
       importAppBackup,
       listWebDavBackups: vi.fn().mockResolvedValue([
         {
-          name: "skillshub-backup.zip",
-          remotePath: "skillshub-backup.zip",
+          name: "arsenal-backup.zip",
+          remotePath: "arsenal-backup.zip",
         },
       ]),
     });
@@ -716,17 +716,17 @@ describe("SettingsView", () => {
       target: { value: "https://example.com/dav" },
     });
     fireEvent.change(screen.getByLabelText("远端目录"), {
-      target: { value: "skillshub" },
+      target: { value: "arsenal" },
     });
     fireEvent.click(screen.getByRole("button", { name: "查看远端" }));
-    await screen.findByText("skillshub-backup.zip");
-    fireEvent.click(screen.getByRole("radio", { name: /skillshub-backup\.zip/ }));
+    await screen.findByText("arsenal-backup.zip");
+    fireEvent.click(screen.getByRole("radio", { name: /arsenal-backup\.zip/ }));
     fireEvent.click(screen.getByRole("button", { name: "导入选中" }));
 
     await waitFor(() => {
       expect(downloadWebDavBackup).toHaveBeenCalledWith(
-        expect.objectContaining({ baseUrl: "https://example.com/dav", remoteDir: "skillshub" }),
-        "skillshub-backup.zip"
+        expect.objectContaining({ baseUrl: "https://example.com/dav", remoteDir: "arsenal" }),
+        "arsenal-backup.zip"
       );
     });
     expect(importAppBackup).toHaveBeenCalledWith(downloadedBackup, true);
@@ -1151,7 +1151,7 @@ describe("SettingsView", () => {
   });
 
   it("saves a custom config folder path", async () => {
-    const updateConfigDir = vi.fn().mockResolvedValue("D:/Apps/SkillsHub/.arsenal");
+    const updateConfigDir = vi.fn().mockResolvedValue("D:/Apps/Arsenal/.arsenal");
     setupMocks({
       configDir: "/Users/test/.arsenal",
       updateConfigDir,
@@ -1159,19 +1159,19 @@ describe("SettingsView", () => {
     renderSettingsView();
 
     fireEvent.change(screen.getByLabelText("配置文件路径"), {
-      target: { value: "D:/Apps/SkillsHub" },
+      target: { value: "D:/Apps/Arsenal" },
     });
     fireEvent.keyDown(screen.getByLabelText("配置文件路径"), { key: "Enter" });
 
     await waitFor(() => {
-      expect(updateConfigDir).toHaveBeenCalledWith("D:/Apps/SkillsHub");
+      expect(updateConfigDir).toHaveBeenCalledWith("D:/Apps/Arsenal");
     });
     expect(await screen.findByText("配置文件路径已保存，请重启应用后生效")).toBeTruthy();
   });
 
   it("browses a config folder and saves the selected path", async () => {
-    const updateConfigDir = vi.fn().mockResolvedValue("D:/Apps/SkillsHub/.arsenal");
-    mockOpenDialog.mockResolvedValueOnce("D:/Apps/SkillsHub");
+    const updateConfigDir = vi.fn().mockResolvedValue("D:/Apps/Arsenal/.arsenal");
+    mockOpenDialog.mockResolvedValueOnce("D:/Apps/Arsenal");
     setupMocks({
       configDir: "/Users/test/.arsenal",
       updateConfigDir,
@@ -1181,7 +1181,7 @@ describe("SettingsView", () => {
     fireEvent.click(screen.getByRole("button", { name: "浏览配置文件路径" }));
 
     await waitFor(() => {
-      expect(updateConfigDir).toHaveBeenCalledWith("D:\\Apps\\SkillsHub");
+      expect(updateConfigDir).toHaveBeenCalledWith("D:\\Apps\\Arsenal");
     });
   });
 

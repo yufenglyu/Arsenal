@@ -853,7 +853,7 @@
     "webdavUsernameLabel": "用户名",
     "webdavPasswordLabel": "密码或 Token",
     "webdavRemoteDirLabel": "远端目录",
-    "webdavRemoteDirPlaceholder": "skillshub",
+    "webdavRemoteDirPlaceholder": "arsenal",
     "webdavSaveConfig": "保存配置",
     "webdavTestConnection": "测试连接",
     "webdavRefresh": "查看远端",
@@ -1654,7 +1654,7 @@
       "noteFolder": "新笔记子目录",
       "chooseVault": "选择笔记库",
       "registerProtocol": "修复链接",
-      "protocolHint": "Windows 正式版启动时自动注册或修复 skillshub://；多个副本以最近启动的正式版为准。返回链接仍失效时可手动修复；库目录仅保存在本机。",
+      "protocolHint": "Windows 正式版启动时自动注册或修复 arsenal://；多个副本以最近启动的正式版为准。返回链接仍失效时可手动修复；库目录仅保存在本机。",
       "backupHint": "Arsenal 备份保留笔记关联，不包含 Obsidian 正文和本机库目录；请单独备份笔记库。",
       "link": "关联 Obsidian 笔记",
       "linkHint": "新建文件会复制当前笔记草稿；关联已有文件会保留原文。属性模板中的同名字段会更新，其他属性保留；旧内部笔记保留至手动清除。",
@@ -1697,7 +1697,7 @@
       "setupHint": "请先在设置中配置 Obsidian 笔记库。",
       "propertyTemplate": "属性模板",
       "resetTemplate": "恢复默认模板",
-      "templateHint": "使用 --- 包围 YAML 属性。可用占位符：{{noteId}}、{{obsidianUri}}、{{repositoryUid}}、{{skillshubUri}}、{{fullName}}、{{url}}、{{description}}、{{stars}}、{{tags}}、{{categories}}。占位符应作为完整 YAML 值，不加引号；文字、数字和列表将自动转义并保留类型。可添加自定义属性。skillshub_schema、skillshub_repository_id 和 skillshub_uri 由系统固定维护。模板在关联或手动更新属性时应用，模板内同名属性会更新，其他已有属性和正文保留；删除模板字段不会删除文件中的旧属性。 笔记 ID、仓库 ID、双向链接和格式版本为受保护字段，不能由模板覆盖。"
+      "templateHint": "使用 --- 包围 YAML 属性。可用占位符：{{noteId}}、{{obsidianUri}}、{{repositoryUid}}、{{arsenalUri}}、{{fullName}}、{{url}}、{{description}}、{{stars}}、{{tags}}、{{categories}}。占位符应作为完整 YAML 值，不加引号；文字、数字和列表将自动转义并保留类型。可添加自定义属性。arsenal_schema、arsenal_repository_id 和 arsenal_uri 由系统固定维护。模板在关联或手动更新属性时应用，模板内同名属性会更新，其他已有属性和正文保留；删除模板字段不会删除文件中的旧属性。 笔记 ID、仓库 ID、双向链接和格式版本为受保护字段，不能由模板覆盖。"
     },
     "notebook": "笔记",
     "emptyNotebook": "还没有笔记",
@@ -1770,7 +1770,7 @@
     }
   },
   "notebookSettings": {
-    "templateIdentity": "属性模板使用 skillshub_* 属性键和 skillshub:// 返回链接，与 Arsenal Obsidian 插件配套使用。",
+    "templateIdentity": "属性模板使用 arsenal_* 属性键和 arsenal:// 返回链接，与 Arsenal Obsidian 插件配套使用。",
     "hint": "每个仓库一篇 Markdown 笔记。关联后直接编辑 Obsidian 文件，外部变化会触发冲突检查。模板值使用占位符，不加引号。",
     "vault": "Obsidian 库目录",
     "folder": "新笔记子目录",

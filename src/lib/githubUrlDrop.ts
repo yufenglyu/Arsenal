@@ -2,7 +2,7 @@ const URL_TYPES = ["text/uri-list", "text/x-moz-url", "text/plain"];
 
 export function acceptsGitHubUrlDrag(data: Pick<DataTransfer, "types">): boolean {
   const types = Array.from(data.types);
-  return !types.includes("application/skillshub-skills")
+  return !types.includes("application/arsenal-skills")
     && (types.includes("Files") || URL_TYPES.some(type => types.includes(type)));
 }
 

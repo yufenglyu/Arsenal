@@ -92,7 +92,7 @@ export const useMetadataStore = create<MetadataState>((set, get) => ({
   renameTag: async (oldTag, newTag, merge) => {
     const rows = await invoke<Array<EditableMetadata & {id:string}>>("rename_skill_tag", {oldTag,newTag:newTag.trim(),merge});
     rows.forEach(row => get().publish(row.id,row));
-    window.dispatchEvent(new CustomEvent("skillshub-tag-renamed", {detail:{oldTag:oldTag.toLowerCase(),newTag:newTag.trim().toLowerCase()}}));
+    window.dispatchEvent(new CustomEvent("arsenal-tag-renamed", {detail:{oldTag:oldTag.toLowerCase(),newTag:newTag.trim().toLowerCase()}}));
   },
   changeTag: async (tag, ids, remove) => {
     if (isTauriRuntime()) {

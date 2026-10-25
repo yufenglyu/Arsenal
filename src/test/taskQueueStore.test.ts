@@ -41,7 +41,7 @@ describe("background queue", () => {
     callbacks.forEach(callback => callback({payload}));
     await waitFor(() => expect(queue.getState().tasks.find(task => task.id === ids[0])?.importProgress).toMatchObject(payload));
     expect(queue.getState().tasks.find(task => task.id === ids[1])?.importProgress).toBeUndefined();
-    expect(localStorage.getItem("skillshub.background-tasks.v1")).not.toContain('"currentSkill"');
+    expect(localStorage.getItem("arsenal.background-tasks.v1")).not.toContain('"currentSkill"');
     const waiters=ids.map(waitForTask);finishes.forEach(finish => finish());await Promise.all(waiters);
     stops.forEach(stop=>expect(stop).toHaveBeenCalledOnce());
   });
@@ -206,7 +206,7 @@ describe("background queue", () => {
       steps: [{ ...input("restore").steps[0], status: "running" }],
     };
     localStorage.setItem(
-      "skillshub.background-tasks.v1",
+      "arsenal.background-tasks.v1",
       JSON.stringify({ state: { tasks: [task] }, version: 0 }),
     );
     await queue.persist.rehydrate();

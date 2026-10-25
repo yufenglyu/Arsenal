@@ -73,7 +73,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => {
     unlinkNotebook: async (id, keepBody, expectedRevision) => (await task(async () => { await invoke("unlink_notebook", { id, keepBody, expectedRevision }); await get().load(); return true; })) === true,
     clearLegacyNotebook: async (id, expectedLegacy) => (await task(async () => { await invoke("clear_legacy_notebook", { id, expectedLegacy }); await get().load(); return true; })) === true,
     openObsidian: async id => { await task(() => invoke("open_obsidian", { id })); },
-    copyNotebookLink: async id => { await task(async () => { const file = await get().readNotebook(id); if (file?.noteId) await navigator.clipboard.writeText(`obsidian://skillshub-note?id=${file.noteId}`); }); },
+    copyNotebookLink: async id => { await task(async () => { const file = await get().readNotebook(id); if (file?.noteId) await navigator.clipboard.writeText(`obsidian://arsenal-note?id=${file.noteId}`); }); },
     notebookAsset: (id, link, open = false) => task(() => invoke<string>("notebook_asset", { id, link, open }), !open),
     watchNotebook: async onChange => {
       if (!isTauriRuntime()) return () => {};
@@ -84,7 +84,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => {
     },
     visit: async url => { await task(() => openUrl(url)); },
     saveConfig: async (vaultPath, folder, template) => (await task(async () => { await invoke("save_notebook_settings", { vaultPath, folder, template }); await get().loadConfig(); return true; })) === true,
-    registerProtocol: async () => { await task(() => invoke("register_skillshub_protocol")); },
+    registerProtocol: async () => { await task(() => invoke("register_arsenal_protocol")); },
     notebookNavigation: async navigate => {
       if (!isTauriRuntime()) return () => {};
       let active = true;

@@ -6,6 +6,7 @@ import { useNotebookStore } from "@/stores/notebookStore";
 import type { NotebookFile, Repository } from "@/types/notebook";
 import { normalizeNotebookFolder } from "@/lib/notebookNames";
 import defaultTemplate from "@/data/obsidianTemplate.json";
+import { NotebookSettings } from "@/components/notebook/NotebookSettings";
 
 const initial = useNotebookStore.getState();
 function repo(id: number, notebook = "saved"): Repository {
@@ -15,13 +16,22 @@ beforeEach(() => { useNotebookStore.setState(initial, true); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe("repository notebooks", () => {
-  it("uses Arsenal folders while preserving existing notebook property identifiers", () => {
+  it("shows Arsenal defaults instead of an old saved template and loads the new template setting", async () => {
+    useNotebookStore.setState({config: {obsidian_property_template: "obsolete custom template"}, loadConfig: async () => {}});
+    const {container} = render(<NotebookSettings />);
+    const field = container.querySelector<HTMLTextAreaElement>("#notebook-template")!;
+    expect(field).toHaveValue(defaultTemplate.template);
+    const template = "---\narsenal_repository: {{fullName}}\n---\n";
+    act(() => useNotebookStore.setState({config: {arsenal_property_template: template}}));
+    await waitFor(() => expect(field).toHaveValue(template));
+  });
+  it("uses Arsenal folders and property identifiers", () => {
     expect(normalizeNotebookFolder()).toBe("Arsenal");
     expect(normalizeNotebookFolder(" ")).toBe("Arsenal");
     expect(normalizeNotebookFolder("Attachments/Research")).toBe("Attachments/Research");
-    expect(defaultTemplate.template).toContain("skillshub_note_id: {{noteId}}");
-    expect(defaultTemplate.template).toContain("skillshub_uri: {{skillshubUri}}");
-    expect(defaultTemplate.template).not.toMatch(/arsenal_(?:note|repository|uri)/);
+    expect(defaultTemplate.template).toContain("arsenal_note_id: {{noteId}}");
+    expect(defaultTemplate.template).toContain("arsenal_uri: {{arsenalUri}}");
+    expect(defaultTemplate.template).toContain("arsenal_repository_id: {{repositoryUid}}");
   });
   it("previews GFM tables and math locally without rendering raw HTML", () => {
     const { container } = render(<NotebookMarkdown content={'| Key | Value |\n|---|---|\n| x | y |\n\n$E=mc^2$\n\n<script>alert(1)</script>\n\n```\n$literal$\n```'} />);
@@ -54,7 +64,7 @@ describe("repository notebooks", () => {
   });
   it("retains a linked draft and blocks Save when an external revision arrives", async () => {
     const row = repo(10004, "");
-    row.obsidian = { bindingVersion: 2, noteId: "note", vaultKey: "default", relativePath: "notes/a.md", obsidianUri: "obsidian://skillshub-note?id=note" };
+    row.obsidian = { bindingVersion: 2, noteId: "note", vaultKey: "default", relativePath: "notes/a.md", obsidianUri: "obsidian://arsenal-note?id=note" };
     let notify = () => {};
     let file: NotebookFile = { noteId: "note", body: "original", revision: "r1", properties: "", relativePath: "notes/a.md" };
     useNotebookStore.setState({ readNotebook: vi.fn(async () => file), watchNotebook: async onChange => { notify = onChange; return () => {}; } });

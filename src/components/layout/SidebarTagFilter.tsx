@@ -17,7 +17,7 @@ export function SidebarTagFilter({
   const [target, setTarget] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState(() => {
     try {
-      return localStorage.getItem("skillshub.tags.expanded") !== "false";
+      return localStorage.getItem("arsenal.tags.expanded") !== "false";
     } catch {
       return true;
     }
@@ -26,14 +26,14 @@ export function SidebarTagFilter({
     const next = !open;
     setOpen(next);
     try {
-      localStorage.setItem("skillshub.tags.expanded", String(next));
+      localStorage.setItem("arsenal.tags.expanded", String(next));
     } catch {
       /* Keep the current session state. */
     }
   }
   const [height, setHeight] = useState(() => {
     try {
-      const saved = Number(localStorage.getItem("skillshub.tags.height"));
+      const saved = Number(localStorage.getItem("arsenal.tags.height"));
       return Number.isFinite(saved) && saved >= 60 ? saved : 128;
     } catch {
       return 128;
@@ -47,7 +47,7 @@ export function SidebarTagFilter({
     );
     setHeight(value);
     try {
-      localStorage.setItem("skillshub.tags.height", String(value));
+      localStorage.setItem("arsenal.tags.height", String(value));
     } catch {
       /* Keep in-memory height. */
     }

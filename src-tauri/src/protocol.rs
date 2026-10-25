@@ -22,8 +22,8 @@ pub fn register(app: &tauri::AppHandle) -> Result<(), &'static str> {
     #[cfg(any(windows, target_os = "linux"))]
     {
         register_and_verify(
-            || app.deep_link().register("skillshub").map_err(|_| ()),
-            || app.deep_link().is_registered("skillshub").map_err(|_| ()),
+            || app.deep_link().register("arsenal").map_err(|_| ()),
+            || app.deep_link().is_registered("arsenal").map_err(|_| ()),
         )
     }
     #[cfg(not(any(windows, target_os = "linux")))]
@@ -51,7 +51,7 @@ pub fn take_protocol_registration_error(app: tauri::AppHandle) -> Option<String>
 }
 
 #[tauri::command]
-pub fn register_skillshub_protocol(app: tauri::AppHandle) -> Result<(), String> {
+pub fn register_arsenal_protocol(app: tauri::AppHandle) -> Result<(), String> {
     register(&app).map_err(str::to_owned)?;
     // A successful explicit repair supersedes an earlier startup failure.
     let _ = take_protocol_registration_error(app);

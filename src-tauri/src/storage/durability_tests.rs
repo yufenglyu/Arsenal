@@ -8,7 +8,7 @@ use std::{
 #[test]
 #[ignore = "subprocess helper; invoked only by acknowledged_commit_survives_process_kill"]
 fn committed_child() {
-    let Some(root) = std::env::var_os("SKILLSHUB_SYNTHETIC_CRASH_ROOT") else {
+    let Some(root) = std::env::var_os("ARSENAL_SYNTHETIC_CRASH_ROOT") else {
         return;
     };
     let root = std::path::PathBuf::from(root);
@@ -41,7 +41,7 @@ fn acknowledged_commit_survives_process_kill() {
             "storage::durability_tests::committed_child",
             "--ignored",
         ])
-        .env("SKILLSHUB_SYNTHETIC_CRASH_ROOT", directory.path())
+        .env("ARSENAL_SYNTHETIC_CRASH_ROOT", directory.path())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

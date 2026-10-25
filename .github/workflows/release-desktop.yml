@@ -80,7 +80,7 @@ jobs:
           }
           Copy-Item $msi.FullName "release-assets/arsenal_${version}_windows_x64.msi"
 
-          New-SkillshubPortableZip `
+          New-ArsenalPortableZip `
             -ExePath "src-tauri/target/x86_64-pc-windows-msvc/release/arsenal.exe" `
             -ConfigDir "src-tauri/resources/packaged-config" `
             -ZipPath "release-assets/arsenal_${version}_windows_x64.zip"
@@ -135,7 +135,7 @@ jobs:
       - name: Build macOS bundles
         run: pnpm tauri build --target universal-apple-darwin --bundles app,dmg --no-sign --ci
 
-      - name: Verify macOS startup with obsolete configuration links
+      - name: Verify macOS startup with current configuration
         run: python3 scripts/test-macos-startup.py src-tauri/target/universal-apple-darwin/release/bundle/macos/Arsenal.app
 
       - name: Prepare macOS assets

@@ -39,7 +39,7 @@ it("queues each dropped repository once and prevents navigation", () => {
 });
 it("ignores internal skill, column and local file drags", () => {
   render(<GitHubUrlDrop/>);
-  for (const values of [{"application/skillshub-skills":"[]"}]) {
+  for (const values of [{"application/arsenal-skills":"[]"}]) {
     const dataTransfer = transfer(values);
     expect(acceptsGitHubUrlDrag(dataTransfer)).toBe(false);
     const drop = createEvent.drop(window,{dataTransfer});

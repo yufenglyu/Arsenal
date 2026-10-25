@@ -124,7 +124,7 @@ describe("background repository preview", () => {
   it("restores the report and choices without reopening a dialog or resuming a spinner", async () => {
     useRepositorySyncStore.setState({ preview: { repositories: [] }, repositories: ["example/skills"],
       includeAdded: false, removeDeleted: true, applied: true, open: true, isChecking: true });
-    const key = "skillshub.repository-update-preview.v1";
+    const key = "arsenal.repository-update-preview.v1";
     const saved = localStorage.getItem(key)!;
     expect(JSON.parse(saved).state).not.toHaveProperty("open");
     expect(JSON.parse(saved).state).not.toHaveProperty("isChecking");
@@ -184,12 +184,12 @@ it("removes the withdrawn screenshot preview without changing real data or ignor
       {...repo("demo/research"),modified:[{skillId:"research-notes",name:"research-notes",version:"demo-v2"}]},
     ]},
   };
-  localStorage.setItem("skillshub.repository-update-preview.v1",JSON.stringify({state:persisted,version:0}));
+  localStorage.setItem("arsenal.repository-update-preview.v1",JSON.stringify({state:persisted,version:0}));
   await useRepositorySyncStore.persist.rehydrate();
   expect(useRepositorySyncStore.getState().preview).toBeNull();
   expect(useRepositorySyncStore.getState().ignored).toEqual(persisted.ignored);
   const realPreview={repositories:[repo("demo/engineering"),repo("demo/research")]};
-  localStorage.setItem("skillshub.repository-update-preview.v1",JSON.stringify({state:{preview:realPreview},version:0}));
+  localStorage.setItem("arsenal.repository-update-preview.v1",JSON.stringify({state:{preview:realPreview},version:0}));
   await useRepositorySyncStore.persist.rehydrate();
   expect(useRepositorySyncStore.getState().preview).toEqual(realPreview);
 });
@@ -272,7 +272,7 @@ describe("repository check checkpoints", () => {
     const saved:BackgroundTask = {id:"restart",key:"restart",label:"Check",kind:"check",locks:["repo:*"],createdAt:1,cancelRequested:false,status:"running",parentReportGeneration:"restart",steps:[
       {...step("example/one"),status:"success",result:report("example/one")},
       {...step("example/two"),status:"running"}, {...step("example/three"),status:"queued"}]};
-    localStorage.setItem("skillshub.background-tasks.v1",JSON.stringify({state:{tasks:[saved]},version:0}));
+    localStorage.setItem("arsenal.background-tasks.v1",JSON.stringify({state:{tasks:[saved]},version:0}));
     await queue.persist.rehydrate();
     expect(queue.getState().tasks[0].status).toBe("interrupted");
     const check = vi.spyOn(useResourceLibraryStore.getState(),"previewRepositorySync").mockImplementation(async repos=>report(repos![0]));

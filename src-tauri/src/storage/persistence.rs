@@ -646,7 +646,7 @@ mod tests {
     #[test]
     #[ignore = "subprocess helper for prepared_commit_survives_process_kill"]
     fn prepared_child() {
-        let Some(path) = std::env::var_os("SKILLSHUB_SYNTHETIC_PREPARE_ROOT") else {
+        let Some(path) = std::env::var_os("ARSENAL_SYNTHETIC_PREPARE_ROOT") else {
             return;
         };
         let directory = std::path::PathBuf::from(path);
@@ -690,7 +690,7 @@ mod tests {
                 "storage::persistence::tests::prepared_child",
                 "--ignored",
             ])
-            .env("SKILLSHUB_SYNTHETIC_PREPARE_ROOT", directory.path())
+            .env("ARSENAL_SYNTHETIC_PREPARE_ROOT", directory.path())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()

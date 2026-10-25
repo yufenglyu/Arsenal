@@ -39,7 +39,7 @@ pub fn platform_dir() -> Option<PathBuf> {
 
 #[cfg(test)]
 pub fn platform_dir() -> Option<PathBuf> {
-    std::env::var_os("SKILLSHUB_PLATFORM_DIR")
+    std::env::var_os("ARSENAL_PLATFORM_DIR")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
 }

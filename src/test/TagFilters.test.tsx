@@ -114,14 +114,14 @@ it("transfers selected skill IDs from table rows to the tag drop target", async 
   const transfer = {
     setData: (key: string, value: string) => data.set(key, value),
     getData: (key: string) => data.get(key) ?? "",
-    types: ["application/skillshub-skills"],
+    types: ["application/arsenal-skills"],
     effectAllowed: "",
     dropEffect: "",
   };
   screen.getByText("One").focus();
   fireEvent.dragStart(one, { dataTransfer: transfer });
   expect(one).toHaveFocus();
-  expect(JSON.parse(transfer.getData("application/skillshub-skills"))).toEqual([
+  expect(JSON.parse(transfer.getData("application/arsenal-skills"))).toEqual([
     "one",
     "two",
   ]);
@@ -145,7 +145,7 @@ it("distinguishes removal hover and resets feedback when dragging is cancelled",
   render(<Harness />);
   const a = screen.getByRole("button", { name: "A" });
   const b = screen.getByRole("button", { name: "B" });
-  const transfer = { types: ["application/skillshub-skills"], dropEffect: "" };
+  const transfer = { types: ["application/arsenal-skills"], dropEffect: "" };
   const over = createEvent.dragOver(a, { dataTransfer: transfer });
   Object.defineProperty(over, "shiftKey", { value: true });
   fireEvent(a, over);

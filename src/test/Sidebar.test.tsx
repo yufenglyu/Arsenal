@@ -277,7 +277,7 @@ describe("Sidebar", () => {
   });
 
   it("toggles the repository from its title and restores its resized height",()=>{
-    localStorage.setItem('skillshub.sidebar.repositoryHeight','240');
+    localStorage.setItem('arsenal.sidebar.repositoryHeight','240');
     renderSidebar();
     const title=screen.getByRole('button',{name:'技能仓库'});
     const region=screen.getByTestId('repository-tree-region');
@@ -799,12 +799,12 @@ it('uses a 40px collapsed rail and stacks theme above settings',()=>{
 
 it('resizes the repository region and retains its height',()=>{
  useSidebarStore.setState({expanded:true});
- localStorage.setItem('skillshub.sidebar.repositoryHeight','160');
+ localStorage.setItem('arsenal.sidebar.repositoryHeight','160');
  renderSidebar();
  const handle=screen.getByRole('separator',{name:'调整技能仓库区域高度'});
  fireEvent.keyDown(handle,{key:'ArrowDown'});
  expect(screen.getByTestId('repository-tree-region')).toHaveStyle({height:'176px'});
- expect(localStorage.getItem('skillshub.sidebar.repositoryHeight')).toBe('176');
+ expect(localStorage.getItem('arsenal.sidebar.repositoryHeight')).toBe('176');
  fireEvent.click(screen.getByRole('button',{name:'折叠侧边栏'}));
  fireEvent.click(screen.getByRole('button',{name:'技能仓库'}));
  expect(screen.getByRole('button',{name:'展开侧边栏'})).toBeInTheDocument();
@@ -812,9 +812,9 @@ it('resizes the repository region and retains its height',()=>{
 
 it("docks the collapsed installation heading above the collapsed tags and releases repository height",()=>{
   useSidebarStore.setState({expanded:true});
-  localStorage.setItem("skillshub.sidebar.installationCollapsed","false");
-  localStorage.setItem("skillshub.tags.expanded","false");
-  localStorage.setItem("skillshub.sidebar.repositoryHeight","240");
+  localStorage.setItem("arsenal.sidebar.installationCollapsed","false");
+  localStorage.setItem("arsenal.tags.expanded","false");
+  localStorage.setItem("arsenal.sidebar.repositoryHeight","240");
   renderSidebar();
   const heading=screen.getByRole("button",{name:"技能安装"});
   fireEvent.doubleClick(heading);

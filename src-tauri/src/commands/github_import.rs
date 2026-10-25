@@ -6237,7 +6237,7 @@ pub(crate) async fn recover_import_transactions(pool: &AppStore) -> Result<(), S
         let name = name.to_string_lossy();
         let transaction_id = name
             .strip_prefix(".arsenal-import-")
-            .or_else(|| name.strip_prefix(".skillshub-import-"));
+            .or_else(|| name.strip_prefix(".arsenal-import-"));
         if transaction_id.is_none_or(|id| uuid::Uuid::parse_str(id).is_err())
             || !entry.file_type().map_err(|e| e.to_string())?.is_dir()
         {
@@ -6331,7 +6331,7 @@ mod import_cleanup_tests {
         db::set_skill_resource_library_dir(&pool, &library.to_string_lossy())
             .await
             .unwrap();
-        for prefix in [".arsenal-import-", ".skillshub-import-"] {
+        for prefix in [".arsenal-import-", ".arsenal-import-"] {
             for marker in ["committed", "recovered", "receipt"] {
                 let root = temp
                     .path()
@@ -6355,7 +6355,7 @@ mod import_cleanup_tests {
                 assert!(!root.exists(), "completed {prefix}{marker} must be cleaned");
             }
         }
-        let unrelated = temp.path().join(".skillshub-import-personal");
+        let unrelated = temp.path().join(".arsenal-import-personal");
         std::fs::create_dir(&unrelated).unwrap();
         std::fs::write(unrelated.join("committed"), b"").unwrap();
         recover_import_transactions(&pool).await.unwrap();
@@ -6388,7 +6388,7 @@ mod import_cleanup_tests {
         let old_root = transaction.root.clone();
         let legacy_root = temp
             .path()
-            .join(format!(".skillshub-import-{}", uuid::Uuid::new_v4()));
+            .join(format!(".arsenal-import-{}", uuid::Uuid::new_v4()));
         let journal =
             serde_json::to_vec(&(target.clone(), Some(legacy_root.join("old-0")))).unwrap();
         std::mem::forget(transaction);

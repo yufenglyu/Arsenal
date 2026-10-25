@@ -81,7 +81,7 @@ export interface CollectionGroupChange {
 
 export const useCollectionStore = create<CollectionState>((set, get) => ({
   activeCollectionId: null,
-  groupDetails: [], selectedSkillIds: [], includeDescendants: (()=>{try{return localStorage.getItem('skillshub.groups.includeDescendants')!=='false';}catch{return true;}})(),
+  groupDetails: [], selectedSkillIds: [], includeDescendants: (()=>{try{return localStorage.getItem('arsenal.groups.includeDescendants')!=='false';}catch{return true;}})(),
   selectGroup: id => set({activeCollectionId:id,selectedSkillIds:[]}),
   loadGroupDetails: async () => {
     const request=++groupRequest;

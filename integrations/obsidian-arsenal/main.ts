@@ -30,7 +30,7 @@ export default class ArsenalLink extends Plugin {
     this.registerEvent(this.app.vault.on("modify", invalidate));
     this.registerEvent(this.app.vault.on("delete", invalidate));
     this.registerEvent(this.app.vault.on("rename", invalidate));
-    this.registerObsidianProtocolHandler("skillshub-note", params => {
+    this.registerObsidianProtocolHandler("arsenal-note", params => {
       void this.openNote(params.id).catch(() => new Notice("Arsenal: Unable to open the note / 无法打开笔记。"));
     });
     this.addCommand({
@@ -58,7 +58,7 @@ export default class ArsenalLink extends Plugin {
       for (const file of files) {
         if (file.stat.size > MAX_NOTE) continue;
         // Read file front matter rather than trusting an asynchronously updated metadata cache.
-        const id = identity(properties(await this.app.vault.cachedRead(file)).skillshub_note_id);
+        const id = identity(properties(await this.app.vault.cachedRead(file)).arsenal_note_id);
         if (id) index.set(id, [...(index.get(id) ?? []), file]);
       }
       if (generation === this.generation) { this.index = index; return index; }
@@ -79,7 +79,7 @@ export default class ArsenalLink extends Plugin {
     }
     const file = files[0];
     if (this.app.vault.getAbstractFileByPath(file.path) !== file ||
-        identity(properties(await this.app.vault.cachedRead(file)).skillshub_note_id) !== id) {
+        identity(properties(await this.app.vault.cachedRead(file)).arsenal_note_id) !== id) {
       this.index = null;
       new Notice("Arsenal: Note changed. Try the link again / 笔记已变化，请重试链接。");
       return;
@@ -96,18 +96,18 @@ export default class ArsenalLink extends Plugin {
   private async copyLink(): Promise<void> {
     const data = await this.activeProperties();
     if (!data) return;
-    const id = identity(data.skillshub_note_id);
+    const id = identity(data.arsenal_note_id);
     if (!id) { new Notice("Arsenal: Open this note in Arsenal to initialize its ID / 请先在 Arsenal 中打开笔记以初始化 ID。"); return; }
-    await navigator.clipboard.writeText(`obsidian://skillshub-note?id=${id}`);
+    await navigator.clipboard.writeText(`obsidian://arsenal-note?id=${id}`);
     new Notice("Arsenal: Stable link copied / 稳定链接已复制。");
   }
 
   private async returnToArsenal(): Promise<void> {
     const data = await this.activeProperties();
     if (!data) return;
-    const id = identity(data.skillshub_repository_id);
+    const id = identity(data.arsenal_repository_id);
     if (!id) { new Notice("Arsenal: Repository ID missing / 缺少仓库 ID。"); return; }
     // Construct a known navigation URI; never execute arbitrary front matter URLs.
-    window.open(`skillshub://repository/${id}?tab=notebook`);
+    window.open(`arsenal://repository/${id}?tab=notebook`);
   }
 }

@@ -366,7 +366,7 @@ export const useRepositorySyncStore = create<RepositorySyncState>()(
       setRepositories: (repositories) => set({ repositories }),
     }),
     {
-      name: "skillshub.repository-update-preview.v1",
+      name: "arsenal.repository-update-preview.v1",
       storage: createJSONStorage(() => localStorage),
       merge: (persisted, current) => {
         const saved = persisted as Partial<RepositorySyncState> | undefined;

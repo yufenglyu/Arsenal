@@ -98,7 +98,7 @@ pub fn run() {
             commands::notebook::notebook_asset,
             commands::notebook::watch_notebook,
             commands::notebook::take_notebook_navigation,
-            protocol::register_skillshub_protocol,
+            protocol::register_arsenal_protocol,
             protocol::take_protocol_registration_error,
             commands::remote_sources::apply_repository_update_item,
             commands::repository_mirror::apply_repository_snapshot,
@@ -227,52 +227,22 @@ pub fn run() {
 #[cfg(test)]
 mod current_config_startup_tests {
     use super::*;
-
     #[tokio::test]
-    async fn current_config_starts_beside_legacy_data_without_migrating() {
+    async fn current_config_can_be_reopened_without_data_loss() {
         let temp = tempfile::tempdir().unwrap();
         let current = temp.path().join(".arsenal");
-        let legacy = temp.path().join(".skillshub");
-        fs::create_dir_all(&legacy).unwrap();
-        fs::write(legacy.join("config.json"), "legacy fixture").unwrap();
-        drop(storage::store::Store::open(&current).unwrap());
         let pool = open_app_store(&current).await.unwrap();
-        assert_eq!(pool.directory(), current);
+        db::set_setting(&pool, "language", "en").await.unwrap();
+        pool.close().await;
+        drop(pool);
+        let reopened = open_app_store(&current).await.unwrap();
+        assert_eq!(reopened.directory(), current);
         assert_eq!(
-            fs::read(legacy.join("config.json")).unwrap(),
-            b"legacy fixture"
+            db::get_setting(&reopened, "language")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("en")
         );
-        assert!(!current.join("migrations/arsenal-paths-v2").exists());
-    }
-
-    #[tokio::test]
-    async fn startup_ignores_dangling_legacy_installation_link() {
-        let temp = tempfile::tempdir().unwrap();
-        let current = temp.path().join(".arsenal");
-        fs::create_dir_all(&current).unwrap();
-        let link = current.join("old-installed-skill");
-        let missing = temp.path().join(".skillshub/library/removed-skill");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&missing, &link).unwrap();
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&missing, &link).unwrap();
-        let pool = open_app_store(&current).await.unwrap();
-        assert_eq!(pool.directory(), current);
-        assert_eq!(fs::read_link(&link).unwrap(), missing);
-        assert!(!current.join("migrations/arsenal-paths-v2").exists());
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn startup_ignores_dangling_legacy_config_link() {
-        let temp = tempfile::tempdir().unwrap();
-        let current = temp.path().join(".arsenal");
-        let legacy = temp.path().join(".skillshub");
-        let missing = temp.path().join("removed-legacy-target");
-        std::os::unix::fs::symlink(&missing, &legacy).unwrap();
-        let pool = open_app_store(&current).await.unwrap();
-        assert_eq!(pool.directory(), current);
-        assert_eq!(fs::read_link(&legacy).unwrap(), missing);
-        assert!(!missing.exists());
     }
 }

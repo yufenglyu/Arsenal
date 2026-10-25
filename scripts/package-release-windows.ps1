@@ -233,7 +233,7 @@ function Build-App {
     throw "Tauri CLI executable not found at $tauriCmd. Run pnpm install first."
   }
 
-  $skipBeforeBuildPath = Join-Path ([System.IO.Path]::GetTempPath()) "skillshub-tauri-build-$PID.json"
+  $skipBeforeBuildPath = Join-Path ([System.IO.Path]::GetTempPath()) "arsenal-tauri-build-$PID.json"
   $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
   [System.IO.File]::WriteAllText($skipBeforeBuildPath, '{"build":{"beforeBuildCommand":""}}', $utf8NoBom)
   try {
@@ -265,7 +265,7 @@ function Copy-WindowsAssets {
 
   $exe = Join-Path $targetRoot "arsenal.exe"
   $configDir = Join-Path $Root "src-tauri/resources/packaged-config"
-  New-SkillshubPortableZip `
+  New-ArsenalPortableZip `
     -ExePath $exe `
     -ConfigDir $configDir `
     -ZipPath (Join-Path $OutDir "arsenal_${NextVersion}_windows_x64.zip")
@@ -283,7 +283,7 @@ function Invoke-PreparePackagedConfig {
   }
 }
 
-function New-SkillshubPortableZip {
+function New-ArsenalPortableZip {
   param(
     [string]$ExePath,
     [string]$ConfigDir,
@@ -299,7 +299,7 @@ function New-SkillshubPortableZip {
   Add-Type -AssemblyName System.IO.Compression
   Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-  $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("skillshub-portable-" + [guid]::NewGuid().ToString("n"))
+  $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("arsenal-portable-" + [guid]::NewGuid().ToString("n"))
   New-Item -ItemType Directory -Force -Path $stage | Out-Null
   try {
     Copy-Item $ExePath (Join-Path $stage "arsenal.exe") -Force

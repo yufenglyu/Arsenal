@@ -46,7 +46,7 @@
         "language": "en-US",
         "upgradeCode": "28d41c68-f4a4-5134-b959-34babea58f7f",
         "fragmentPaths": ["./windows/fragments/user-config.wxs"],
-        "componentRefs": ["SkillshubUserConfigInit"]
+        "componentRefs": ["ArsenalUserConfigInit"]
       }
     },
     "linux": {
@@ -63,7 +63,7 @@
         "postInstallScript": "bundle/unix/seed-user-config.sh",
         "files": {
           "/usr/share/metainfo/com.iamzhihuix.skillsmanage.metainfo.xml": "bundle/linux/com.iamzhihuix.skillsmanage.metainfo.xml",
-          "/usr/share/skillshub/packaged-config": "resources/packaged-config"
+          "/usr/share/arsenal/packaged-config": "resources/packaged-config"
         }
       },
       "rpm": {
@@ -72,7 +72,7 @@
         "postInstallScript": "bundle/unix/seed-user-config.sh",
         "files": {
           "/usr/share/metainfo/com.iamzhihuix.skillsmanage.metainfo.xml": "bundle/linux/com.iamzhihuix.skillsmanage.metainfo.xml",
-          "/usr/share/skillshub/packaged-config": "resources/packaged-config"
+          "/usr/share/arsenal/packaged-config": "resources/packaged-config"
         }
       }
     },
@@ -92,7 +92,7 @@
   },
   "plugins": {
     "deep-link": {
-      "desktop": { "schemes": ["skillshub"] }
+      "desktop": { "schemes": ["arsenal"] }
     },
     "sql": {
       "preload": []

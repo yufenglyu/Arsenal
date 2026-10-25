@@ -986,7 +986,7 @@ mod tests {
     fn resolve_app_data_dir_uses_arsenal_next_to_macos_app() {
         let dir = tempfile::tempdir().expect("tempdir");
         let stage = dir.path().join("portable");
-        let exe_dir = stage.join("SkillsHub.app").join("Contents").join("MacOS");
+        let exe_dir = stage.join("Arsenal.app").join("Contents").join("MacOS");
         let portable = stage.join(".arsenal");
         std::fs::create_dir_all(&exe_dir).expect("macos exe dir");
         std::fs::create_dir_all(&portable).expect("portable");
@@ -998,7 +998,7 @@ mod tests {
     fn resolve_app_data_dir_prefers_exe_dir_over_macos_app_sibling() {
         let dir = tempfile::tempdir().expect("tempdir");
         let stage = dir.path().join("portable");
-        let exe_dir = stage.join("SkillsHub.app").join("Contents").join("MacOS");
+        let exe_dir = stage.join("Arsenal.app").join("Contents").join("MacOS");
         let nested = exe_dir.join(".arsenal");
         let sibling = stage.join(".arsenal");
         std::fs::create_dir_all(&nested).expect("nested portable");
@@ -1037,34 +1037,6 @@ mod tests {
         .expect("pointer");
         let resolved = resolve_app_data_dir_from(Some(&exe_dir), Path::new("/tmp/home"));
         assert_eq!(resolved, custom);
-    }
-
-    #[test]
-    fn legacy_pointer_and_portable_directory_are_ignored() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join("home");
-        let exe = temp.path().join("app");
-        std::fs::create_dir_all(exe.join(".skillshub")).unwrap();
-        std::fs::create_dir_all(&home).unwrap();
-        assert_eq!(
-            resolve_app_data_dir_from(Some(&exe), &home),
-            home.join(".arsenal")
-        );
-        let custom = temp.path().join("custom/.skillshub");
-        std::fs::write(exe.join("skillshub-config-path"), custom.to_str().unwrap()).unwrap();
-        assert_eq!(
-            resolve_app_data_dir_from(Some(&exe), &home),
-            home.join(".arsenal")
-        );
-        std::fs::write(
-            home.join(".skillshub-config-path"),
-            custom.to_str().unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            resolve_app_data_dir_from(None, &home),
-            home.join(".arsenal")
-        );
     }
 
     #[test]

@@ -56,7 +56,7 @@ var ArsenalLink = class extends import_obsidian.Plugin {
     this.registerEvent(this.app.vault.on("modify", invalidate));
     this.registerEvent(this.app.vault.on("delete", invalidate));
     this.registerEvent(this.app.vault.on("rename", invalidate));
-    this.registerObsidianProtocolHandler("skillshub-note", (params) => {
+    this.registerObsidianProtocolHandler("arsenal-note", (params) => {
       void this.openNote(params.id).catch(() => new import_obsidian.Notice("Arsenal: Unable to open the note / \u65E0\u6CD5\u6253\u5F00\u7B14\u8BB0\u3002"));
     });
     this.addCommand({
@@ -87,7 +87,7 @@ var ArsenalLink = class extends import_obsidian.Plugin {
       const index = /* @__PURE__ */ new Map();
       for (const file of files) {
         if (file.stat.size > MAX_NOTE) continue;
-        const id = identity(properties(await this.app.vault.cachedRead(file)).skillshub_note_id);
+        const id = identity(properties(await this.app.vault.cachedRead(file)).arsenal_note_id);
         if (id) index.set(id, [...index.get(id) ?? [], file]);
       }
       if (generation === this.generation) {
@@ -110,7 +110,7 @@ var ArsenalLink = class extends import_obsidian.Plugin {
       return;
     }
     const file = files[0];
-    if (this.app.vault.getAbstractFileByPath(file.path) !== file || identity(properties(await this.app.vault.cachedRead(file)).skillshub_note_id) !== id) {
+    if (this.app.vault.getAbstractFileByPath(file.path) !== file || identity(properties(await this.app.vault.cachedRead(file)).arsenal_note_id) !== id) {
       this.index = null;
       new import_obsidian.Notice("Arsenal: Note changed. Try the link again / \u7B14\u8BB0\u5DF2\u53D8\u5316\uFF0C\u8BF7\u91CD\u8BD5\u94FE\u63A5\u3002");
       return;
@@ -128,22 +128,22 @@ var ArsenalLink = class extends import_obsidian.Plugin {
   async copyLink() {
     const data = await this.activeProperties();
     if (!data) return;
-    const id = identity(data.skillshub_note_id);
+    const id = identity(data.arsenal_note_id);
     if (!id) {
       new import_obsidian.Notice("Arsenal: Open this note in Arsenal to initialize its ID / \u8BF7\u5148\u5728 Arsenal \u4E2D\u6253\u5F00\u7B14\u8BB0\u4EE5\u521D\u59CB\u5316 ID\u3002");
       return;
     }
-    await navigator.clipboard.writeText(`obsidian://skillshub-note?id=${id}`);
+    await navigator.clipboard.writeText(`obsidian://arsenal-note?id=${id}`);
     new import_obsidian.Notice("Arsenal: Stable link copied / \u7A33\u5B9A\u94FE\u63A5\u5DF2\u590D\u5236\u3002");
   }
   async returnToArsenal() {
     const data = await this.activeProperties();
     if (!data) return;
-    const id = identity(data.skillshub_repository_id);
+    const id = identity(data.arsenal_repository_id);
     if (!id) {
       new import_obsidian.Notice("Arsenal: Repository ID missing / \u7F3A\u5C11\u4ED3\u5E93 ID\u3002");
       return;
     }
-    window.open(`skillshub://repository/${id}?tab=notebook`);
+    window.open(`arsenal://repository/${id}?tab=notebook`);
   }
 };

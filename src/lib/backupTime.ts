@@ -26,5 +26,5 @@ export function defaultLocalBackupFilename(now = new Date()): string {
     pad2(now.getMonth() + 1),
     pad2(now.getDate()),
   ].join("-") + `-${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`;
-  return `skillshub-backup-${stamp}.zip`;
+  return `arsenal-backup-${stamp}.zip`;
 }

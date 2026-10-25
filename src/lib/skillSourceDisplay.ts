@@ -67,7 +67,6 @@ function targetLooksLikeCentralSkills(target: string): boolean {
 function targetLooksLikeResourceLibrary(target: string): boolean {
   return (
     target.includes("/.arsenal/") ||
-    target.includes("/.skillshub/") ||
     target.includes("resource-library") ||
     target.includes("/library/")
   );

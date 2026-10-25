@@ -62,8 +62,8 @@ export function TagFilters({
       const {oldTag,newTag} = (event as CustomEvent<{oldTag:string;newTag:string}>).detail;
       if (selected.includes(oldTag)) onChange([...new Set(selected.map(tag => tag === oldTag ? newTag : tag))]);
     };
-    window.addEventListener("skillshub-tag-renamed", renamed);
-    return () => window.removeEventListener("skillshub-tag-renamed", renamed);
+    window.addEventListener("arsenal-tag-renamed", renamed);
+    return () => window.removeEventListener("arsenal-tag-renamed", renamed);
   }, [selected,onChange]);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -84,7 +84,7 @@ export function TagFilters({
     setDropTarget(null);
     try {
       const ids: unknown = JSON.parse(
-        event.dataTransfer.getData("application/skillshub-skills"),
+        event.dataTransfer.getData("application/arsenal-skills"),
       );
       if (
         !Array.isArray(ids) ||
@@ -137,7 +137,7 @@ export function TagFilters({
             onDragOver={(event) => {
               if (
                 event.dataTransfer.types.includes(
-                  "application/skillshub-skills",
+                  "application/arsenal-skills",
                 )
               ) {
                 event.preventDefault();

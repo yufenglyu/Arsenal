@@ -235,7 +235,7 @@ export const useTaskQueueStore = create<State>()(
       },
     }),
     {
-      name: "skillshub.background-tasks.v1",
+      name: "arsenal.background-tasks.v1",
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         tasks: [

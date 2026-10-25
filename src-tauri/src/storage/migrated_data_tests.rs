@@ -5,10 +5,10 @@ use crate::{
 };
 
 #[tokio::test]
-#[ignore = "requires SKILLSHUB_VERIFY_JSON_DIR; never edits the supplied store"]
+#[ignore = "requires ARSENAL_VERIFY_JSON_DIR; never edits the supplied store"]
 async fn verify_migrated_data_on_disposable_store() {
     let path =
-        std::env::var_os("SKILLSHUB_VERIFY_JSON_DIR").expect("verification directory required");
+        std::env::var_os("ARSENAL_VERIFY_JSON_DIR").expect("verification directory required");
     let source = Store::open(std::path::Path::new(&path)).expect("source open failed");
     let data: Data = source
         .read(|d| {

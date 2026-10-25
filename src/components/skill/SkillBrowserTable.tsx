@@ -898,16 +898,16 @@ export function SkillBrowserTable({
   useEffect(() => {
     const update = () => setColumnOrder(readOrder());
     update();
-    window.addEventListener("skillshub-column-order", update);
+    window.addEventListener("arsenal-column-order", update);
     window.addEventListener("storage", update);
-    return () => { window.removeEventListener("skillshub-column-order", update); window.removeEventListener("storage", update); };
+    return () => { window.removeEventListener("arsenal-column-order", update); window.removeEventListener("storage", update); };
     // The storage key identifies the table configuration.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderStorageKey]);
   function saveOrder(next: string[]) {
     setColumnOrder(next);
     try { localStorage.setItem(orderStorageKey, JSON.stringify(next)); } catch { /* Keep current order in memory. */ }
-    window.dispatchEvent(new Event("skillshub-column-order"));
+    window.dispatchEvent(new Event("arsenal-column-order"));
   }
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() =>
     readColumnWidths(kind)
@@ -1088,7 +1088,7 @@ export function SkillBrowserTable({
                     // Dragging does not dispatch the click that normally transfers title focus to the row.
                     event.currentTarget.focus({preventScroll:true});
                     window.getSelection()?.removeAllRanges();
-                    event.dataTransfer.setData("application/skillshub-skills",JSON.stringify(ids));
+                    event.dataTransfer.setData("application/arsenal-skills",JSON.stringify(ids));
                     event.dataTransfer.effectAllowed="copyMove";
                   }} onMouseDownCapture={preventModifiedTextSelection} aria-selected={effectiveSelection.has(`skill:${skill.rowKey ?? skill.name}`)} onClickCapture={event=>selectRow(event,`skill:${skill.rowKey ?? skill.name}`)} tabIndex={0} onContextMenu={event => openRowMenu(event, "skill", skill.rowKey ?? skill.name)} onKeyDown={event => { if(event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) { event.preventDefault(); if(!effectiveSelection.has(`skill:${skill.rowKey ?? skill.name}`))setSelectedRows(new Set([`skill:${skill.rowKey ?? skill.name}`])); menuReturnFocus.current = event.currentTarget; const rect=event.currentTarget.getBoundingClientRect(); setRowMenu({kind:"skill",key:skill.rowKey ?? skill.name,x:rect.left+40,y:rect.top+20}); } }} onClick={(event) => { if (tree && !(event.target as HTMLElement).closest("button,input,a")) skill.onDetail?.(event as unknown as ReactMouseEvent<HTMLButtonElement>); }} key={skill.rowKey ?? skill.name} ref={node => { const key = `skill:${skill.rowKey ?? skill.name}`; if (node) rowNodes.current.set(key, node); else rowNodes.current.delete(key); }} className={cn("align-middle select-none", !selectionClass(`skill:${skill.rowKey ?? skill.name}`,skill.highlighted) && "hover:bg-muted/25", selectionClass(`skill:${skill.rowKey ?? skill.name}`,skill.highlighted) && "bg-primary/10 ring-1 ring-inset ring-primary/40")}>
                     {activeColumns.map((column) => {

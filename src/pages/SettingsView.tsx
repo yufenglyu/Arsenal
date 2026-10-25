@@ -675,7 +675,7 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
   const [webDavBaseUrl, setWebDavBaseUrl] = useState("");
   const [webDavUsername, setWebDavUsername] = useState("");
   const [webDavPassword, setWebDavPassword] = useState("");
-  const [webDavRemoteDir, setWebDavRemoteDir] = useState("skillshub");
+  const [webDavRemoteDir, setWebDavRemoteDir] = useState("arsenal");
   const [webDavConfigMessage, setWebDavConfigMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [webDavFiles, setWebDavFiles] = useState<WebDavBackupFile[]>([]);
   const [selectedWebDavPath, setSelectedWebDavPath] = useState("");
@@ -723,7 +723,7 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
     setWebDavBaseUrl(webDavConfig.baseUrl);
     setWebDavUsername(webDavConfig.username ?? "");
     setWebDavPassword(webDavConfig.password ?? "");
-    setWebDavRemoteDir(webDavConfig.remoteDir || "skillshub");
+    setWebDavRemoteDir(webDavConfig.remoteDir || "arsenal");
   }, [webDavConfig]);
 
   useEffect(() => {
@@ -737,7 +737,7 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
       webDavBaseUrl.trim() !== webDavConfig.baseUrl ||
       webDavUsername !== (webDavConfig.username ?? "") ||
       webDavPassword !== (webDavConfig.password ?? "") ||
-      webDavRemoteDir.trim() !== (webDavConfig.remoteDir || "skillshub"),
+      webDavRemoteDir.trim() !== (webDavConfig.remoteDir || "arsenal"),
     [webDavBaseUrl, webDavConfig, webDavPassword, webDavRemoteDir, webDavUsername]
   );
 

@@ -304,7 +304,7 @@ build_app() {
   fi
 
   local skip_before_build_path
-  skip_before_build_path="$(mktemp "${TMPDIR:-/tmp}/skillshub-tauri-build.XXXXXX")"
+  skip_before_build_path="$(mktemp "${TMPDIR:-/tmp}/arsenal-tauri-build.XXXXXX")"
   printf '%s' '{"build":{"beforeBuildCommand":""}}' > "$skip_before_build_path"
   trap 'rm -f "$skip_before_build_path"' RETURN
   run "$tauri_cmd" build --target universal-apple-darwin --bundles app,dmg --no-sign --ci --config "$skip_before_build_path"
@@ -370,7 +370,7 @@ create_macos_portable_archives() {
   local stage
   local status=0
   app_name="$(basename "$app_path")"
-  stage="$(mktemp -d "${TMPDIR:-/tmp}/skillshub-portable.XXXXXX")"
+  stage="$(mktemp -d "${TMPDIR:-/tmp}/arsenal-portable.XXXXXX")"
 
   if ! (
     set -euo pipefail

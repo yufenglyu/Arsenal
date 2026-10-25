@@ -2953,7 +2953,7 @@ mod repository_file_tests {
     #[ignore = "Requires an isolated replay fixture and live public GitHub access"]
     async fn live_replay_added_skill_survives_apply_and_rescan() {
         let root = std::path::PathBuf::from(
-            std::env::var("SKILLSHUB_REPLAY_ROOT").expect("isolated fixture required"),
+            std::env::var("ARSENAL_REPLAY_ROOT").expect("isolated fixture required"),
         );
         assert!(
             root.starts_with(std::env::temp_dir())
@@ -2961,7 +2961,7 @@ mod repository_file_tests {
                     .file_name()
                     .unwrap()
                     .to_string_lossy()
-                    .starts_with("skillshub-update-replay-")
+                    .starts_with("arsenal-update-replay-")
         );
         let rows: serde_json::Value =
             serde_json::from_slice(&std::fs::read(root.join("fixture.json")).unwrap()).unwrap();

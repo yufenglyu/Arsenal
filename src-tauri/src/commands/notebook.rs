@@ -104,7 +104,7 @@ pub fn validate_binding(binding: &Binding) -> bool {
         1 => binding.note_id.is_none() && uri.host_str() == Some("open"),
         2 => binding.note_id.as_ref().is_some_and(|id| {
             uuid::Uuid::parse_str(id).is_ok()
-                && uri.host_str() == Some("skillshub-note")
+                && uri.host_str() == Some("arsenal-note")
                 && uri.query_pairs().filter(|(key, _)| key == "id").count() == 1
                 && uri
                     .query_pairs()
@@ -128,12 +128,12 @@ pub fn validate_binding(binding: &Binding) -> bool {
 }
 
 fn stable_note_uri(note_id: &str) -> String {
-    format!("obsidian://skillshub-note?id={note_id}")
+    format!("obsidian://arsenal-note?id={note_id}")
 }
 
 fn note_id(text: &str) -> Result<Option<String>, String> {
     let data = yaml(parts(text)?.1)?;
-    match data.get("skillshub_note_id") {
+    match data.get("arsenal_note_id") {
         None => Ok(None),
         Some(value) => value
             .as_str()
@@ -150,9 +150,9 @@ fn with_note_identity(text: &str, id: &str) -> Result<String, String> {
     let normalized = front.replace("\r\n", "\n");
     let doc: yaml_edit::YamlFile = normalized.parse().map_err(|_| "noteYaml")?;
     doc.ensure_document();
-    doc.set("skillshub_note_id", id);
-    doc.set("skillshub_note_uri", stable_note_uri(id));
-    doc.set("skillshub_schema", 2);
+    doc.set("arsenal_note_id", id);
+    doc.set("arsenal_note_uri", stable_note_uri(id));
+    doc.set("arsenal_schema", 2);
     let bom = if text.starts_with('\u{feff}') {
         "\u{feff}"
     } else {
@@ -291,7 +291,7 @@ fn yaml(text: &str) -> Result<serde_yaml::Mapping, String> {
 fn check_identity(text: &str, uid: &str, required: bool) -> Result<(), String> {
     let (_, front, _) = parts(text)?;
     let data = yaml(front)?;
-    match data.get(serde_yaml::Value::String("skillshub_repository_id".into())) {
+    match data.get(serde_yaml::Value::String("arsenal_repository_id".into())) {
         Some(value) if value.as_str() == Some(uid) => Ok(()),
         None if !required => Ok(()),
         _ => Err("noteIdentity".into()),
@@ -392,13 +392,13 @@ fn render_template(
 }
 
 pub fn validate_template(template: &str) -> Result<(), String> {
-    render_template(template, &serde_json::json!({"noteId":"00000000-0000-4000-8000-000000000002", "obsidianUri":"obsidian://skillshub-note?id=00000000-0000-4000-8000-000000000002", "repositoryUid":"fixture-id", "skillshubUri":"skillshub://repository/fixture-id?tab=notebook", "fullName":"example/project", "url":"https://github.com/example/project", "description":"Example: a quoted \"value\"\nSecond line", "stars":42, "tags":["example"], "categories":["Tools/Example"]})).map(|_| ())
+    render_template(template, &serde_json::json!({"noteId":"00000000-0000-4000-8000-000000000002", "obsidianUri":"obsidian://arsenal-note?id=00000000-0000-4000-8000-000000000002", "repositoryUid":"fixture-id", "arsenalUri":"arsenal://repository/fixture-id?tab=notebook", "fullName":"example/project", "url":"https://github.com/example/project", "description":"Example: a quoted \"value\"\nSecond line", "stars":42, "tags":["example"], "categories":["Tools/Example"]})).map(|_| ())
 }
 
 fn configured_template(pool: &crate::db::AppStore) -> Result<String, String> {
     Ok(crate::db::load_config(pool)?
         .settings
-        .get("obsidian_property_template")
+        .get("arsenal_property_template")
         .filter(|s| !s.trim().is_empty())
         .cloned()
         .unwrap_or_else(default_template))
@@ -429,7 +429,7 @@ fn properties_with_template(
     let variables = serde_json::json!({
         "noteId":identity, "obsidianUri":stable_note_uri(&identity),
         "repositoryUid":repository.repository_uid,
-        "skillshubUri":format!("skillshub://repository/{}?tab=notebook", repository.repository_uid),
+        "arsenalUri":format!("arsenal://repository/{}?tab=notebook", repository.repository_uid),
         "fullName":repository.full_name, "url":repository.url,
         "description":repository.description, "tags":repository.tags, "stars": repository.stars,
         "categories":categories.iter().filter(|c| c.repository_ids.contains(&repository.id)).map(|c| {
@@ -442,23 +442,23 @@ fn properties_with_template(
     let mut data = render_template(template, &variables)?;
     // Stable identity and the return link cannot be disabled by a custom template.
     for (key, value) in [
-        ("skillshub_schema", serde_yaml::Value::Number(2.into())),
+        ("arsenal_schema", serde_yaml::Value::Number(2.into())),
         (
-            "skillshub_note_id",
+            "arsenal_note_id",
             serde_yaml::Value::String(identity.clone()),
         ),
         (
-            "skillshub_note_uri",
+            "arsenal_note_uri",
             serde_yaml::Value::String(stable_note_uri(&identity)),
         ),
         (
-            "skillshub_repository_id",
+            "arsenal_repository_id",
             serde_yaml::Value::String(repository.repository_uid.clone()),
         ),
         (
-            "skillshub_uri",
+            "arsenal_uri",
             serde_yaml::Value::String(
-                variables["skillshubUri"]
+                variables["arsenalUri"]
                     .as_str()
                     .ok_or("noteTemplate")?
                     .into(),
@@ -468,7 +468,7 @@ fn properties_with_template(
         data.insert(serde_yaml::Value::String(key.into()), value);
     }
     if repository.stars.is_none() {
-        data.remove(serde_yaml::Value::String("skillshub_stars".into()));
+        data.remove(serde_yaml::Value::String("arsenal_stars".into()));
     }
     // Serialize as YAML Front Matter, retaining scalar/list types rather than JSON formatting.
     let values: yaml_edit::YamlFile = serde_yaml::to_string(&data)
@@ -484,7 +484,7 @@ fn properties_with_template(
     }
     if repository.stars.is_none() {
         if let Some(mapping) = document.document().and_then(|d| d.as_mapping()) {
-            mapping.remove("skillshub_stars");
+            mapping.remove("arsenal_stars");
         }
     }
     let edited = document.to_string();
@@ -504,7 +504,7 @@ fn properties_with_template(
     let new = yaml(parts(&result)?.1)?;
     for (key, value) in old {
         if !key.as_str().is_some_and(|key| {
-            data.contains_key(serde_yaml::Value::String(key.into())) || key == "skillshub_stars"
+            data.contains_key(serde_yaml::Value::String(key.into())) || key == "arsenal_stars"
         }) && new.get(&key) != Some(&value)
         {
             return Err("noteYaml".into());
@@ -603,7 +603,7 @@ fn build_index(root: &Path) -> Result<VaultIndex, String> {
                 let Ok(data) = yaml(front) else {
                     continue;
                 };
-                if let Some(id) = data.get("skillshub_repository_id").and_then(|v| v.as_str()) {
+                if let Some(id) = data.get("arsenal_repository_id").and_then(|v| v.as_str()) {
                     index
                         .repositories
                         .entry(id.to_owned())
@@ -1115,7 +1115,7 @@ pub fn watch_notebook(
 
 pub fn navigation_uid(uri: &str) -> Option<String> {
     let uri = reqwest::Url::parse(uri).ok()?;
-    if uri.scheme() != "skillshub"
+    if uri.scheme() != "arsenal"
         || uri.host_str() != Some("repository")
         || !uri.username().is_empty()
         || uri.password().is_some()
@@ -1165,12 +1165,38 @@ pub fn take_notebook_navigation(app: tauri::AppHandle) -> Vec<String> {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn arsenal_template_uses_its_own_setting_without_converting_old_preferences() {
+        let root = tempfile::tempdir().unwrap();
+        let pool = crate::storage::store::Store::open(root.path()).unwrap();
+        crate::db::set_setting(
+            &pool,
+            "obsidian_property_template",
+            "obsolete custom template",
+        )
+        .await
+        .unwrap();
+        assert_eq!(configured_template(&pool).unwrap(), default_template());
+        let current = "---\nname: {{fullName}}\n---\n";
+        crate::db::set_setting(&pool, "arsenal_property_template", current)
+            .await
+            .unwrap();
+        assert_eq!(configured_template(&pool).unwrap(), current);
+        assert_eq!(
+            crate::db::get_setting(&pool, "obsidian_property_template")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("obsolete custom template")
+        );
+    }
+
     #[test]
     fn moved_notes_are_found_by_identity_and_duplicates_are_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
         let uid = "00000000-0000-4000-8000-000000000001";
-        let text = format!("---\nskillshub_repository_id: {uid}\n---\nbody");
+        let text = format!("---\narsenal_repository_id: {uid}\n---\nbody");
         let path = safe_path(&root, "notes/Renamed 中文.md", true).unwrap();
         std::fs::write(&path, &text).unwrap();
         assert_eq!(
@@ -1206,7 +1232,7 @@ mod tests {
         repository.obsidian = Some(binding.clone());
         db::put(&state.db, &repository).await.unwrap();
         let source = safe_path(&root, &binding.relative_path, true).unwrap();
-        let text = format!("---\n# retain comment\nskillshub_repository_id: {}\nskillshub_uri: skillshub://repository/{}?tab=notebook\ncustom: [one, two]\n---\n# Body\n",repository.repository_uid,repository.repository_uid);
+        let text = format!("---\n# retain comment\narsenal_repository_id: {}\narsenal_uri: arsenal://repository/{}?tab=notebook\ncustom: [one, two]\n---\n# Body\n",repository.repository_uid,repository.repository_uid);
         let text = with_note_identity(&text, binding.note_id.as_deref().unwrap()).unwrap();
         std::fs::write(&source, &text).unwrap();
         std::fs::write(root.join("notes/occupied.md"), "keep other file").unwrap();
@@ -1272,10 +1298,10 @@ mod tests {
     #[test]
     fn property_display_uses_yaml_without_changing_file_bytes() {
         let original =
-            "---\n\"skillshub_tags\": [\"one\", \"two\"]\n\"skillshub_stars\": 42\n---\nbody";
+            "---\n\"arsenal_tags\": [\"one\", \"two\"]\n\"arsenal_stars\": 42\n---\nbody";
         let file = snapshot(original, "note.md").unwrap();
-        assert!(file.properties.contains("skillshub_tags:\n- one\n- two"));
-        assert!(file.properties.contains("skillshub_stars: 42"));
+        assert!(file.properties.contains("arsenal_tags:\n- one\n- two"));
+        assert!(file.properties.contains("arsenal_stars: 42"));
         assert_eq!(file.body, "body");
         assert_eq!(file.revision, revision(original));
     }
@@ -1291,7 +1317,7 @@ mod tests {
         };
         let mut repo = db::Repository::new(101, "fixture/identity".into());
         repo.obsidian = Some(binding_for_path(&root, "old.md").unwrap());
-        let original=format!("\u{feff}---\r\n# keep comment\r\nskillshub_repository_id: {}\r\ncustom: 'keep me'\r\n---\r\n# Body\r\n",repo.repository_uid);
+        let original=format!("\u{feff}---\r\n# keep comment\r\narsenal_repository_id: {}\r\ncustom: 'keep me'\r\n---\r\n# Body\r\n",repo.repository_uid);
         std::fs::write(root.join("old.md"), &original).unwrap();
         db::put(&state.db, &repo).await.unwrap();
         let (path, binding) = resolve_in_vault(&state, &mut repo, &root).await.unwrap();
@@ -1357,23 +1383,17 @@ mod tests {
         assert!(next.contains("# user comment"));
         assert!(next.contains("custom: 'keep me'"));
         let values = yaml(parts(&next).unwrap().1).unwrap();
-        assert_eq!(values["skillshub_stars"].as_i64(), Some(42));
-        assert_eq!(values["skillshub_tags"][0].as_str(), Some("中文"));
+        assert_eq!(values["arsenal_stars"].as_i64(), Some(42));
+        assert_eq!(values["arsenal_tags"][0].as_str(), Some("中文"));
         assert_eq!(
-            values["skillshub_uri"].as_str(),
-            Some(
-                format!(
-                    "skillshub://repository/{}?tab=notebook",
-                    repo.repository_uid
-                )
-                .as_str()
-            )
+            values["arsenal_uri"].as_str(),
+            Some(format!("arsenal://repository/{}?tab=notebook", repo.repository_uid).as_str())
         );
         repo.stars = None;
         let next = properties(&next, &repo, &[]).unwrap();
         assert!(!yaml(parts(&next).unwrap().1)
             .unwrap()
-            .contains_key("skillshub_stars"));
+            .contains_key("arsenal_stars"));
     }
 
     #[test]
@@ -1382,7 +1402,7 @@ mod tests {
         for text in [
             "---\na: 1\na: 2\n---\nbody",
             "---\na: [\n---\nbody",
-            "---\nskillshub_repository_id: other\n---\nbody",
+            "---\narsenal_repository_id: other\n---\nbody",
         ] {
             assert!(properties(text, &repo, &[]).is_err());
         }
@@ -1430,14 +1450,14 @@ mod tests {
         );
         let uid = "00000000-0000-4000-8000-000000000001";
         assert_eq!(
-            navigation_uid(&format!("skillshub://repository/{uid}?tab=notebook")),
+            navigation_uid(&format!("arsenal://repository/{uid}?tab=notebook")),
             Some(uid.into())
         );
         for uri in [
-            "skillshub://repository/1",
-            "skillshub://repository/../../file",
+            "arsenal://repository/1",
+            "arsenal://repository/../../file",
             "https://repository/00000000-0000-4000-8000-000000000001",
-            "skillshub://repository/00000000-0000-4000-8000-000000000001?tab=other",
+            "arsenal://repository/00000000-0000-4000-8000-000000000001?tab=other",
         ] {
             assert!(navigation_uid(uri).is_none());
         }
@@ -1449,7 +1469,7 @@ fn yaml_templates_keep_types_escape_values_and_protect_identity() {
     repo.description = "Quotes: \"hello\"\ncustom: injected".into();
     repo.tags = vec!["a:b".into(), "space tag".into()];
     repo.stars = Some(42);
-    let template = "---\nname: {{fullName}}\ndescription: {{description}}\ntags: {{tags}}\nstars: {{stars}}\nstatus: draft\nskillshub_repository_id: overridden\nskillshub_uri: https://example.com\n---\n";
+    let template = "---\nname: {{fullName}}\ndescription: {{description}}\ntags: {{tags}}\nstars: {{stars}}\nstatus: draft\narsenal_repository_id: overridden\narsenal_uri: https://example.com\n---\n";
     let original = "---\n# user comment\ncustom: keep\nstatus: old\n---\n# Body\n";
     let result = properties_with_template(original, &repo, &[], template).unwrap();
     let (_, front, body) = parts(&result).unwrap();
@@ -1465,18 +1485,12 @@ fn yaml_templates_keep_types_escape_values_and_protect_identity() {
     assert_eq!(data["custom"].as_str(), Some("keep"));
     assert_eq!(data["status"].as_str(), Some("draft"));
     assert_eq!(
-        data["skillshub_repository_id"].as_str(),
+        data["arsenal_repository_id"].as_str(),
         Some(repo.repository_uid.as_str())
     );
     assert_eq!(
-        data["skillshub_uri"].as_str(),
-        Some(
-            format!(
-                "skillshub://repository/{}?tab=notebook",
-                repo.repository_uid
-            )
-            .as_str()
-        )
+        data["arsenal_uri"].as_str(),
+        Some(format!("arsenal://repository/{}?tab=notebook", repo.repository_uid).as_str())
     );
     assert!(front.contains("name: example/project"));
     for invalid in [

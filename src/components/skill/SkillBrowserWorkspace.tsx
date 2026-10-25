@@ -30,7 +30,7 @@ function readExpanded(key: string): Set<string> {
   return new Set(Array.isArray(saved) ? saved.filter((value): value is string => typeof value === "string") : []);
 }
 function readWidth(): number {
-  const saved = readPreference<unknown>("skillshub.browser.width", 45);
+  const saved = readPreference<unknown>("arsenal.browser.width", 45);
   return typeof saved === "number" && Number.isFinite(saved) ? Math.min(70, Math.max(30, saved)) : 45;
 }
 function writePreference(key: string, value: unknown) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* Keep in-memory state. */ } }
@@ -41,7 +41,7 @@ export function SkillBrowserWorkspace({ visibleColumns:fixedColumns, emptyMessag
   const { pathname } = useLocation();
   const notebooks = useNotebookStore(state => state.rows);
   useEffect(() => { void useNotebookStore.getState().load(); }, []);
-  const key = `skillshub.browser.${storageKey}.${agentId ?? ""}`;
+  const key = `arsenal.browser.${storageKey}.${agentId ?? ""}`;
   const [flatPreference, setFlatPreference] = useState(() => readPreference(`${key}.flat`, false));
   const flat = forceFlat || (allowFlatView && flatPreference);
   const scrollPositions = useRef<{key: string; tree?: number; flat?: number}>({key});
@@ -68,8 +68,8 @@ export function SkillBrowserWorkspace({ visibleColumns:fixedColumns, emptyMessag
     return () => window.removeEventListener("arsenal-open-notebook", open);
   }, []);
   const [width, setWidth] = useState(readWidth);
-  const [collapsed, updateCollapsed] = useState(()=>readPreference("skillshub.browser.collapsed",false));
-  const setCollapsed = (value:boolean) => {updateCollapsed(value);writePreference("skillshub.browser.collapsed",value);};
+  const [collapsed, updateCollapsed] = useState(()=>readPreference("arsenal.browser.collapsed",false));
+  const setCollapsed = (value:boolean) => {updateCollapsed(value);writePreference("arsenal.browser.collapsed",value);};
   const root = useRef<HTMLDivElement>(null);
   const listScroll = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -189,7 +189,7 @@ export function SkillBrowserWorkspace({ visibleColumns:fixedColumns, emptyMessag
   </section>;
   function resize(clientX: number) {
     const bounds = root.current?.getBoundingClientRect(); if(!bounds) return;
-    const next = Math.min(70,Math.max(30,(bounds.right-clientX)/bounds.width*100)); setWidth(next); writePreference("skillshub.browser.width",next);
+    const next = Math.min(70,Math.max(30,(bounds.right-clientX)/bounds.width*100)); setWidth(next); writePreference("arsenal.browser.width",next);
   }
   const viewControl = allowFlatView ? <Button type="button" size="icon-sm" variant="ghost" title={t(flat ? "browser.groupedView" : "browser.flatView")} aria-label={t(flat ? "browser.groupedView" : "browser.flatView")} aria-pressed={flat} onClick={switchView}>{flat ? <FolderTree className="size-4"/> : <List className="size-4"/>}</Button> : null;
   return <div ref={root} className="flex min-h-0 min-w-0 flex-1 overflow-hidden" data-testid="skill-browser-workspace">
@@ -216,7 +216,7 @@ export function SkillBrowserWorkspace({ visibleColumns:fixedColumns, emptyMessag
         onPointerDown={e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);}}
         onPointerMove={e=>{if(e.currentTarget.hasPointerCapture(e.pointerId))resize(e.clientX);}}
         onPointerUp={e=>{if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);}}
-        onKeyDown={e=>{if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();const next=Math.min(70,Math.max(30,width+(e.key==="ArrowLeft"?2:-2)));setWidth(next);writePreference("skillshub.browser.width",next);}}}/>
+        onKeyDown={e=>{if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();const next=Math.min(70,Math.max(30,width+(e.key==="ArrowLeft"?2:-2)));setWidth(next);writePreference("arsenal.browser.width",next);}}}/>
       <aside style={{flexBasis:`${width}%`}} className="flex min-w-0 shrink-0 flex-col overflow-hidden" aria-label={t("browser.preview")}>
         <div role="tablist" className="flex h-11 shrink-0 items-stretch gap-4 border-b border-border px-4">
           {((selectedSkill ? ["overview","document"] : !collectionsMode && selectedFolder && !selectedFolder.overviewOnly ? ["overview","document", ...(canUseNotebook(selectedFolder) ? ["notebook"] : [])] : ["overview"]) as Tab[]).map(value=><button role="tab" aria-selected={activeTab===value} key={value} onClick={()=>{setTab(value);writePreference("arsenal.browser.tab",value);}} className={cn("inline-flex items-center gap-2 border-b-2 border-transparent px-1 text-sm font-semibold text-muted-foreground",activeTab===value&&"border-primary text-primary")}>{value === "notebook" ? <ActionIcon action="notebook"/> : <ActionIcon action={value === "document" ? "document" : "info"}/>}{t(`browser.${value}`)}</button>)}

@@ -14,7 +14,7 @@ function Harness() {
   );
 }
 it("hides clear filters while collapsed and preserves the selection until cleared", () => {
-  localStorage.removeItem("skillshub.tags.expanded");
+  localStorage.removeItem("arsenal.tags.expanded");
   render(<Harness />);
   const clear = screen.getByRole("button", { name: "清除筛选" });
   expect(clear).toBeEnabled();

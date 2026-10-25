@@ -805,7 +805,7 @@ fn parse_webdav_modified_at(value: Option<&str>) -> Option<DateTime<Utc>> {
 }
 
 fn generated_backup_timestamp(name: &str) -> Option<NaiveDateTime> {
-    let timestamp = name.strip_prefix("skillshub-backup-")?;
+    let timestamp = name.strip_prefix("arsenal-backup-")?;
     let timestamp = timestamp
         .strip_suffix(".zip")
         .or_else(|| timestamp.strip_suffix(".json"))?;
@@ -834,10 +834,7 @@ fn listed_webdav_modified_at(value: Option<&str>) -> Option<String> {
 }
 
 fn generated_backup_filename() -> String {
-    format!(
-        "skillshub-backup-{}.zip",
-        Local::now().format("%Y%m%d%H%M%S")
-    )
+    format!("arsenal-backup-{}.zip", Local::now().format("%Y%m%d%H%M%S"))
 }
 
 fn write_backup_archive_to_path(dest_path: &str, archive: &[u8]) -> Result<(), String> {
@@ -2245,7 +2242,7 @@ mod tests {
             note_id: Some(note_id.clone()),
             vault_key: "default".into(),
             relative_path: "Missing Vault/renamed.md".into(),
-            obsidian_uri: format!("obsidian://skillshub-note?id={note_id}"),
+            obsidian_uri: format!("obsidian://arsenal-note?id={note_id}"),
         });
         notebooks::put(&pool, &row).await.unwrap();
         let backup = export_app_backup_data_impl(&pool, repository_backup_options())
@@ -3760,10 +3757,10 @@ mod tests {
     #[test]
     fn webdav_normalize_remote_path_rejects_absolute_and_unc_like_values() {
         for value in [
-            "/backups/skillshub-backup.json",
+            "/backups/arsenal-backup.json",
             r"\server\share\backup.json",
-            r"C:\backups\skillshub-backup.json",
-            "C:/backups/skillshub-backup.json",
+            r"C:\backups\arsenal-backup.json",
+            "C:/backups/arsenal-backup.json",
             r"safe\..\secret.json",
         ] {
             assert!(
@@ -3776,8 +3773,8 @@ mod tests {
     #[test]
     fn generated_backup_filenames_use_compact_timestamp_and_zip_suffix() {
         let first = generated_backup_filename();
-        assert_eq!(first.len(), "skillshub-backup-".len() + 14 + ".zip".len());
-        assert!(first.starts_with("skillshub-backup-"));
+        assert_eq!(first.len(), "arsenal-backup-".len() + 14 + ".zip".len());
+        assert!(first.starts_with("arsenal-backup-"));
         assert!(first.ends_with(".zip"));
         assert!(generated_backup_timestamp(&first).is_some());
     }
@@ -3811,13 +3808,13 @@ mod tests {
     #[test]
     fn webdav_normalize_remote_path_accepts_nested_zip_backup() {
         let result =
-            normalize_webdav_remote_path("backups/skillshub-backup.zip").expect("normalized path");
-        assert_eq!(result, "backups/skillshub-backup.zip");
+            normalize_webdav_remote_path("backups/arsenal-backup.zip").expect("normalized path");
+        assert_eq!(result, "backups/arsenal-backup.zip");
     }
 
     #[test]
     fn generated_backup_timestamp_accepts_legacy_json_suffix() {
-        let timestamp = generated_backup_timestamp("skillshub-backup-2026-07-15-120000-old.json");
+        let timestamp = generated_backup_timestamp("arsenal-backup-2026-07-15-120000-old.json");
         assert!(timestamp.is_some());
     }
 
@@ -3833,10 +3830,10 @@ mod tests {
             base_url: "https://example.com/dav".to_string(),
             username: None,
             password: None,
-            remote_dir: "skillshub".to_string(),
+            remote_dir: "arsenal".to_string(),
         };
         let url = build_webdav_directory_url(&config).expect("directory url");
-        assert_eq!(url, "https://example.com/dav/skillshub/");
+        assert_eq!(url, "https://example.com/dav/arsenal/");
     }
 
     #[test]
@@ -3911,7 +3908,7 @@ mod tests {
                 <d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat>
               </d:response>
               <d:response>
-                <d:href>/dav/backups/skillshub-backup.json</d:href>
+                <d:href>/dav/backups/arsenal-backup.json</d:href>
                 <d:propstat>
                   <d:prop>
                     <d:getcontentlength>42</d:getcontentlength>
@@ -3928,8 +3925,8 @@ mod tests {
         assert_eq!(
             files,
             vec![WebDavBackupFile {
-                name: "skillshub-backup.json".to_string(),
-                remote_path: "skillshub-backup.json".to_string(),
+                name: "arsenal-backup.json".to_string(),
+                remote_path: "arsenal-backup.json".to_string(),
                 size: Some(42),
                 modified_at: Some("2026-07-15T08:00:00+00:00".to_string()),
             }]
@@ -3941,15 +3938,15 @@ mod tests {
         let xml = r#"
             <d:multistatus xmlns:d="DAV:">
               <d:response>
-                <d:href>/dav/backups/skillshub-backup%20copy.json</d:href>
+                <d:href>/dav/backups/arsenal-backup%20copy.json</d:href>
               </d:response>
             </d:multistatus>
         "#;
 
         let files = parse_webdav_backup_files(xml).expect("PROPFIND XML");
 
-        assert_eq!(files[0].name, "skillshub-backup copy.json");
-        assert_eq!(files[0].remote_path, "skillshub-backup copy.json");
+        assert_eq!(files[0].name, "arsenal-backup copy.json");
+        assert_eq!(files[0].remote_path, "arsenal-backup copy.json");
         let url = build_webdav_url(
             &WebDavConfig {
                 base_url: "https://example.com/dav".to_string(),
@@ -3960,7 +3957,7 @@ mod tests {
             &files[0].remote_path,
         )
         .expect("WebDAV URL");
-        assert!(url.ends_with("/dav/backups/skillshub-backup%20copy.json"));
+        assert!(url.ends_with("/dav/backups/arsenal-backup%20copy.json"));
     }
 
     #[test]
@@ -3968,7 +3965,7 @@ mod tests {
         let xml = r#"
             <d:multistatus xmlns:d="DAV:">
               <d:response>
-                <d:href>/dav/backups/skillshub-backup%2Fnested.json</d:href>
+                <d:href>/dav/backups/arsenal-backup%2Fnested.json</d:href>
               </d:response>
             </d:multistatus>
         "#;
@@ -3981,11 +3978,11 @@ mod tests {
         let xml = r#"
             <d:multistatus xmlns:d="DAV:">
               <d:response>
-                <d:href>/dav/backups/skillshub-backup-2026-07-15-100000.json</d:href>
+                <d:href>/dav/backups/arsenal-backup-2026-07-15-100000.json</d:href>
                 <d:propstat><d:prop><d:getlastmodified>Wed, 15 Jul 2026 10:00:00 GMT</d:getlastmodified></d:prop></d:propstat>
               </d:response>
               <d:response>
-                <d:href>/dav/backups/skillshub-backup-2026-07-16-090000.json</d:href>
+                <d:href>/dav/backups/arsenal-backup-2026-07-16-090000.json</d:href>
                 <d:propstat><d:prop><d:getlastmodified>Thu, 16 Jul 2026 09:00:00 GMT</d:getlastmodified></d:prop></d:propstat>
               </d:response>
             </d:multistatus>
@@ -3999,8 +3996,8 @@ mod tests {
                 .map(|file| file.name.as_str())
                 .collect::<Vec<_>>(),
             vec![
-                "skillshub-backup-2026-07-16-090000.json",
-                "skillshub-backup-2026-07-15-100000.json",
+                "arsenal-backup-2026-07-16-090000.json",
+                "arsenal-backup-2026-07-15-100000.json",
             ]
         );
     }
@@ -4010,17 +4007,17 @@ mod tests {
         let xml = r#"
             <d:multistatus xmlns:d="DAV:">
               <d:response>
-                <d:href>/dav/backups/skillshub-backup-2026-01-01-010000.json</d:href>
+                <d:href>/dav/backups/arsenal-backup-2026-01-01-010000.json</d:href>
               </d:response>
               <d:response>
-                <d:href>/dav/backups/skillshub-backup-2026-07-01-010000.json</d:href>
+                <d:href>/dav/backups/arsenal-backup-2026-07-01-010000.json</d:href>
                 <d:propstat><d:prop><d:getlastmodified>not a date</d:getlastmodified></d:prop></d:propstat>
               </d:response>
               <d:response>
-                <d:href>/dav/backups/skillshub-backup-2026-06-01-010000.json</d:href>
+                <d:href>/dav/backups/arsenal-backup-2026-06-01-010000.json</d:href>
               </d:response>
               <d:response>
-                <d:href>/dav/backups/skillshub-backup-2026-08-01-010000.json</d:href>
+                <d:href>/dav/backups/arsenal-backup-2026-08-01-010000.json</d:href>
                 <d:propstat><d:prop><d:getlastmodified>Thu, 01 Jan 2026 00:00:00 GMT</d:getlastmodified></d:prop></d:propstat>
               </d:response>
             </d:multistatus>
@@ -4034,10 +4031,10 @@ mod tests {
                 .map(|file| file.name.as_str())
                 .collect::<Vec<_>>(),
             vec![
-                "skillshub-backup-2026-08-01-010000.json",
-                "skillshub-backup-2026-07-01-010000.json",
-                "skillshub-backup-2026-06-01-010000.json",
-                "skillshub-backup-2026-01-01-010000.json",
+                "arsenal-backup-2026-08-01-010000.json",
+                "arsenal-backup-2026-07-01-010000.json",
+                "arsenal-backup-2026-06-01-010000.json",
+                "arsenal-backup-2026-01-01-010000.json",
             ]
         );
     }
@@ -4047,11 +4044,11 @@ mod tests {
         let xml = r#"
             <d:multistatus xmlns:d="DAV:">
               <d:response>
-                <d:href>/dav/backups/skillshub-backup-2026-07-17-090000.json</d:href>
+                <d:href>/dav/backups/arsenal-backup-2026-07-17-090000.json</d:href>
                 <d:propstat><d:prop><d:getlastmodified>Wed, 15 Jul 2026 08:00:00 GMT</d:getlastmodified></d:prop></d:propstat>
               </d:response>
               <d:response>
-                <d:href>/dav/backups/skillshub-backup-2026-07-15-100000.json</d:href>
+                <d:href>/dav/backups/arsenal-backup-2026-07-15-100000.json</d:href>
                 <d:propstat><d:prop><d:getlastmodified>Thu, 16 Jul 2026 09:00:00 GMT</d:getlastmodified></d:prop></d:propstat>
               </d:response>
             </d:multistatus>
@@ -4060,7 +4057,7 @@ mod tests {
         let files = parse_webdav_backup_files(xml).expect("PROPFIND XML");
         assert_eq!(
             files.first().map(|file| file.name.as_str()),
-            Some("skillshub-backup-2026-07-17-090000.json")
+            Some("arsenal-backup-2026-07-17-090000.json")
         );
     }
 
@@ -4722,7 +4719,7 @@ mod tests {
             base_url: format!("http://{address}/dav"),
             username: Some("user".to_string()),
             password: Some("token".to_string()),
-            remote_dir: "skillshub".to_string(),
+            remote_dir: "arsenal".to_string(),
         };
         let uploaded = upload_webdav_backup_impl(config, b"zip-bytes".to_vec())
             .await
@@ -4752,7 +4749,7 @@ mod tests {
             base_url: "https://example.com/dav".to_string(),
             username: None,
             password: None,
-            remote_dir: "skillshub".to_string(),
+            remote_dir: "arsenal".to_string(),
         };
 
         let error = delete_webdav_backup_impl(config, "../escape.zip")
@@ -4768,7 +4765,7 @@ mod tests {
             base_url: "".to_string(),
             username: None,
             password: None,
-            remote_dir: "skillshub".to_string(),
+            remote_dir: "arsenal".to_string(),
         };
 
         let error = test_webdav_connection_impl(config)

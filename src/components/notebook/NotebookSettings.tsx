@@ -18,7 +18,7 @@ export function NotebookSettings() {
   const [template, setTemplate] = useState(defaultTemplate.template);
   const [busy, setBusy] = useState(false);
   useEffect(() => { void useNotebookStore.getState().loadConfig(); }, []);
-  useEffect(() => { setVault(config.obsidian_vault_path ?? ""); setFolder(config.obsidian_note_folder ?? "Arsenal"); setTemplate(config.obsidian_property_template || defaultTemplate.template); }, [config]);
+  useEffect(() => { setVault(config.obsidian_vault_path ?? ""); setFolder(config.obsidian_note_folder ?? "Arsenal"); setTemplate(config.arsenal_property_template || defaultTemplate.template); }, [config]);
   return (
     <Card>
       <details className="group/notebook-settings">

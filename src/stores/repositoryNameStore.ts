@@ -10,6 +10,6 @@ export const useRepositoryNameStore = create<{
       repositoryFirst: false,
       toggle: () => set(state => ({ repositoryFirst: !state.repositoryFirst })),
     }),
-    { name: "skillshub-repository-name-format" },
+    { name: "arsenal-repository-name-format" },
   ),
 );

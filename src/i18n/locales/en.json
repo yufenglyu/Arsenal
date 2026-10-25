@@ -855,7 +855,7 @@
     "webdavUsernameLabel": "Username",
     "webdavPasswordLabel": "Password or token",
     "webdavRemoteDirLabel": "Remote directory",
-    "webdavRemoteDirPlaceholder": "skillshub",
+    "webdavRemoteDirPlaceholder": "arsenal",
     "webdavSaveConfig": "Save config",
     "webdavTestConnection": "Test connection",
     "webdavRefresh": "View remote",
@@ -1664,7 +1664,7 @@
       "noteFolder": "Folder for new notes",
       "chooseVault": "Choose vault",
       "registerProtocol": "Repair links",
-      "protocolHint": "Windows releases register or repair skillshub:// on startup; the most recently started release handles links when multiple copies exist. Repair manually if links still fail. Vault paths stay on this device.",
+      "protocolHint": "Windows releases register or repair arsenal:// on startup; the most recently started release handles links when multiple copies exist. Repair manually if links still fail. Vault paths stay on this device.",
       "backupHint": "Arsenal backups retain note links, but exclude Obsidian bodies and local vault paths. Back up your vault separately.",
       "link": "Link Obsidian note",
       "linkHint": "New files copy the current draft; linking an existing file preserves its body. Keys in the property template are updated, while other properties remain. The old internal notebook is retained until explicitly cleared.",
@@ -1707,7 +1707,7 @@
       "setupHint": "Configure your Obsidian vault in Settings first.",
       "propertyTemplate": "Property template",
       "resetTemplate": "Reset template",
-      "templateHint": "Enclose YAML properties in ---. Placeholders: {{noteId}}, {{obsidianUri}}, {{repositoryUid}}, {{skillshubUri}}, {{fullName}}, {{url}}, {{description}}, {{stars}}, {{tags}}, {{categories}}. Use each placeholder as a whole YAML value without quotes; text, numbers and lists are escaped and retain their types. Custom properties are supported. skillshub_schema, skillshub_repository_id and skillshub_uri are maintained by Arsenal. Linking or explicitly updating properties applies template keys; other existing properties and the body are preserved. Removing a template key does not delete that property from existing files. Note ID, repository ID, navigation links and schema version are protected fields."
+      "templateHint": "Enclose YAML properties in ---. Placeholders: {{noteId}}, {{obsidianUri}}, {{repositoryUid}}, {{arsenalUri}}, {{fullName}}, {{url}}, {{description}}, {{stars}}, {{tags}}, {{categories}}. Use each placeholder as a whole YAML value without quotes; text, numbers and lists are escaped and retain their types. Custom properties are supported. arsenal_schema, arsenal_repository_id and arsenal_uri are maintained by Arsenal. Linking or explicitly updating properties applies template keys; other existing properties and the body are preserved. Removing a template key does not delete that property from existing files. Note ID, repository ID, navigation links and schema version are protected fields."
     },
     "notebook": "Notes",
     "emptyNotebook": "No notes yet",
@@ -1780,7 +1780,7 @@
     }
   },
   "notebookSettings": {
-    "templateIdentity": "Property templates use skillshub_* keys and skillshub:// return links with the Arsenal Obsidian plugin.",
+    "templateIdentity": "Property templates use arsenal_* keys and arsenal:// return links with the Arsenal Obsidian plugin.",
     "hint": "One Markdown notebook per repository. Linked notes are edited in the Obsidian file with revision checks. Use unquoted template placeholders.",
     "vault": "Obsidian vault directory",
     "folder": "New note folder",

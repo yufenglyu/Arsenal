@@ -58,7 +58,7 @@ describe("settingsStore", () => {
         baseUrl: "",
         username: "",
         password: "",
-        remoteDir: "skillshub",
+        remoteDir: "arsenal",
       },
       isLoadingWebDavConfig: false,
       isSavingWebDavConfig: false,
@@ -399,7 +399,7 @@ describe("settingsStore", () => {
       baseUrl: "https://example.com/dav",
       username: "user",
       password: "secret",
-      remoteDir: "skillshub",
+      remoteDir: "arsenal",
     };
 
     await useSettingsStore.getState().listWebDavBackups(config);
@@ -413,7 +413,7 @@ describe("settingsStore", () => {
       baseUrl: "https://example.com/dav",
       username: "user",
       password: "secret",
-      remoteDir: "skillshub",
+      remoteDir: "arsenal",
     };
 
     await useSettingsStore.getState().testWebDavConnection(config);
@@ -423,8 +423,8 @@ describe("settingsStore", () => {
 
   it("uploadWebDavBackup calls upload_webdav_backup with config and options", async () => {
     const file = {
-      name: "skillshub-backup.zip",
-      remotePath: "skillshub-backup.zip",
+      name: "arsenal-backup.zip",
+      remotePath: "arsenal-backup.zip",
       size: 100,
       modifiedAt: "2026-07-15T00:00:00Z",
     };
@@ -433,7 +433,7 @@ describe("settingsStore", () => {
       baseUrl: "https://example.com/dav",
       username: "",
       password: "",
-      remoteDir: "skillshub",
+      remoteDir: "arsenal",
     };
     const options = {
       includeResourceLibrary: true,
@@ -453,16 +453,16 @@ describe("settingsStore", () => {
       baseUrl: "https://example.com/dav",
       username: "user",
       password: "secret",
-      remoteDir: "skillshub",
+      remoteDir: "arsenal",
     };
 
     const backup = await useSettingsStore
       .getState()
-      .downloadWebDavBackup(config, "skillshub-backup.zip");
+      .downloadWebDavBackup(config, "arsenal-backup.zip");
 
     expect(invoke).toHaveBeenCalledWith("download_webdav_backup", {
       config,
-      remotePath: "skillshub-backup.zip",
+      remotePath: "arsenal-backup.zip",
     });
     expect(backup).toEqual(new Uint8Array([80, 75, 3, 4]));
   });
@@ -473,16 +473,16 @@ describe("settingsStore", () => {
       baseUrl: "https://example.com/dav",
       username: "user",
       password: "secret",
-      remoteDir: "skillshub",
+      remoteDir: "arsenal",
     };
 
     await useSettingsStore
       .getState()
-      .deleteWebDavBackup(config, "skillshub-backup.zip");
+      .deleteWebDavBackup(config, "arsenal-backup.zip");
 
     expect(invoke).toHaveBeenCalledWith("delete_webdav_backup", {
       config,
-      remotePath: "skillshub-backup.zip",
+      remotePath: "arsenal-backup.zip",
     });
   });
 
@@ -598,15 +598,15 @@ describe("settingsStore", () => {
   });
 
   it("updateConfigDir persists the config folder", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce("D:/Apps/SkillsHub/.arsenal");
+    vi.mocked(invoke).mockResolvedValueOnce("D:/Apps/Arsenal/.arsenal");
 
-    const updated = await useSettingsStore.getState().updateConfigDir("D:/Apps/SkillsHub");
+    const updated = await useSettingsStore.getState().updateConfigDir("D:/Apps/Arsenal");
 
     expect(invoke).toHaveBeenCalledWith("update_app_data_dir", {
-      path: "D:/Apps/SkillsHub",
+      path: "D:/Apps/Arsenal",
     });
-    expect(updated).toBe("D:/Apps/SkillsHub/.arsenal");
-    expect(useSettingsStore.getState().configDir).toBe("D:/Apps/SkillsHub/.arsenal");
+    expect(updated).toBe("D:/Apps/Arsenal/.arsenal");
+    expect(useSettingsStore.getState().configDir).toBe("D:/Apps/Arsenal/.arsenal");
   });
 });
 

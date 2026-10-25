@@ -35,9 +35,9 @@ export function CollectionTree({count, onExport, onExpandedChange}: {count?: num
     return keys;
   },[skills,libraryDir]);
   const tree=useRef<HTMLDivElement>(null); const menuRef=useRef<HTMLDivElement>(null);
-  const [closed,setClosed]=useState<Set<string>>(()=>{try{return new Set(JSON.parse(localStorage.getItem('skillshub.groups.closed')??'[]'));}catch{return new Set();}});
-  const [rootOpen,setRootOpen]=useState(()=>{try{return localStorage.getItem('skillshub.groups.open')!=='false';}catch{return true;}});
-  useEffect(()=>{try{localStorage.setItem('skillshub.groups.open',String(rootOpen));}catch{/* Keep session state. */}},[rootOpen]);
+  const [closed,setClosed]=useState<Set<string>>(()=>{try{return new Set(JSON.parse(localStorage.getItem('arsenal.groups.closed')??'[]'));}catch{return new Set();}});
+  const [rootOpen,setRootOpen]=useState(()=>{try{return localStorage.getItem('arsenal.groups.open')!=='false';}catch{return true;}});
+  useEffect(()=>{try{localStorage.setItem('arsenal.groups.open',String(rootOpen));}catch{/* Keep session state. */}},[rootOpen]);
   const [controlHeld,setControlHeld]=useState(false);
   const [menu,setMenu]=useState<{item:Collection|null;x:number;y:number}|null>(null);
   const [edit,setEdit]=useState<{action:'create'|'rename'|'delete';item?:Collection;parentId?:string|null}|null>(null);
@@ -46,7 +46,7 @@ export function CollectionTree({count, onExport, onExpandedChange}: {count?: num
   const {collections,currentDetail,loadGroupDetails}=store;
   const groupError=t('groups.operationFailed');
   useEffect(()=>{void loadGroupDetails().catch(()=>toast.error(groupError));},[collections,currentDetail,loadGroupDetails,groupError]);
-  useEffect(()=>{try{localStorage.setItem('skillshub.groups.closed',JSON.stringify([...closed]));}catch{/* Keep session state. */}},[closed]);
+  useEffect(()=>{try{localStorage.setItem('arsenal.groups.closed',JSON.stringify([...closed]));}catch{/* Keep session state. */}},[closed]);
   useEffect(()=>{
     const down=(e:KeyboardEvent)=>{if(e.key==='Control'||e.key==='Meta')setControlHeld(true);};
     const up=(e:KeyboardEvent)=>{if(!e.ctrlKey&&!e.metaKey)setControlHeld(false);};const clear=()=>setControlHeld(false);
@@ -160,7 +160,7 @@ export function CollectionTree({count, onExport, onExpandedChange}: {count?: num
       </div></>}
       <div role="separator" className="my-1 border-t border-border"/>
       <div role="group" aria-label={t('groups.menu.view')}>
-        <button role="menuitemcheckbox" aria-checked={store.includeDescendants} className="group-menu-item" onClick={()=>{try{localStorage.setItem('skillshub.groups.includeDescendants',String(!store.includeDescendants));}catch{/* Keep session state. */}useCollectionStore.setState({includeDescendants:!store.includeDescendants});setMenu(null);}}><ListTree/>{t('groups.includeChildren')}<Check className={cn('ml-auto',!store.includeDescendants&&'invisible')}/></button>
+        <button role="menuitemcheckbox" aria-checked={store.includeDescendants} className="group-menu-item" onClick={()=>{try{localStorage.setItem('arsenal.groups.includeDescendants',String(!store.includeDescendants));}catch{/* Keep session state. */}useCollectionStore.setState({includeDescendants:!store.includeDescendants});setMenu(null);}}><ListTree/>{t('groups.includeChildren')}<Check className={cn('ml-auto',!store.includeDescendants&&'invisible')}/></button>
         <button role="menuitem" className="group-menu-item" onClick={()=>{expandAll();setMenu(null);}}><Plus/>{t('groups.expandAll')}</button>
         <button role="menuitem" className="group-menu-item" onClick={()=>{collapseAll();setMenu(null);}}><Minus/>{t('groups.collapseAll')}</button>
       </div>

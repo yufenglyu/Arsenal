@@ -12,15 +12,11 @@ esac
 find_src() {
   script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
   for candidate in \
+    "/usr/share/arsenal/packaged-config" \
     "/usr/lib/arsenal/packaged-config" \
     "/usr/lib/Arsenal/packaged-config" \
     "/usr/lib/arsenal/resources/packaged-config" \
     "/usr/lib/Arsenal/resources/packaged-config" \
-    "/usr/share/skillshub/packaged-config" \
-    "/usr/lib/skillshub/packaged-config" \
-    "/usr/lib/SkillsHub/packaged-config" \
-    "/usr/lib/skillshub/resources/packaged-config" \
-    "/usr/lib/SkillsHub/resources/packaged-config" \
     "$script_dir/packaged-config" \
     "$script_dir/resources/packaged-config" \
     "$script_dir/../resources/packaged-config"
@@ -62,8 +58,8 @@ lookup_install_user() {
 }
 
 resolve_dest() {
-  if [ -n "${SKILLSHUB_CONFIG_DIR:-}" ]; then
-    printf '%s\n' "$SKILLSHUB_CONFIG_DIR"
+  if [ -n "${ARSENAL_CONFIG_DIR:-}" ]; then
+    printf '%s\n' "$ARSENAL_CONFIG_DIR"
     return 0
   fi
 
@@ -107,7 +103,6 @@ copy_missing() {
 
 src=$(find_src) || exit 0
 dest=$(resolve_dest) || exit 0
-[ ! -d "$(dirname "$dest")/.skillshub" ] || exit 0
 copy_missing "$src" "$dest"
 
 if [ "$(id -u)" -eq 0 ]; then

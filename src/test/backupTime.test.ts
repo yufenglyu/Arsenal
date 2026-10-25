@@ -26,7 +26,7 @@ describe("backupTime", () => {
 
   it("names local backup files with the system clock", () => {
     expect(defaultLocalBackupFilename(new Date(2026, 7, 19, 21, 56, 38))).toBe(
-      "skillshub-backup-2026-08-19-215638.zip"
+      "arsenal-backup-2026-08-19-215638.zip"
     );
   });
 });

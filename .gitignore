@@ -90,11 +90,7 @@ desktop.ini
 AGENTS.md
 HANDOFF.md
 
-# Legacy data remains private during migration
-.skillshub/
 
 .arsenal-migration.lock
 .arsenal-config-path
 arsenal-config-path
-.skillshub-config-path
-skillshub-config-path

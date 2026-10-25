@@ -6,7 +6,7 @@ import { useThemeStore, type ThemeMode } from "../stores/themeStore";
 function resetStore() {
   useThemeStore.setState({ mode: "system", resolvedTheme: "dark" });
   try {
-    localStorage.removeItem("skillshub-theme-mode");
+    localStorage.removeItem("arsenal-theme-mode");
     localStorage.removeItem("catppuccin-flavor");
     localStorage.removeItem("catppuccin-accent");
   } catch {
@@ -76,7 +76,7 @@ describe("themeStore", () => {
 
   it("init loads config mode and ignores browser storage", async () => {
     vi.mocked(invoke).mockResolvedValue("light");
-    localStorage.setItem("skillshub-theme-mode", "light");
+    localStorage.setItem("arsenal-theme-mode", "light");
     localStorage.setItem("catppuccin-accent", "green");
 
     await useThemeStore.getState().init();
@@ -88,7 +88,7 @@ describe("themeStore", () => {
 
   it("init falls back to system when config mode is invalid", async () => {
     vi.mocked(invoke).mockResolvedValue("mocha");
-    localStorage.setItem("skillshub-theme-mode", "mocha");
+    localStorage.setItem("arsenal-theme-mode", "mocha");
     const spy = vi.spyOn(window, "matchMedia");
     spy.mockReturnValue({ matches: false } as MediaQueryList);
 

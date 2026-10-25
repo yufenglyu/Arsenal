@@ -426,8 +426,8 @@ describe("SkillDetailView", () => {
       detail: {
         ...mockDetail,
         is_central: true,
-        file_path: "D:/SkillsHub/repository/owner/repo/frontend-design/SKILL.md",
-        dir_path: "D:/SkillsHub/repository/owner/repo/frontend-design",
+        file_path: "D:/Arsenal/repository/owner/repo/frontend-design/SKILL.md",
+        dir_path: "D:/Arsenal/repository/owner/repo/frontend-design",
         canonical_path: "C:/Users/test/.agents/skills/frontend-design",
       },
     });
@@ -436,7 +436,7 @@ describe("SkillDetailView", () => {
     const metadataRegion = screen.getByRole("region", { name: /基本信息/i });
     expect(within(metadataRegion).getByText("存储路径")).toBeInTheDocument();
     expect(
-      within(metadataRegion).getByText("D:\\SkillsHub\\repository\\owner\\repo\\frontend-design")
+      within(metadataRegion).getByText("D:\\Arsenal\\repository\\owner\\repo\\frontend-design")
     ).toBeInTheDocument();
     expect(within(metadataRegion).getByText("当前安装路径")).toBeInTheDocument();
     expect(
@@ -449,8 +449,8 @@ describe("SkillDetailView", () => {
       detail: {
         ...mockDetail,
         is_central: false,
-        file_path: "D:/SkillsHub/repository/owner/repo/frontend-design/SKILL.md",
-        dir_path: "D:/SkillsHub/repository/owner/repo/frontend-design",
+        file_path: "D:/Arsenal/repository/owner/repo/frontend-design/SKILL.md",
+        dir_path: "D:/Arsenal/repository/owner/repo/frontend-design",
         canonical_path: "C:/Users/test/.cursor/skills/frontend-design",
       },
     });
@@ -458,7 +458,7 @@ describe("SkillDetailView", () => {
 
     const metadataRegion = screen.getByRole("region", { name: /基本信息/i });
     expect(
-      within(metadataRegion).getByText("D:\\SkillsHub\\repository\\owner\\repo\\frontend-design")
+      within(metadataRegion).getByText("D:\\Arsenal\\repository\\owner\\repo\\frontend-design")
     ).toBeInTheDocument();
     expect(within(metadataRegion).getByText("当前安装路径")).toBeInTheDocument();
     expect(

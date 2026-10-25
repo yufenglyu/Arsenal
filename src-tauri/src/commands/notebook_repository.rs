@@ -275,7 +275,12 @@ pub fn get_notebook_settings(
     Ok(crate::db::load_config(&state.db)?
         .settings
         .into_iter()
-        .filter(|(key, _)| key.starts_with("obsidian_"))
+        .filter(|(key, _)| {
+            matches!(
+                key.as_str(),
+                "obsidian_vault_path" | "obsidian_note_folder" | "arsenal_property_template"
+            )
+        })
         .collect())
 }
 #[tauri::command]
@@ -301,7 +306,7 @@ pub fn save_notebook_settings(
             .insert("obsidian_note_folder".into(), folder);
         config
             .settings
-            .insert("obsidian_property_template".into(), template);
+            .insert("arsenal_property_template".into(), template);
         Ok(())
     })
 }
