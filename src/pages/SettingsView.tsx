@@ -6,7 +6,7 @@ import { useAiConnectionStore, type AiConnections } from "@/stores/aiConnectionS
 import { X } from "lucide-react";
 import { AiPromptSettings } from "@/components/settings/AiPromptSettings";
 import { useCollectionStore } from "@/stores/collectionStore";
-import { ChangeEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Trash2, Pencil, Loader2, FolderOpen, AppWindow, Info, Database, Globe, Bot, MessageSquareText, ChevronDown, ChevronRight, KeyRound, Download, Upload, RefreshCw, ExternalLink, Save, Keyboard, RotateCcw, Plug } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
@@ -545,7 +545,8 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
   const listWebDavBackups = useSettingsStore((s) => s.listWebDavBackups);
   const testWebDavConnection = useSettingsStore((s) => s.testWebDavConnection);
   const uploadWebDavBackup = useSettingsStore((s) => s.uploadWebDavBackup);
-  const downloadWebDavBackup = useSettingsStore((s) => s.downloadWebDavBackup);
+  const restoreWebDavBackup = useSettingsStore((s) => s.restoreWebDavBackup);
+  const backupImportProgress = useSettingsStore((s) => s.backupImportProgress);
   const deleteWebDavBackup = useSettingsStore((s) => s.deleteWebDavBackup);
   const webDavConfig = useSettingsStore((s) => s.webDavConfig);
   const isSavingWebDavConfig = useSettingsStore((s) => s.isSavingWebDavConfig);
@@ -684,7 +685,6 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
   const [isUploadingWebDav, setIsUploadingWebDav] = useState(false);
   const [isImportingWebDav, setIsImportingWebDav] = useState(false);
   const [isDeletingWebDav, setIsDeletingWebDav] = useState(false);
-  const backupInputRef = useRef<HTMLInputElement | null>(null);
   const isBackupBusy = isExportingBackup || isImportingBackup || isRefreshingWebDav || isTestingWebDav || isUploadingWebDav || isImportingWebDav || isDeletingWebDav || isSavingWebDavConfig;
 
   // ── Load on mount ──────────────────────────────────────────────────────────
@@ -986,13 +986,12 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
     }
   }
 
-  async function handleImportBackup(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  async function handleImportBackup() {
     setIsImportingBackup(true);
     try {
-      const backup = new Uint8Array(await file.arrayBuffer());
-      await importAppBackup(backup);
+      const sourcePath = await openDialog({ multiple: false, filters: [{name: t("settings.backupTitle"), extensions: ["zip", "json"]}] });
+      if (typeof sourcePath !== "string") return;
+      await importAppBackup(sourcePath);
       await Promise.all([
         rescan(),
         loadScanDirectories(),
@@ -1002,10 +1001,9 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
       ]);
       toast.success(t("settings.backupImported"));
     } catch (err) {
-      toast.error(t("settings.backupImportError", { error: String(err) }));
+      toast.error(t("settings.backupImportError", { error: webDavErrorDetail(t, err) }));
     } finally {
       setIsImportingBackup(false);
-      if (backupInputRef.current) backupInputRef.current.value = "";
     }
   }
 
@@ -1121,8 +1119,7 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
     }
     setIsImportingWebDav(true);
     try {
-      const backup = await downloadWebDavBackup(currentWebDavConfig(), selectedWebDavPath);
-      await importAppBackup(backup, true);
+      await restoreWebDavBackup(currentWebDavConfig(), selectedWebDavPath);
       await Promise.all([
         loadResourceLibrary(),
         useCollectionStore.getState().loadCollections(),
@@ -1288,6 +1285,12 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
           </summary>
           <CardContent className="pt-4">
             <div className="space-y-4">
+              {(isImportingBackup || isImportingWebDav) && backupImportProgress && (
+                <p role="status" aria-live="polite" className="text-xs text-muted-foreground">
+                  {t(`settings.backupProgress.${backupImportProgress.phase}`)}
+                  {backupImportProgress.phase === "downloading" && ` · ${(backupImportProgress.completedBytes / 1048576).toFixed(1)} MiB${backupImportProgress.totalBytes ? ` / ${(backupImportProgress.totalBytes / 1048576).toFixed(1)} MiB` : ""}`}
+                </p>
+              )}
               <div className="rounded-lg border border-border/70 bg-background/40 p-4">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0">
@@ -1303,20 +1306,13 @@ export function SettingsView({ onClose }: {onClose?: () => void} = {}) {
                     </Button>
                     <Button
                       variant="outline"
-                      onClick={() => backupInputRef.current?.click()}
+                      onClick={handleImportBackup}
                       disabled={isBackupBusy}
                     >
                       {isImportingBackup ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
                       <span>{t("settings.importBackup")}</span>
                     </Button>
-                    <input
-                      ref={backupInputRef}
-                      type="file"
-                      accept="application/zip,.zip,application/json,.json"
-                      className="hidden"
-                      onChange={handleImportBackup}
-                      aria-label={t("settings.importBackup")}
-                    />
+
                   </div>
                 </div>
               </div>

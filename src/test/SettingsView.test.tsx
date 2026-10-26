@@ -42,7 +42,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { useSettingsStore } from "../stores/settingsStore";
+import { useSettingsStore, type BackupImportProgress } from "../stores/settingsStore";
 import { usePlatformStore } from "../stores/platformStore";
 import { useCentralSkillsStore } from "../stores/centralSkillsStore";
 import { useResourceLibraryStore } from "../stores/resourceLibraryStore";
@@ -127,11 +127,12 @@ function setupMocks({
   loadConfigDir = vi.fn(),
   updateConfigDir = vi.fn(),
   exportAppBackup = vi.fn(),
+  backupImportProgress = null as BackupImportProgress | null,
   importAppBackup = vi.fn(),
   listWebDavBackups = vi.fn(),
   testWebDavConnection = vi.fn(),
   uploadWebDavBackup = vi.fn(),
-  downloadWebDavBackup = vi.fn(),
+  restoreWebDavBackup = vi.fn(),
   deleteWebDavBackup = vi.fn(),
   webDavConfig = {
     baseUrl: "",
@@ -183,11 +184,12 @@ function setupMocks({
       loadConfigDir,
       updateConfigDir,
       exportAppBackup,
+      backupImportProgress,
       importAppBackup,
       listWebDavBackups,
       testWebDavConnection,
       uploadWebDavBackup,
-      downloadWebDavBackup,
+      restoreWebDavBackup,
       deleteWebDavBackup,
       webDavConfig,
       isLoadingWebDavConfig,
@@ -696,12 +698,44 @@ describe("SettingsView", () => {
     expect(listWebDavBackups).toHaveBeenCalledTimes(2);
   });
 
+  it("imports a local backup through the native path picker", async () => {
+    const importAppBackup = vi.fn().mockResolvedValue(undefined);
+    setupMocks({ importAppBackup });
+    mockOpenDialog.mockResolvedValueOnce("/backups/large.zip");
+    renderSettingsView();
+    fireEvent.click(screen.getByRole("button", {name: "导入备份"}));
+    await waitFor(() => expect(importAppBackup).toHaveBeenCalledWith("/backups/large.zip"));
+    expect(screen.queryByLabelText("导入备份", {selector: "input"})).not.toBeInTheDocument();
+  });
+
+  it("does not start a restore when the native picker is cancelled", async () => {
+    const importAppBackup = vi.fn();
+    setupMocks({ importAppBackup });
+    mockOpenDialog.mockResolvedValueOnce(null);
+    renderSettingsView();
+    fireEvent.click(screen.getByRole("button", {name: "导入备份"}));
+    await waitFor(() => expect(screen.getByRole("button", {name: "导入备份"})).not.toBeDisabled());
+    expect(importAppBackup).not.toHaveBeenCalled();
+  });
+
+  it("shows backend validation progress while keeping restore actions disabled", async () => {
+    setupMocks({
+      importAppBackup: vi.fn(() => new Promise<void>(() => {})),
+      backupImportProgress: {phase: "validating", completedBytes: 0, totalBytes: null},
+    });
+    mockOpenDialog.mockResolvedValueOnce("/backups/large.zip");
+    renderSettingsView();
+    fireEvent.click(screen.getByRole("button", {name: "导入备份"}));
+    expect(await screen.findByRole("status")).toHaveTextContent("正在校验备份");
+    expect(screen.getByRole("button", {name: "导入备份"})).toBeDisabled();
+    expect(screen.getByRole("button", {name: "导出备份"})).toBeDisabled();
+  });
+
   it("imports the selected WebDAV backup", async () => {
-    const downloadedBackup = new Uint8Array([80, 75, 3, 4]);
-    const downloadWebDavBackup = vi.fn().mockResolvedValue(downloadedBackup);
+    const restoreWebDavBackup = vi.fn().mockResolvedValue(undefined);
     const importAppBackup = vi.fn().mockResolvedValue(undefined);
     setupMocks({
-      downloadWebDavBackup,
+      restoreWebDavBackup,
       importAppBackup,
       listWebDavBackups: vi.fn().mockResolvedValue([
         {
@@ -724,12 +758,12 @@ describe("SettingsView", () => {
     fireEvent.click(screen.getByRole("button", { name: "导入选中" }));
 
     await waitFor(() => {
-      expect(downloadWebDavBackup).toHaveBeenCalledWith(
+      expect(restoreWebDavBackup).toHaveBeenCalledWith(
         expect.objectContaining({ baseUrl: "https://example.com/dav", remoteDir: "arsenal" }),
         "arsenal-backup.zip"
       );
     });
-    expect(importAppBackup).toHaveBeenCalledWith(downloadedBackup, true);
+    expect(importAppBackup).not.toHaveBeenCalled();
   });
 
   it("renders the saved github pat value and explanation copy", () => {

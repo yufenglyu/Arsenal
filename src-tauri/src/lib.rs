@@ -156,13 +156,12 @@ pub fn run() {
             commands::skills::open_in_file_manager,
             commands::skills::export_resource_skill_directory_list,
             // Backup
-            commands::backup::export_app_backup,
             commands::backup::export_app_backup_to_path,
-            commands::backup::import_app_backup,
+            commands::backup::import_app_backup_from_path,
             commands::backup::list_webdav_backups,
             commands::backup::test_webdav_connection,
             commands::backup::upload_webdav_backup,
-            commands::backup::download_webdav_backup,
+            commands::backup::restore_webdav_backup,
             commands::backup::delete_webdav_backup,
             // Collections
             commands::collections::create_collection,

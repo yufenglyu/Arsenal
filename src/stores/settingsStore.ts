@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import i18n from "@/i18n";
 import { toast } from "sonner";
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { openInFileManager } from "@/lib/openPath";
 import {
   ScanDirectory,
@@ -16,7 +16,14 @@ import {
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
+export interface BackupImportProgress {
+  phase: "downloading" | "validating" | "restoring" | "completed";
+  completedBytes: number;
+  totalBytes: number | null;
+}
+
 interface SettingsState {
+  backupImportProgress: BackupImportProgress | null;
   loadLanguage: () => Promise<void>;
   saveLanguage: (language: "zh" | "en") => Promise<void>;
   scanDirectories: ScanDirectory[];
@@ -63,20 +70,17 @@ interface SettingsState {
   loadConfigDir: () => Promise<void>;
   updateConfigDir: (path: string) => Promise<string>;
   exportAppBackup: (destPath: string, options?: BackupOptions) => Promise<void>;
-  importAppBackup: (backup: Uint8Array, repositoryOnly?: boolean) => Promise<void>;
+  importAppBackup: (sourcePath: string, repositoryOnly?: boolean) => Promise<void>;
   listWebDavBackups: (config: WebDavConfig) => Promise<WebDavBackupFile[]>;
   testWebDavConnection: (config: WebDavConfig) => Promise<void>;
   uploadWebDavBackup: (config: WebDavConfig, options?: BackupOptions) => Promise<WebDavBackupFile>;
-  downloadWebDavBackup: (config: WebDavConfig, remotePath: string) => Promise<Uint8Array>;
+  restoreWebDavBackup: (config: WebDavConfig, remotePath: string) => Promise<void>;
   deleteWebDavBackup: (config: WebDavConfig, remotePath: string) => Promise<void>;
   checkAppUpdate: () => Promise<AppUpdateInfo>;
 
   clearError: () => void;
 }
 
-function toBackupBytes(value: number[] | Uint8Array): Uint8Array {
-  return value instanceof Uint8Array ? value : new Uint8Array(value);
-}
 
 const DEFAULT_WEBDAV_CONFIG: WebDavConfig = {
   baseUrl: "",
@@ -97,6 +101,7 @@ function normalizeWebDavConfig(config: WebDavConfig): WebDavConfig {
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 export const useSettingsStore = create<SettingsState>((set) => ({
+  backupImportProgress: null,
   loadLanguage: async () => {
     const language = await invoke<string | null>("get_setting", { key: "language" });
     if (language === "zh" || language === "en") await i18n.changeLanguage(language);
@@ -375,8 +380,13 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     });
   },
 
-  importAppBackup: async (backup: Uint8Array, repositoryOnly = false) => {
-    await invoke<void>("import_app_backup", { backup: Array.from(backup), repositoryOnly });
+  importAppBackup: async (sourcePath, repositoryOnly = false) => {
+    const onProgress = new Channel<BackupImportProgress>();
+    set({ backupImportProgress: {phase: "validating", completedBytes: 0, totalBytes: null} });
+    onProgress.onmessage = progress => set({ backupImportProgress: progress });
+    try {
+      await invoke<void>("import_app_backup_from_path", { sourcePath, repositoryOnly, onProgress });
+    } catch (error) { set({ backupImportProgress: null }); throw error; }
   },
 
   listWebDavBackups: async (config) => {
@@ -394,12 +404,13 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     });
   },
 
-  downloadWebDavBackup: async (config, remotePath) => {
-    const backup = await invoke<number[] | Uint8Array>("download_webdav_backup", {
-      config,
-      remotePath,
-    });
-    return toBackupBytes(backup);
+  restoreWebDavBackup: async (config, remotePath) => {
+    const onProgress = new Channel<BackupImportProgress>();
+    set({ backupImportProgress: {phase: "downloading", completedBytes: 0, totalBytes: null} });
+    onProgress.onmessage = progress => set({ backupImportProgress: progress });
+    try {
+      await invoke<void>("restore_webdav_backup", { config, remotePath, onProgress });
+    } catch (error) { set({ backupImportProgress: null }); throw error; }
   },
 
   deleteWebDavBackup: async (config, remotePath) => {

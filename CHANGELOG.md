@@ -2,6 +2,11 @@
 
 [English](CHANGELOG.md) | [简体中文](CHANGELOG.zh.md)
 
+## Unreleased
+
+- Restore WebDAV backups entirely in the backend and pass native local backup paths instead of archive bytes through the WebView. Report small progress messages rather than serializing large numeric arrays.
+- Stage ZIP entries on disk with CRC, path and size checks before restoration; avoid whole-archive buffers and Base64 copies of ZIP payloads, clean temporary files on failures, and explain download, validation and disk-space failures.
+
 ## 1.5.1 - 2026-10-26
 
 - Stop deriving remote skill paths from local directory names. Flattened, renamed and hash-suffixed import folders now retain the actual source manifest recorded during import and subsequent scans and updates.

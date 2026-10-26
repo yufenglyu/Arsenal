@@ -39,7 +39,7 @@ required-features = ["snapshot-maintenance"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "fs", "io-util"] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-window-state = "=2.4.1"
 tauri-plugin-fs = "2"

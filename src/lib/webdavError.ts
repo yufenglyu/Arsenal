@@ -2,6 +2,13 @@ import { toErrorMessage } from "@/lib/errorMessage";
 
 export function webDavErrorDetail(t: (key: string) => string, error: unknown): string {
   const message = toErrorMessage(error);
+  if (/WebDAV backup download (?:interrupted|incomplete)/i.test(message)) return t("settings.backupErrorDownloadIncomplete");
+  if (/backup.*(?:expanded size|file count).*limit/i.test(message)) return t("settings.backupErrorExpandedTooLarge");
+  if (/(?:JSON backup|Backup manifest|Backup skill manifest).*size limit/i.test(message)) return t("settings.backupErrorManifestTooLarge");
+  if (/backup.*(?:corrupt|incomplete|not a valid|not valid|missing manifest)/i.test(message)) return t("settings.backupErrorCorrupt");
+  if (/backup.*(?:duplicate|conflicting|symbolic links|unsafe|invalid.*path)|invalid base64|Invalid backup entry path/i.test(message)) return t("settings.backupErrorUnsafe");
+  if (/backup.*(?:stage|staging|download file|finish backup download)|Failed to (?:stage backup|copy restored)|disk full|no space left|os error 112/i.test(message)) return t("settings.backupErrorStaging");
+  if (/backup restore worker failed/i.test(message)) return t("settings.backupErrorWorker");
   if (/WebDAV download[^\n]*timed out/i.test(message)) {
     return t("settings.webdavErrorDownloadTimeout");
   }

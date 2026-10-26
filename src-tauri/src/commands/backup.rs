@@ -1,3 +1,8 @@
+mod import;
+
+use import::BackupImportProgress;
+use tauri::ipc::Channel;
+
 use crate::db::backup::{CollectionSkillBackup, RepositoryDirectoryBackup, RepositoryStatsBackup};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
@@ -102,6 +107,8 @@ struct SkillInstallationBackup {
 struct SkillFileBackup {
     relative_path: String,
     content_base64: String,
+    #[serde(skip)]
+    staged_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,16 +191,6 @@ struct AppBackup {
 }
 
 #[tauri::command]
-pub async fn export_app_backup(
-    state: State<'_, AppState>,
-    options: Option<BackupOptions>,
-) -> Result<Vec<u8>, String> {
-    let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
-    super::repository_address::recover(&state.db).await?;
-    export_app_backup_archive_impl(&state.db, complete_backup_options(options)).await
-}
-
-#[tauri::command]
 pub async fn export_app_backup_to_path(
     state: State<'_, AppState>,
     dest_path: String,
@@ -207,18 +204,23 @@ pub async fn export_app_backup_to_path(
 }
 
 #[tauri::command]
-pub async fn import_app_backup(
+pub async fn import_app_backup_from_path(
     state: State<'_, AppState>,
-    backup: Vec<u8>,
+    source_path: String,
     repository_only: Option<bool>,
+    on_progress: Channel<BackupImportProgress>,
 ) -> Result<(), String> {
     let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
     super::repository_address::recover(&state.db).await?;
-    let mut data = read_app_backup_bytes(&backup)?;
-    if repository_only.unwrap_or(false) {
-        restrict_to_repository(&mut data);
-    }
-    import_app_backup_data_impl(&state.db, data).await
+    import::restore_path(
+        &state.db,
+        PathBuf::from(source_path),
+        repository_only.unwrap_or(false),
+        std::sync::Arc::new(move |progress| {
+            let _ = on_progress.send(progress);
+        }),
+    )
+    .await
 }
 
 fn repository_backup_options() -> BackupOptions {
@@ -281,11 +283,19 @@ pub async fn upload_webdav_backup(
 }
 
 #[tauri::command]
-pub async fn download_webdav_backup(
+pub async fn restore_webdav_backup(
+    state: State<'_, AppState>,
     config: WebDavConfig,
     remote_path: String,
-) -> Result<Vec<u8>, String> {
-    download_webdav_backup_impl(config, &remote_path).await
+    on_progress: Channel<BackupImportProgress>,
+) -> Result<(), String> {
+    let _guard = super::repository_mirror::MIRROR_LOCK.lock().await;
+    super::repository_address::recover(&state.db).await?;
+    let progress: import::Progress = std::sync::Arc::new(move |progress| {
+        let _ = on_progress.send(progress);
+    });
+    let download = import::download(&state.db, config, &remote_path, &progress).await?;
+    import::restore_path(&state.db, download.path().to_path_buf(), true, progress).await
 }
 
 #[tauri::command]
@@ -557,36 +567,6 @@ async fn upload_webdav_backup_impl(
         size: Some(archive.len() as u64),
         modified_at: Some(Utc::now().to_rfc3339()),
     })
-}
-
-async fn download_webdav_backup_impl(
-    config: WebDavConfig,
-    remote_path: &str,
-) -> Result<Vec<u8>, String> {
-    let url = build_webdav_url(&config, remote_path)?;
-    // Downloading a repository archive needs the same total budget as uploading it.
-    // The ordinary 30-second budget is only for small WebDAV control requests.
-    let client = webdav_transfer_client()?;
-    let response = send_webdav_request(
-        &client,
-        Method::GET,
-        &url,
-        &config,
-        |builder| builder,
-        "WebDAV download",
-    )
-    .await?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(webdav_status_error("WebDAV download", status, &body));
-    }
-    read_webdav_bytes(
-        response,
-        WEBDAV_MAX_TRANSFER_BYTES,
-        "WebDAV download failed",
-    )
-    .await
 }
 
 async fn delete_webdav_backup_impl(config: WebDavConfig, remote_path: &str) -> Result<(), String> {
@@ -1112,9 +1092,18 @@ async fn import_app_backup_impl(pool: &AppStore, json: &str) -> Result<(), Strin
 
 #[cfg(test)]
 async fn import_app_backup_bytes_impl(pool: &AppStore, backup: &[u8]) -> Result<(), String> {
-    import_app_backup_data_impl(pool, read_app_backup_bytes(backup)?).await
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(backup).unwrap();
+    import::restore_path(
+        pool,
+        file.path().to_path_buf(),
+        false,
+        std::sync::Arc::new(|_| {}),
+    )
+    .await
 }
 
+#[cfg(test)]
 fn read_app_backup_bytes(backup: &[u8]) -> Result<AppBackup, String> {
     if backup
         .iter()
@@ -1127,6 +1116,7 @@ fn read_app_backup_bytes(backup: &[u8]) -> Result<AppBackup, String> {
     read_app_backup_archive(backup)
 }
 
+#[cfg(test)]
 fn read_app_backup_archive(archive: &[u8]) -> Result<AppBackup, String> {
     let reader = Cursor::new(archive);
     let mut zip = zip::ZipArchive::new(reader)
@@ -1173,6 +1163,7 @@ fn read_app_backup_archive(archive: &[u8]) -> Result<AppBackup, String> {
                     .map(|relative_path| SkillFileBackup {
                         relative_path: relative_path.to_string(),
                         content_base64: STANDARD.encode(content),
+                        staged_path: None,
                     })
             })
             .collect();
@@ -1654,6 +1645,7 @@ fn collect_files_inner(
             files.push(SkillFileBackup {
                 relative_path,
                 content_base64: STANDARD.encode(bytes),
+                staged_path: None,
             });
         }
     }
@@ -1710,9 +1702,26 @@ fn validate_skill_backup(skill: &SkillBackup) -> Result<(), String> {
     for file in &skill.files {
         let relative_path = normalize_relative_path(&file.relative_path)?;
         let key = relative_path_key(&relative_path)?;
-        let bytes = STANDARD
-            .decode(&file.content_base64)
-            .map_err(|e| format!("Invalid base64 content for '{}': {}", file.relative_path, e))?;
+        let bytes = if let Some(path) = &file.staged_path {
+            if key == "skill.md" {
+                let file = std::fs::File::open(path)
+                    .map_err(|_| "Failed to read staged skill manifest")?;
+                let mut bytes = Vec::new();
+                file.take(import::MAX_MANIFEST_BYTES + 1)
+                    .read_to_end(&mut bytes)
+                    .map_err(|_| "Failed to read staged skill manifest")?;
+                if bytes.len() as u64 > import::MAX_MANIFEST_BYTES {
+                    return Err("Backup skill manifest exceeds size limit".into());
+                }
+                bytes
+            } else {
+                Vec::new()
+            }
+        } else {
+            STANDARD.decode(&file.content_base64).map_err(|e| {
+                format!("Invalid base64 content for '{}': {}", file.relative_path, e)
+            })?
+        };
         if key == "skill.md" {
             let content = std::str::from_utf8(&bytes)
                 .map_err(|_| "Backup skill SKILL.md is not valid UTF-8".to_string())?;
@@ -1891,6 +1900,11 @@ fn write_files(root: &Path, files: &[SkillFileBackup]) -> Result<(), String> {
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create directory '{}': {}", parent.display(), e))?;
+        }
+        if let Some(source) = &file.staged_path {
+            std::fs::copy(source, &target)
+                .map_err(|e| format!("Failed to copy restored file: {e}"))?;
+            continue;
         }
         let bytes = STANDARD
             .decode(&file.content_base64)
@@ -2163,6 +2177,268 @@ mod tests {
             .await
             .expect("resource path");
         (pool, dir)
+    }
+
+    fn file_backed_test_archive(path: &Path, payload_bytes: u64) {
+        let manifest = serde_json::json!({
+            "schema_version": BACKUP_SCHEMA_VERSION, "exported_at": "2026-10-26T00:00:00Z",
+            "included": repository_backup_options(),
+            "skills": [{"skill": {"id":"streamed", "name":"Streamed", "description":null,
+                "file_path":"", "canonical_path":null, "is_central":false, "source":"manual",
+                "content":null, "scanned_at":"2026-10-26T00:00:00Z"},
+                "storage_kind":"resource", "relative_dir":"streamed", "files":[]}],
+            "collections":[], "collection_skills":[], "settings":[], "agents":[],
+            "scan_directories":[], "skill_installations":[]
+        });
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        let options =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(manifest.to_string().as_bytes()).unwrap();
+        zip.start_file("resource-library/streamed/SKILL.md", options)
+            .unwrap();
+        zip.write_all(b"---\nname: Streamed\n---\nstreamed fixture")
+            .unwrap();
+        zip.start_file("resource-library/streamed/asset.bin", options)
+            .unwrap();
+        std::io::copy(&mut std::io::repeat(0x5a).take(payload_bytes), &mut zip).unwrap();
+        zip.finish().unwrap();
+    }
+
+    async fn file_backed_restore_case(payload_bytes: u64, webdav: bool) {
+        let (pool, root) = setup_test_db().await;
+        let archive = root.path().join("large.zip");
+        file_backed_test_archive(&archive, payload_bytes);
+        {
+            let staging = tempdir().unwrap();
+            let progress: import::Progress = std::sync::Arc::new(|_| {});
+            let prepared = import::prepare(&archive, staging.path(), &progress).unwrap();
+            assert_eq!(prepared.skills.len(), 1);
+            for file in &prepared.skills[0].files {
+                assert!(
+                    file.content_base64.is_empty(),
+                    "ZIP payload must remain on disk"
+                );
+                assert!(file.staged_path.as_ref().unwrap().is_file());
+            }
+        }
+        let phases = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = phases.clone();
+        let progress: import::Progress = std::sync::Arc::new(move |p| {
+            captured
+                .lock()
+                .unwrap()
+                .push(serde_json::to_value(p).unwrap());
+        });
+        let download = if webdav {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let source = archive.clone();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                let mut byte = [0];
+                while !request.ends_with(b"\r\n\r\n") {
+                    stream.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                }
+                let mut file = std::fs::File::open(source).unwrap();
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    file.metadata().unwrap().len()
+                )
+                .unwrap();
+                std::io::copy(&mut file, &mut stream).unwrap();
+            });
+            let config = WebDavConfig {
+                base_url: format!("http://{address}"),
+                username: None,
+                password: None,
+                remote_dir: "backup".into(),
+            };
+            let download = import::download(&pool, config, "large.zip", &progress)
+                .await
+                .unwrap();
+            server.join().unwrap();
+            Some(download)
+        } else {
+            None
+        };
+        let source = download
+            .as_ref()
+            .map(|d| d.path().to_path_buf())
+            .unwrap_or(archive);
+        import::restore_path(&pool, source, true, progress)
+            .await
+            .unwrap();
+        drop(download);
+        let asset = root.path().join("resource-library/streamed/asset.bin");
+        assert_eq!(std::fs::metadata(&asset).unwrap().len(), payload_bytes);
+        let mut expected = std::io::repeat(0x5a).take(payload_bytes);
+        let mut actual = std::fs::File::open(asset).unwrap();
+        let mut left = [0; 65536];
+        let mut right = [0; 65536];
+        loop {
+            let n = actual.read(&mut left).unwrap();
+            if n == 0 {
+                break;
+            }
+            expected.read_exact(&mut right[..n]).unwrap();
+            assert_eq!(left[..n], right[..n]);
+        }
+        let phases = phases.lock().unwrap();
+        assert!(phases.iter().any(|p| p["phase"] == "validating"));
+        assert!(phases.iter().any(|p| p["phase"] == "restoring"));
+        assert_eq!(phases.last().unwrap()["phase"], "completed");
+        assert!(phases
+            .iter()
+            .all(|p| serde_json::to_vec(p).unwrap().len() < 256));
+        assert!(!std::fs::read_dir(pool.directory()).unwrap().any(|p| p
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".backup-restore-")));
+    }
+
+    #[tokio::test]
+    async fn file_backed_restore_streams_payloads_and_cleans_staging() {
+        file_backed_restore_case(16 * 1024 * 1024, false).await;
+    }
+
+    #[tokio::test]
+    async fn webdav_file_download_restores_without_an_ipc_payload() {
+        let (pool, root) = setup_test_db().await;
+        let archive = root.path().join("remote.zip");
+        file_backed_test_archive(&archive, 2 * 1024 * 1024);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut byte = [0];
+            while !request.ends_with(b"\r\n\r\n") {
+                stream.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+            }
+            let mut file = std::fs::File::open(archive).unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                file.metadata().unwrap().len()
+            )
+            .unwrap();
+            std::io::copy(&mut file, &mut stream).unwrap();
+        });
+        let config = WebDavConfig {
+            base_url: format!("http://{address}"),
+            username: None,
+            password: None,
+            remote_dir: "backup".into(),
+        };
+        let progress: import::Progress = std::sync::Arc::new(|p| {
+            assert!(serde_json::to_vec(&p).unwrap().len() < 256);
+        });
+        let download = import::download(&pool, config, "remote.zip", &progress)
+            .await
+            .unwrap();
+        let downloaded_path = download.path().to_path_buf();
+        import::restore_path(&pool, downloaded_path.clone(), true, progress)
+            .await
+            .unwrap();
+        drop(download);
+        assert!(!downloaded_path.exists());
+        assert_eq!(
+            std::fs::metadata(root.path().join("resource-library/streamed/asset.bin"))
+                .unwrap()
+                .len(),
+            2 * 1024 * 1024
+        );
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn interrupted_webdav_download_removes_tempfile_without_restore() {
+        let (pool, root) = setup_test_db().await;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut byte = [0];
+            while !request.ends_with(b"\r\n\r\n") {
+                stream.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+            }
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 9999\r\nConnection: close\r\n\r\nPKshort",
+                )
+                .unwrap();
+        });
+        let config = WebDavConfig {
+            base_url: format!("http://{address}"),
+            username: None,
+            password: None,
+            remote_dir: "backup".into(),
+        };
+        let before = pool.read(|d| Ok(serde_json::to_value(d).unwrap())).unwrap();
+        let progress: import::Progress = std::sync::Arc::new(|_| {});
+        assert!(import::download(&pool, config, "remote.zip", &progress)
+            .await
+            .is_err());
+        assert_eq!(
+            before,
+            pool.read(|d| Ok(serde_json::to_value(d).unwrap())).unwrap()
+        );
+        assert!(!root.path().join("resource-library/streamed").exists());
+        assert!(!std::fs::read_dir(pool.directory()).unwrap().any(|p| p
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".backup-download-")));
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "800 MiB file-backed restore stress test; run explicitly without concurrent tests"]
+    async fn file_backed_restore_800_mib_stress() {
+        file_backed_restore_case(800 * 1024 * 1024, true).await;
+    }
+
+    #[tokio::test]
+    async fn corrupt_zip_payload_fails_before_store_or_library_changes() {
+        use std::io::{Seek, SeekFrom};
+        let (pool, root) = setup_test_db().await;
+        let archive = root.path().join("corrupt.zip");
+        file_backed_test_archive(&archive, 1024);
+        let offset = zip::ZipArchive::new(std::fs::File::open(&archive).unwrap())
+            .unwrap()
+            .by_name("resource-library/streamed/asset.bin")
+            .unwrap()
+            .data_start();
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&archive)
+            .unwrap();
+        file.seek(SeekFrom::Start(offset)).unwrap();
+        file.write_all(&[0]).unwrap();
+        drop(file);
+        let before = pool.read(|d| Ok(serde_json::to_value(d).unwrap())).unwrap();
+        let error = import::restore_path(&pool, archive, true, std::sync::Arc::new(|_| {}))
+            .await
+            .unwrap_err();
+        assert!(error.contains("corrupt"));
+        assert_eq!(
+            before,
+            pool.read(|d| Ok(serde_json::to_value(d).unwrap())).unwrap()
+        );
+        assert!(!root.path().join("resource-library/streamed").exists());
+        assert!(!std::fs::read_dir(pool.directory()).unwrap().any(|p| p
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".backup-restore-")));
     }
 
     #[tokio::test]
@@ -4641,8 +4917,13 @@ mod tests {
             password: None,
             remote_dir: "backups".to_string(),
         };
-        let result = download_webdav_backup_impl(config, "backup.zip").await;
-        assert_eq!(result.expect("slow download should finish"), b"PKOK");
+        let (pool, _root) = setup_test_db().await;
+        let progress: import::Progress = std::sync::Arc::new(|_| {});
+        let result = import::download(&pool, config, "backup.zip", &progress).await;
+        assert_eq!(
+            std::fs::read(result.expect("slow download should finish").path()).unwrap(),
+            b"PKOK"
+        );
         server.join().expect("server");
     }
 

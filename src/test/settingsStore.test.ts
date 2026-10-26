@@ -4,6 +4,7 @@ import { ScanDirectory, AgentWithStatus } from "../types";
 // Mock Tauri core before importing the store
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
+  Channel: class { onmessage = (_message: unknown) => {}; },
 }));
 
 import { invoke } from "@tauri-apps/api/core";
@@ -379,18 +380,12 @@ describe("settingsStore", () => {
     });
   });
 
-  it("importAppBackup passes backup bytes to import_app_backup", async () => {
+  it("imports a local backup by path without sending its bytes through IPC", async () => {
     vi.mocked(invoke).mockResolvedValueOnce(undefined);
-
-    await useSettingsStore.getState().importAppBackup(new Uint8Array([1, 2, 3]));
-
-    expect(invoke).toHaveBeenCalledWith("import_app_backup", { backup: [1, 2, 3], repositoryOnly: false });
-  });
-
-  it("limits WebDAV restore to the repository and collections", async () => {
-    vi.mocked(invoke).mockResolvedValue(undefined);
-    await useSettingsStore.getState().importAppBackup(new Uint8Array([1]), true);
-    expect(invoke).toHaveBeenCalledWith("import_app_backup", { backup: [1], repositoryOnly: true });
+    await useSettingsStore.getState().importAppBackup("/backups/large.zip");
+    expect(invoke).toHaveBeenCalledWith("import_app_backup_from_path", {
+      sourcePath: "/backups/large.zip", repositoryOnly: false, onProgress: expect.any(Object),
+    });
   });
 
   it("listWebDavBackups calls list_webdav_backups with session config", async () => {
@@ -447,24 +442,22 @@ describe("settingsStore", () => {
     expect(invoke).toHaveBeenCalledWith("upload_webdav_backup", { config, options });
   });
 
-  it("downloadWebDavBackup calls download_webdav_backup with selected remote path", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce([80, 75, 3, 4]);
-    const config = {
-      baseUrl: "https://example.com/dav",
-      username: "user",
-      password: "secret",
-      remoteDir: "arsenal",
-    };
-
-    const backup = await useSettingsStore
-      .getState()
-      .downloadWebDavBackup(config, "arsenal-backup.zip");
-
-    expect(invoke).toHaveBeenCalledWith("download_webdav_backup", {
-      config,
-      remotePath: "arsenal-backup.zip",
+  it("restores WebDAV in one backend call and receives only small progress messages", async () => {
+    const config = {baseUrl: "https://example.com/dav", remoteDir: "arsenal"};
+    const progress = {phase: "downloading", completedBytes: 1024, totalBytes: 800 * 1048576};
+    vi.mocked(invoke).mockImplementationOnce(async (_command, args) => {
+      (args as {onProgress: {onmessage: (value: unknown) => void}}).onProgress.onmessage(progress);
     });
-    expect(backup).toEqual(new Uint8Array([80, 75, 3, 4]));
+    await useSettingsStore.getState().restoreWebDavBackup(config, "large.zip");
+    expect(invoke).toHaveBeenCalledWith("restore_webdav_backup", {config, remotePath: "large.zip", onProgress: expect.any(Object)});
+    expect(useSettingsStore.getState().backupImportProgress).toEqual(progress);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears progress and propagates backend validation failure", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new Error("Backup archive entry is corrupt"));
+    await expect(useSettingsStore.getState().restoreWebDavBackup({baseUrl: "https://example.com", remoteDir: "backup"}, "broken.zip")).rejects.toThrow("corrupt");
+    expect(useSettingsStore.getState().backupImportProgress).toBeNull();
   });
 
   it("deleteWebDavBackup calls delete_webdav_backup with selected remote path", async () => {

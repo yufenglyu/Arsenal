@@ -6,6 +6,18 @@ function t(key: string) {
 }
 
 describe("webDavErrorDetail", () => {
+  it.each([
+    ["WebDAV backup download interrupted; no restore was started", "backupErrorDownloadIncomplete"],
+    ["Backup archive entry is corrupt, incomplete, or cannot be staged", "backupErrorCorrupt"],
+    ["Backup archive is not a valid ZIP file", "backupErrorCorrupt"],
+    ["Backup contains duplicate archive paths", "backupErrorUnsafe"],
+    ["Backup expanded size exceeds limit (16 GiB)", "backupErrorExpandedTooLarge"],
+    ["Backup manifest exceeds size limit (128 MiB)", "backupErrorManifestTooLarge"],
+    ["Failed to create backup staging directory: no space left", "backupErrorStaging"],
+    ["Backup restore worker failed; check available disk space and memory", "backupErrorWorker"],
+  ])("explains restore failure %s", (error, key) => {
+    expect(webDavErrorDetail(t, error)).toBe(`settings.${key}`);
+  });
   it("maps object-shaped Tauri errors instead of falling back to unknown", () => {
     expect(
       webDavErrorDetail(t, { message: "WebDAV upload failed with status 409 Conflict" })
