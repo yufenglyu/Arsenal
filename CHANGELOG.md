@@ -2,7 +2,11 @@
 
 [English](CHANGELOG.md) | [简体中文](CHANGELOG.zh.md)
 
-## Unreleased
+## 1.5.1 - 2026-10-26
+
+- Stop deriving remote skill paths from local directory names. Flattened, renamed and hash-suffixed import folders now retain the actual source manifest recorded during import and subsequent scans and updates.
+- Block checks and synchronization when the source path is missing, preserving installed content and explaining that the repository must be imported again to restore source metadata. Do not misreport missing metadata as a removed upstream source or propose unverified additions and deletions.
+- Add offline regression coverage for same-name imports, hashed and renamed destinations, repeated scans, updates, and missing-source checks and apply attempts. Document the source identity contract.
 
 - Unify note properties, navigation protocols, Obsidian plugin identity, browser storage, backup names and packaging paths under Arsenal. Remove old-brand aliases and startup seeding guards; existing old-brand data is neither migrated nor used as a fallback.
 - Use a new `arsenal_property_template` setting with Arsenal defaults. Existing saved templates are not reused. The companion Obsidian plugin is now 0.3.0 and installs as `arsenal-link`.
