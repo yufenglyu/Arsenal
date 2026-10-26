@@ -1,6 +1,6 @@
 [package]
 name = "arsenal"
-version = "1.5.1"
+version = "1.5.2"
 description = "AI tools and capabilities management"
 authors = ["yufenglyu"]
 license = "Apache-2.0"

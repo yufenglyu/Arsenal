@@ -2,10 +2,11 @@
 
 [English](CHANGELOG.md) | [简体中文](CHANGELOG.zh.md)
 
-## Unreleased
+## 1.5.2 - 2026-10-26
 
 - Restore WebDAV backups entirely in the backend and pass native local backup paths instead of archive bytes through the WebView. Report small progress messages rather than serializing large numeric arrays.
 - Stage ZIP entries on disk with CRC, path and size checks before restoration; avoid whole-archive buffers and Base64 copies of ZIP payloads, clean temporary files on failures, and explain download, validation and disk-space failures.
+- Limit archive inputs to 1 GiB, expanded ZIP data to 16 GiB and 100000 entries, and manifests or standalone JSON backups to 128 MiB. Synchronize the settings-page version and Linux package metadata with this release.
 
 ## 1.5.1 - 2026-10-26
 

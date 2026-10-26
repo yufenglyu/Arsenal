@@ -48,7 +48,7 @@ import { useShortcutStore } from "@/stores/shortcutStore";
 
 // ─── App constants ────────────────────────────────────────────────────────────
 
-export const APP_VERSION = "1.4.1";
+export const APP_VERSION = "1.5.2";
 const CONFIG_DIR_FALLBACK = "~/.arsenal";
 const COMPLETE_BACKUP_OPTIONS: BackupOptions = {
   includeResourceLibrary: true,
