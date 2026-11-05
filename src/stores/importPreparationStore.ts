@@ -1,3 +1,4 @@
+import { useCollectionStore } from "./collectionStore";
 import { useGitHubImportStore } from "./githubImportStore";
 import { useResourceLibraryStore } from "./resourceLibraryStore";
 import {
@@ -43,7 +44,7 @@ export function submitPreparedImport(taskId: string, preview: GitHubRepoPreview,
   if (!chosen.length || new Set(selections.map(item => item.sourcePath)).size !== selections.length || selections.some(item => !paths.has(item.sourcePath) || !["skip","rename","overwrite"].includes(item.resolution))) return null;
   if (chosen.some(item => item.resolution === "rename" && (!item.renamedSkillId?.trim() || /[\\/]/.test(item.renamedSkillId) || [".",".."].includes(item.renamedSkillId.trim())))) return null;
   const batchId = task.batchId ?? task.id;
-  const id = enqueueGitHubImport(step.args.repoUrl, preview, selections, batchId, step.args.reimport === true);
+  const id = enqueueGitHubImport(step.args.repoUrl, preview, selections, batchId, step.args.reimport === true, typeof step.args.collectionId === "string" ? step.args.collectionId : undefined);
   if (!id) return null;
   queue.patch(task.id, {batchId, status:"success", skippedImportSkills:preview.skills.filter(skill => !chosen.some(item => item.sourcePath === skill.sourcePath)).map(skill => skill.skillName),
     steps:task.steps.map(item => ({...item,status:"success"}))});
@@ -65,6 +66,7 @@ export function enqueueGitHubImport(
   selections: GitHubSkillImportSelection[],
   batchId?: string,
   reimport = false,
+  collectionId?: string,
 ) {
   const chosen = selections.filter((selection) => selection.resolution !== "skip").map(selection=>({
     sourcePath:selection.sourcePath,resolution:selection.resolution,
@@ -76,7 +78,7 @@ export function enqueueGitHubImport(
     ? `https://github.com/${preview.repo.owner}/${preview.repo.repo}/tree/${preview.repo.branch}`
     : repoUrl;
   return useTaskQueueStore.getState().enqueue({
-    key: `${reimport?"reimport":"import"}:${repository}:${JSON.stringify(chosen)}`,
+    key: `${reimport?"reimport":"import"}:${repository}:${JSON.stringify(chosen)}${collectionId ? `:group:${collectionId}` : ""}`,
     kind: "import",
     label: repository,
     ...(batchId ? { batchId, batchLabel: repository } : {}),
@@ -91,9 +93,30 @@ export function enqueueGitHubImport(
       command: reimport?"reimport_github_repo_skills":"import_github_repo_skills",
       label: repository,
       args: { repoUrl: importUrl, selections: chosen },
-    }],
+    }, ...(collectionId ? [{
+      command: "assign_imported_repository_group",
+      label: repository,
+      args: { collectionId, repository },
+    }] : []), ...(!reimport ? [{
+      command: "focus_imported_repository",
+      label: repository,
+      args: { repository, ...(collectionId ? {collectionId} : {}) },
+    }] : [])],
   });
 }
+
+registerTaskExecutor("focus_imported_repository", async args => {
+  useResourceLibraryStore.setState({importedRepositoryFocus: {
+    repository: String(args.repository),
+    collectionId: typeof args.collectionId === "string" ? args.collectionId : undefined,
+  }});
+});
+
+registerTaskExecutor("assign_imported_repository_group", async args => {
+  await useCollectionStore.getState().changeGroup({
+    action: "assign", id: String(args.collectionId), repositories: [String(args.repository)],
+  });
+});
 
 // Reuse the preview already requested by the dialog. A retry after restart previews again.
 export function continueGitHubImportInBackground(
@@ -101,8 +124,9 @@ export function continueGitHubImportInBackground(
   preview?: Promise<GitHubRepoPreview>,
   operationId?: string,
   reimport = false,
+  collectionId?: string,
 ) {
-  const key = `prepare-${reimport?"reimport":"import"}:${repoUrl.trim().toLowerCase()}`;
+  const key = `prepare-${reimport?"reimport":"import"}:${repoUrl.trim().toLowerCase()}${collectionId ? `:group:${collectionId}` : ""}`;
   const existing = useTaskQueueStore.getState().tasks.find((task) => task.key === key &&
     ["queued", "running", "awaiting_input"].includes(task.status) && !task.cancelRequested);
   if (existing) return existing.id;
@@ -118,14 +142,14 @@ export function continueGitHubImportInBackground(
     steps: [{
       command: PREPARE_GITHUB_IMPORT,
       label: i18n.t("workflow.prepareImport"),
-      args: { repoUrl, requestId, ...(reimport?{reimport:true}:{}), ...(operationId ? {operationId} : {}) },
+      args: { repoUrl, requestId, ...(collectionId ? {collectionId} : {}), ...(reimport?{reimport:true}:{}), ...(operationId ? {operationId} : {}) },
     }],
   });
 }
 
 // Queue preparation first so duplicate drops do not start duplicate downloads.
-export function enqueueGitHubUrlImport(repoUrl: string) {
-  return continueGitHubImportInBackground(repoUrl, undefined, crypto.randomUUID());
+export function enqueueGitHubUrlImport(repoUrl: string, collectionId?: string) {
+  return continueGitHubImportInBackground(repoUrl, undefined, crypto.randomUUID(), false, collectionId);
 }
 
 registerTaskExecutor(PREPARE_GITHUB_IMPORT, async (args) => {
@@ -158,7 +182,7 @@ registerTaskResult(PREPARE_GITHUB_IMPORT, (step, result) => {
   enqueueGitHubImport(String(step.args.repoUrl), preview, preview.skills.map((skill) => ({
     sourcePath: skill.sourcePath,
     resolution: skill.recommended === false ? "skip" : "overwrite",
-  })), task.batchId, step.args.reimport === true);
+  })), task.batchId, step.args.reimport === true, typeof step.args.collectionId === "string" ? step.args.collectionId : undefined);
 });
 for (const command of ["import_github_repo_skills", "reimport_github_repo_skills", "add_local_resource_skills"]) {
   registerTaskResult(command, async (_step,result) => {

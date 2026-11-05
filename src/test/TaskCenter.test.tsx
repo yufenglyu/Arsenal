@@ -430,6 +430,7 @@ it("keeps import choices inline across collapse and tab changes and queues only 
           selections: [{ sourcePath: "b/SKILL.md", resolution: "overwrite" }],
         },
       },
+      { command: "focus_imported_repository", args: { repository: "example/skills" } },
     ],
   });
   expect(queue.getState().tasks[0]).toMatchObject({

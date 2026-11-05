@@ -129,3 +129,8 @@ it("decodes UTF-16 Windows shortcuts and ignores oversized or unrelated files", 
   Object.defineProperty(file,"arrayBuffer",{value:async()=>bytes.buffer});
   expect(await droppedShortcutGitHubUrls([file,new File(["x".repeat(65537)],"large.url"),new File([text],"notes.txt")])).toEqual(["https://github.com/example/skills"]);
 });
+it("keeps the exact nested sidebar group as the link import destination", () => {
+  render(<><GitHubUrlDrop/><div data-group-id="parent"><div data-group-id="child"><div data-group-row><span>Destination</span></div></div></div></>);
+  fireEvent.drop(screen.getByText("Destination"), {dataTransfer: transfer({"text/uri-list":"https://github.com/example/skills"})});
+  expect(enqueueGitHubUrlImport).toHaveBeenCalledWith("https://github.com/example/skills", "child");
+});

@@ -1,8 +1,11 @@
+import { describeTaskError } from "@/lib/taskErrors";
+import { continueGitHubImportInBackground } from "@/stores/importPreparationStore";
+import { BatchSkillActionDialog } from "@/components/skill/BatchSkillActionDialog";
 import { ActionIcon } from "@/components/ui/action-icon";
 import {repositoryRisk, repositoryLocked, repositorySelectable, selectedRepositories, useTaskReviewStore} from "@/stores/taskReviewStore";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { RefreshCw } from "lucide-react";
+import { RotateCw, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HintIcon } from "@/components/ui/hint-icon";
 import { useRepositorySyncStore } from "@/stores/repositorySyncStore";
@@ -152,6 +155,7 @@ export function TaskRepositoryReview({ batch }: { batch: TaskBatch; onLater?: ()
   const state = useRepositorySyncStore();
   const tasks = useTaskQueueStore(s => s.tasks);
   const selection = useTaskReviewStore();
+  const [reimportRepository, setReimportRepository] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [expandedRepositories, setExpandedRepositories] = useState<string[]>([]);
   const setRepositoryExpanded = (repository: string, expanded: boolean) => setExpandedRepositories(previous => expanded ? [...new Set([...previous, repository])] : previous.filter(name => name !== repository));
@@ -209,7 +213,8 @@ export function TaskRepositoryReview({ batch }: { batch: TaskBatch; onLater?: ()
           <span className={`min-w-0 flex-1 text-xs text-muted-foreground ${row.error ? "break-words whitespace-normal" : "truncate"}`} title={summaryText}>{summaryText}</span>
           <span title={statusHint} className={`shrink-0 whitespace-nowrap text-xs ${row.error ? "text-destructive" : "text-muted-foreground"}`}>{running && owner?.cancelRequested ? t("workflow.stopping") : running ? t(`workflow.taskStatus.${owner?.status === "queued" ? "queued" : "running"}`) : row.needsCheck ? t("workflow.batch.needsCheck") : completed(row) ? t(row.applied ? "workflow.updated" : "workflow.changeType.unchanged") : risk ? t(accepted ? "workflow.flow.confirmed" : "workflow.flow.risk") : t("workflow.flow.ready")}</span>
       </>;
-      const actions = <div className="flex w-18 shrink-0 items-center justify-end gap-2">
+      const actions = <div className="flex shrink-0 items-center justify-end gap-2">
+          {row.error && describeTaskError(row.error).code === "SOURCE_METADATA_MISSING" && <Button variant="outline" disabled={running || state.migratingRepository?.toLowerCase() === row.repository.toLowerCase()} onClick={() => setReimportRepository(row.repository)}><RotateCw />{t("browser.batch.reimport")}</Button>}
           {running && owner ? <Button variant="ghost" size="icon" title={t("workflow.stopTask")} aria-label={t("workflow.stopTask")} disabled={owner.cancelRequested} onClick={() => useTaskQueueStore.getState().cancel(owner.id)}><ActionIcon action="stop" /></Button> : row.needsCheck ? <Button variant="ghost" size="icon" title={t("workflow.recheck")} aria-label={t("workflow.recheck")} disabled={state.migratingRepository?.toLowerCase() === row.repository.toLowerCase()} onClick={() => void state.recheckRepository(row.repository)}><RefreshCw /></Button> : null}
           <Button variant="ghost" size="icon" title={t("workflow.deleteTaskRecord",{name:row.repository})} aria-label={t("workflow.deleteTaskRecord",{name:row.repository})} onClick={()=>state.dismissRepositoryTask(row.repository)}><ActionIcon action="delete"/></Button>
           {accepted && selectable && <Button variant="ghost" size="icon" title={t("workflow.flow.withdraw")} aria-label={t("workflow.flow.withdraw")} onClick={() => selection.forget([repo!.snapshotId!])}><ActionIcon action="back" /></Button>}
@@ -231,5 +236,12 @@ export function TaskRepositoryReview({ batch }: { batch: TaskBatch; onLater?: ()
     {!visible.length && <p className="py-4 text-sm text-muted-foreground">{t("workflow.flow.empty")}</p>}
 
     </div>
+    {reimportRepository && <BatchSkillActionDialog action="reimport" entries={[{
+      key: reimportRepository,
+      name: reimportRepository,
+      operations: {reimport: async () => {
+        continueGitHubImportInBackground(`https://github.com/${reimportRepository}`, undefined, undefined, true);
+      }},
+    }]} onClose={() => setReimportRepository(null)} />}
   </div>;
 }

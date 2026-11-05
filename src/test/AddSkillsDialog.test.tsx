@@ -116,7 +116,7 @@ it("queues GitHub selections together and closes immediately", async () => {
     screen.queryByRole("button", { name: "confirm selection" }),
   ).not.toBeInTheDocument();
   await waitFor(() => expect(queue.getState().tasks[0].status).toBe("success"));
-  expect(queue.getState().tasks[0].steps).toHaveLength(1);
+  expect(queue.getState().tasks[0].steps.map(step => step.command)).toEqual(["import_github_repo_skills", "focus_imported_repository"]);
 });
 
 it("imports 100 skills with one repository operation and one library refresh", async () => {

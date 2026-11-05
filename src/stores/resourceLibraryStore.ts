@@ -43,6 +43,7 @@ const BROWSER_RESOURCE_SKILLS: SkillWithLinks[] = [
 ];
 
 interface ResourceLibraryState {
+  importedRepositoryFocus?: {repository: string; collectionId?: string} | null;
   skills: SkillWithLinks[];
   agents: AgentWithStatus[];
   resourceLibraryDir: string;
@@ -92,6 +93,7 @@ async function invalidateDeletedRepositories(skills:SkillWithLinks[],ids:string[
 
 
 export const useResourceLibraryStore = create<ResourceLibraryState>((set, get) => ({
+  importedRepositoryFocus: null,
   skills: [],
   agents: [],
   resourceLibraryDir: "",

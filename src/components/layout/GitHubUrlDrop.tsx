@@ -33,6 +33,9 @@ export function GitHubUrlDrop() {
       const accepted = accepts(event);
       reset();
       if (!accepted || !event.dataTransfer) return;
+      const groupId = event.target instanceof Element
+        ? event.target.closest<HTMLElement>("[data-group-row]")?.closest<HTMLElement>("[data-group-id]")?.dataset.groupId
+        : undefined;
       let urls = droppedGitHubUrls(event.dataTransfer);
       const shortcuts = Array.from(event.dataTransfer.files ?? []).filter(file => file.name.toLowerCase().endsWith(".url"));
       if (!urls.length && shortcuts.length) {
@@ -55,7 +58,10 @@ export function GitHubUrlDrop() {
       }
       event.preventDefault();
       event.stopPropagation();
-      for (const url of urls) enqueueGitHubUrlImport(url);
+      for (const url of urls) {
+        if (groupId) enqueueGitHubUrlImport(url, groupId);
+        else enqueueGitHubUrlImport(url);
+      }
       toast.info(translate.current("workflow.githubDropQueued", { count: urls.length }));
     };
     window.addEventListener("dragstart", start, true);

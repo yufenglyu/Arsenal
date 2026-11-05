@@ -1,3 +1,5 @@
+import { useResourceLibraryStore } from "@/stores/resourceLibraryStore";
+import { useCollectionStore } from "@/stores/collectionStore";
 import {createPortal} from "react-dom";
 import {StatusBarSlot} from "./StatusBarSlot";
 import { GitHubUrlDrop } from "./GitHubUrlDrop";
@@ -22,6 +24,15 @@ export function AppShell({ settingsOpen = false, onCloseSettings }: {settingsOpe
   const mainRef = useRef<HTMLElement | null>(null);
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const importedFocus = useResourceLibraryStore(s => s.importedRepositoryFocus);
+  useEffect(() => {
+    if (!importedFocus) return;
+    const target = useResourceLibraryStore.getState().skills.find(skill => skill.source_repo?.toLowerCase() === importedFocus.repository.toLowerCase());
+    if (!target) return;
+    useCollectionStore.getState().selectGroup(importedFocus.collectionId ?? null);
+    navigate(`/resources?${new URLSearchParams({locate: target.id, view: "folders"})}`);
+    useResourceLibraryStore.setState({importedRepositoryFocus: null});
+  }, [importedFocus, navigate]);
 
   const initialize = usePlatformStore((s) => s.initialize);
   const toggleSidebar = useSidebarStore((s) => s.toggleExpanded);

@@ -2,6 +2,12 @@
 
 [English](CHANGELOG.md) | [简体中文](CHANGELOG.zh.md)
 
+## 1.5.3 - 2026-11-05
+
+- Add a reimport action for repository updates blocked by missing source metadata.
+- Assign repositories imported by dropping a link onto a sidebar group to that group.
+- Select and scroll to newly imported repositories after import and group assignment complete.
+
 ## 1.5.2 - 2026-10-26
 
 - Restore WebDAV backups entirely in the backend and pass native local backup paths instead of archive bytes through the WebView. Report small progress messages rather than serializing large numeric arrays.
