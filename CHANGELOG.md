@@ -2,6 +2,12 @@
 
 [English](CHANGELOG.md) | [简体中文](CHANGELOG.zh.md)
 
+## 1.5.4 - 2026-11-09
+
+- Redesign the application icon with a dark background and blue-and-white modules; reduce outer padding for better taskbar visibility.
+- Simplify sidebar repository and skill counts into compact text without repeated icons or fixed-width columns.
+- Keep full count descriptions available on hover and to screen readers across groups, unfiled items and the recycle bin.
+
 ## 1.5.3 - 2026-11-05
 
 - Add a reimport action for repository updates blocked by missing source metadata.

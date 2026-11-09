@@ -1809,6 +1809,7 @@
       "danger": "Delete actions"
     },
     "countSummary": "{{repositories}} repositories / {{skills}} skills",
+    "countCompact": "{{repositories}} repos · {{skills}} skills",
     "detachItem": "Remove from group",
     "export": "Export group list",
     "title": "Groups",

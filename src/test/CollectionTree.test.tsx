@@ -11,41 +11,41 @@ beforeEach(()=>{localStorage.clear();vi.clearAllMocks();resources.setState({skil
 function setup(){render(<MemoryRouter><CollectionTree/></MemoryRouter>);}
 function transfer(values:Record<string,string>){return {types:Object.keys(values),getData:(key:string)=>values[key]??'',setData:vi.fn(),effectAllowed:'',dropEffect:''};}
 it('selects groups in the repository and navigates visible rows with arrows',()=>{
- setup();const first=screen.getByRole('button',{name:'Research 0/0'});fireEvent.click(first);expect(store.getState().activeCollectionId).toBe('a');
- fireEvent.keyDown(first,{key:'ArrowDown'});expect(store.getState().activeCollectionId).toBe('b');expect(screen.getByRole('button',{name:'Writing 0/0'})).toHaveFocus();
- fireEvent.keyDown(first,{key:'ArrowLeft'});expect(screen.queryByRole('button',{name:'Writing 0/0'})).not.toBeInTheDocument();
- fireEvent.keyDown(first,{key:'ArrowRight'});expect(screen.getByRole('button',{name:'Writing 0/0'})).toBeInTheDocument();
+ setup();const first=screen.getByRole('button',{name:'Research 0 个仓库 / 0 个技能'});fireEvent.click(first);expect(store.getState().activeCollectionId).toBe('a');
+ fireEvent.keyDown(first,{key:'ArrowDown'});expect(store.getState().activeCollectionId).toBe('b');expect(screen.getByRole('button',{name:'Writing 0 个仓库 / 0 个技能'})).toHaveFocus();
+ fireEvent.keyDown(first,{key:'ArrowLeft'});expect(screen.queryByRole('button',{name:'Writing 0 个仓库 / 0 个技能'})).not.toBeInTheDocument();
+ fireEvent.keyDown(first,{key:'ArrowRight'});expect(screen.getByRole('button',{name:'Writing 0 个仓库 / 0 个技能'})).toBeInTheDocument();
 });
 it('collapses and expands child groups while keeping the repository root open',()=>{
- setup();const first=screen.getByRole('button',{name:'Research 0/0'});fireEvent.keyDown(first,{key:'-'});expect(screen.getAllByRole('treeitem')).toHaveLength(2); expect(screen.getByText('未分类')).toBeInTheDocument();
+ setup();const first=screen.getByRole('button',{name:'Research 0 个仓库 / 0 个技能'});fireEvent.keyDown(first,{key:'-'});expect(screen.getAllByRole('treeitem')).toHaveLength(2); expect(screen.getByText('未分类')).toBeInTheDocument();
  fireEvent.keyDown(screen.getByRole('tree'),{key:'+'});expect(screen.getAllByRole('treeitem')).toHaveLength(3);
 });
 it('opens the keyboard context menu and creates a child at the chosen parent',async()=>{
- setup();fireEvent.keyDown(screen.getByRole('button',{name:'Research 0/0'}),{key:'F10',shiftKey:true});
+ setup();fireEvent.keyDown(screen.getByRole('button',{name:'Research 0 个仓库 / 0 个技能'}),{key:'F10',shiftKey:true});
  fireEvent.click(screen.getByRole('menuitem',{name:'新建子分组'}));fireEvent.change(screen.getByRole('textbox',{name:'分组名称'}),{target:{value:'New child'}});fireEvent.click(screen.getByRole('button',{name:'确认'}));
  expect(change).toHaveBeenCalledWith(expect.objectContaining({action:'create',name:'New child',parentId:'a'}));await act(async()=>{});
 });
 it('adds dragged skills and transfers only on Shift drag with a source group',()=>{
- setup();const target=screen.getByRole('button',{name:'Other 0/0'}).parentElement!;
+ setup();const target=screen.getByRole('button',{name:'Other 0 个仓库 / 0 个技能'}).parentElement!;
  const data=transfer({[SKILLS_DRAG]:'["one","two"]',[COLLECTION_SOURCE_DRAG]:'a'});
  fireEvent.drop(target,{dataTransfer:data});expect(change).toHaveBeenLastCalledWith(expect.objectContaining({action:'assign',id:'c',skillIds:['one','two'],sourceCollectionId:undefined}));
  const drop=createEvent.drop(target,{dataTransfer:data});Object.defineProperty(drop,'shiftKey',{value:true});fireEvent(target,drop);expect(change).toHaveBeenLastCalledWith(expect.objectContaining({action:'transfer',id:'c',sourceCollectionId:'a'}));
 });
 it('moves groups inside another group and requires confirmation before subtree deletion',async()=>{
- setup();const target=screen.getByRole('button',{name:'Other 0/0'}).parentElement!;
+ setup();const target=screen.getByRole('button',{name:'Other 0 个仓库 / 0 个技能'}).parentElement!;
  fireEvent.drop(target,{dataTransfer:transfer({[COLLECTION_DRAG]:'a'})});expect(change).toHaveBeenLastCalledWith(expect.objectContaining({action:'move',id:'a',parentId:'c'}));change.mockClear();
  fireEvent.contextMenu(target);fireEvent.click(screen.getByRole('menuitem',{name:'删除分组'}));expect(change).not.toHaveBeenCalled();
  const dialog=screen.getByRole('dialog');expect(within(dialog).getByText(/技能文件保留/)).toBeInTheDocument();fireEvent.click(within(dialog).getByRole('button',{name:'确认'}));expect(change).toHaveBeenCalledWith(expect.objectContaining({action:'delete',id:'c'}));await act(async()=>{});
 });
 
 it('uses stable repository selectors instead of stale member IDs on drop',()=>{
- setup();const target=screen.getByRole('button',{name:'Other 0/0'}).parentElement!;
+ setup();const target=screen.getByRole('button',{name:'Other 0 个仓库 / 0 个技能'}).parentElement!;
  const data=transfer({[SKILLS_DRAG]:'["obsolete"]',[REPOSITORIES_DRAG]:JSON.stringify({repositories:['example/research'],skillIds:['explicit']})});
  fireEvent.drop(target,{dataTransfer:data});
  expect(change).toHaveBeenCalledWith(expect.objectContaining({action:'assign',id:'c',repositories:['example/research'],skillIds:['explicit']}));
 });
 it('rejects malformed repository metadata without applying stale skill IDs',()=>{
- setup();const target=screen.getByRole('button',{name:'Other 0/0'}).parentElement!;
+ setup();const target=screen.getByRole('button',{name:'Other 0 个仓库 / 0 个技能'}).parentElement!;
  fireEvent.drop(target,{dataTransfer:transfer({[SKILLS_DRAG]:'["obsolete"]',[REPOSITORIES_DRAG]:'{"repositories":[3],"skillIds":[]}'})});
  expect(change).not.toHaveBeenCalled();
 });
@@ -58,19 +58,19 @@ it('counts distinct repositories and skills across subgroups with matching right
  store.setState({groupDetails:[{...groups[0],skills:[one]},{...groups[1],skills:[one,two]}]});
  setup();
  const root=screen.getByRole('button',{name:'技能仓库'});
- expect(root).toHaveTextContent('2/3');expect(root).toHaveClass('pr-2');
+ expect(within(root).getByRole('img', {name:'2 个仓库 / 3 个技能'})).toBeInTheDocument();expect(root).toHaveClass('pr-2');
  expect(within(root).getByTitle('2 个仓库 / 3 个技能')).toBeInTheDocument();
- expect(screen.getByRole('button',{name:'Research 1/2'})).toHaveClass('pr-2');
- expect(screen.getByRole('button',{name:'Writing 1/2'})).toHaveClass('pr-2');
- expect(screen.getByRole('button',{name:'未分类 1/1'})).toHaveClass('pr-2');
+ expect(screen.getByRole('button',{name:'Research 1 个仓库 / 2 个技能'})).toHaveClass('pr-2');
+ expect(screen.getByRole('button',{name:'Writing 1 个仓库 / 2 个技能'})).toHaveClass('pr-2');
+ expect(screen.getByRole('button',{name:'未分类 1 个仓库 / 1 个技能'})).toHaveClass('pr-2');
  act(()=>store.setState({includeDescendants:false}));
- expect(screen.getByRole('button',{name:'Research 1/1'})).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'Research 1 个仓库 / 1 个技能'})).toBeInTheDocument();
 });
 
 it('keeps unfiled and recycle bin after custom groups and gives every menu action an icon',()=>{
  setup();const tree=screen.getByRole('tree');const rows=Array.from(tree.querySelectorAll('[data-group-select]'));
  expect(rows.at(-2)).toHaveTextContent('未分类');expect(rows.at(-1)).toHaveTextContent('回收站');
- fireEvent.contextMenu(screen.getByRole('button',{name:'Research 0/0'}).parentElement!);
+ fireEvent.contextMenu(screen.getByRole('button',{name:'Research 0 个仓库 / 0 个技能'}).parentElement!);
  const menu=screen.getByRole('menu');
  expect(within(menu).queryByRole('menuitem',{name:'添加所选技能'})).not.toBeInTheDocument();
  expect(within(menu).queryByRole('menuitem',{name:'从分组移除所选技能'})).not.toBeInTheDocument();

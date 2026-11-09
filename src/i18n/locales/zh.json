@@ -1799,6 +1799,7 @@
       "danger": "删除操作"
     },
     "countSummary": "{{repositories}} 个仓库 / {{skills}} 个技能",
+    "countCompact": "{{repositories}} 仓 · {{skills}} 技",
     "detachItem": "移出分组",
     "export": "导出分组清单",
     "title": "分组",
